@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>자기소개서 챗봇</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f6f8fa;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        .chat-section {
+            flex: 4;
+            background: #fff;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-history {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+        }
+        .chat-message {
+            margin-bottom: 18px;
+            display: flex;
+            align-items: flex-start;
+        }
+        .chat-message.user .bubble {
+            background: #e3f2fd;
+            color: #1565c0;
+            margin-left: auto;
+        }
+        .chat-message.agent .bubble {
+            background: #f1f8e9;
+            color: #388e3c;
+            margin-right: auto;
+        }
+        .bubble {
+            padding: 12px 18px;
+            border-radius: 18px;
+            max-width: 70%;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        }
+        .chat-input {
+            display: flex;
+            padding: 16px;
+            border-top: 1px solid #e0e0e0;
+            background: #fafbfc;
+        }
+        .chat-input input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #bdbdbd;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+        .chat-input button {
+            margin-left: 12px;
+            padding: 12px 24px;
+            background: #1976d2;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .chat-input button:hover {
+            background: #1565c0;
+        }
+        .statement-section {
+            flex: 6;
+            background: #f9fbe7;
+            display: flex;
+            flex-direction: column;
+            padding: 32px 40px;
+            overflow-y: auto;
+        }
+        .statement-title {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #689f38;
+            margin-bottom: 18px;
+        }
+        .statement-content {
+            background: #fff;
+            border-radius: 12px;
+            padding: 24px;
+            min-height: 300px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+            font-size: 1.1rem;
+            color: #333;
+            white-space: pre-line;
+        }
+        @media (max-width: 900px) {
+            .container {
+                flex-direction: column;
+            }
+            .chat-section, .statement-section {
+                flex: unset;
+                width: 100%;
+                min-height: 40vh;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Chat Section (Left) -->
+        <div class="chat-section">
+            <div class="chat-history" id="chat-history">
+                <!-- 채팅 내용이 여기에 동적으로 표시됩니다 -->
+            </div>
+            <form class="chat-input" id="chat-form" autocomplete="off">
+                <input type="text" id="user-input" placeholder="메시지를 입력하세요..." required />
+                <button type="submit">전송</button>
+            </form>
+        </div>
+        <!-- Statement Section (Right) -->
+        <div class="statement-section">
+            <div class="statement-title">자기소개서 초안</div>
+            <div class="statement-content" id="statement-content">
+                <!-- 대화에 따라 자기소개서가 여기에 표시됩니다 -->
+            </div>
+        </div>
+    </div>
+    <script>
+        // Fetch initial state from Flask backend
+        async function fetchInitialState() {
+            const res = await fetch('/get_initial_state');
+            if (res.ok) {
+                return await res.json();
+            }
+            return { personal_statement_draft: '', chat_history: [] };
+        }
+
+        // Render chat history
+        function renderChatHistory(chatHistory) {
+            const chatHistoryDiv = document.getElementById('chat-history');
+            chatHistoryDiv.innerHTML = '';
+            chatHistory.forEach(msg => {
+                const msgDiv = document.createElement('div');
+                msgDiv.className = 'chat-message ' + (msg.role === 'user' ? 'user' : 'agent');
+                const bubble = document.createElement('div');
+                bubble.className = 'bubble';
+                bubble.textContent = msg.role === 'user' ? `사용자: ${msg.content}` : `에이전트: ${msg.content}`;
+                msgDiv.appendChild(bubble);
+                chatHistoryDiv.appendChild(msgDiv);
+            });
+            chatHistoryDiv.scrollTop = chatHistoryDiv.scrollHeight;
+        }
+
+        // Render personal statement
+        function renderStatement(statement) {
+            document.getElementById('statement-content').textContent = statement || '대화가 진행되면 자기소개서가 여기에 표시됩니다.';
+        }
+
+        // Handle chat form submission
+        document.getElementById('chat-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const input = document.getElementById('user-input');
+            const message = input.value.trim();
+            if (!message) return;
+
+            // Add user message to chat
+            const chatHistoryDiv = document.getElementById('chat-history');
+            const userMsgDiv = document.createElement('div');
+            userMsgDiv.className = 'chat-message user';
+            const userBubble = document.createElement('div');
+            userBubble.className = 'bubble';
+            userBubble.textContent = `사용자: ${message}`;
+            userMsgDiv.appendChild(userBubble);
+            chatHistoryDiv.appendChild(userMsgDiv);
+            chatHistoryDiv.scrollTop = chatHistoryDiv.scrollHeight;
+            input.value = '';
+
+            // Send to backend
+            const statementContent = document.getElementById('statement-content').textContent;
+            const res = await fetch('/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message, personal_statement_draft: statementContent })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                // Add agent response
+                const agentMsgDiv = document.createElement('div');
+                agentMsgDiv.className = 'chat-message agent';
+                const agentBubble = document.createElement('div');
+                agentBubble.className = 'bubble';
+                agentBubble.textContent = `에이전트: ${data.chat_response}`;
+                agentMsgDiv.appendChild(agentBubble);
+                chatHistoryDiv.appendChild(agentMsgDiv);
+                chatHistoryDiv.scrollTop = chatHistoryDiv.scrollHeight;
+                // Update statement suggestion
+                renderStatement(data.statement_suggestion || statementContent);
+            } else {
+                // Error handling
+                const agentMsgDiv = document.createElement('div');
+                agentMsgDiv.className = 'chat-message agent';
+                const agentBubble = document.createElement('div');
+                agentBubble.className = 'bubble';
+                agentBubble.textContent = '죄송합니다. 메시지 처리 중 오류가 발생했습니다.';
+                agentMsgDiv.appendChild(agentBubble);
+                chatHistoryDiv.appendChild(agentMsgDiv);
+                chatHistoryDiv.scrollTop = chatHistoryDiv.scrollHeight;
+            }
+        });
+
+        // On load, fetch initial state
+        window.onload = async function() {
+            const state = await fetchInitialState();
+            renderChatHistory(state.chat_history || []);
+            renderStatement(state.personal_statement_draft || '');
+        };
+    </script>
+</body>
+</html> 
