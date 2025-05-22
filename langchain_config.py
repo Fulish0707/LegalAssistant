@@ -85,5 +85,6 @@ agent = initialize_agent(
     tools=tools,
     llm=llm,
     agent="zero-shot-react-description",
-    verbose=True
+    verbose=True,
+    system_message=prompt.messages[0].prompt.template
 )
