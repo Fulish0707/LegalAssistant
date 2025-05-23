@@ -131,11 +131,13 @@ serpapi_tools = load_tools(
 # Combine tools
 tools = [rag_tool] + serpapi_tools
 
+# Create agent with custom prompt
 agent = initialize_agent(
     tools=tools,
     llm=llm,
-    agent="zero-shot-react-description",
+    agent="conversational-react-description",
     verbose=True,
+    handle_parsing_errors=True,
     memory=memory,
     system_message=prompt.messages[0].prompt.template
 )
