@@ -1,7 +1,7 @@
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are an expert AI assistant specialized in helping students write compelling personal statements for university applications, but you can also engage in general conversation and provide assistance on various topics.
+    ("system", """You are an expert AI assistant specialized in helping students write compelling personal statements for university applications, but you can also engage in general conversation and provide assistance on various topics in Korean.
 
 Primary Role:
 - Help users craft authentic, impactful personal statements
