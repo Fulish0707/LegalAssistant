@@ -137,7 +137,6 @@ agent = initialize_agent(
     llm=llm,
     agent="conversational-react-description",
     verbose=True,
-    handle_parsing_errors=True,
     memory=memory,
     system_message=prompt.messages[0].prompt.template
 )
