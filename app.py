@@ -1,9 +1,12 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, Response, stream_with_context
 from langchain_config import retriever, memory, agent
 import threading
 import time # Needed for a brief pause
 import logging # Optional: Configure logging for Flask
 import sqlite3
+import json
+import asyncio
+from langchain.callbacks.base import BaseCallbackHandler
 
 # Disable Flask's default request logging in notebook for cleaner output
 log = logging.getLogger('werkzeug')
@@ -82,6 +85,16 @@ def clear_chat_history():
     conn.commit()
     conn.close()
 
+class StreamingCallbackHandler(BaseCallbackHandler):
+    def __init__(self, queue):
+        self.queue = queue
+
+    def on_llm_new_token(self, token: str, **kwargs) -> None:
+        self.queue.put(token)
+
+    def on_llm_end(self, *args, **kwargs) -> None:
+        self.queue.put(None)  # 스트리밍 종료 신호
+
 # Define Flask routes
 @app.route('/')
 def index():
@@ -97,87 +110,103 @@ def chat():
     if not user_input:
         return jsonify({"error": "No message provided"}), 400
 
-    # 1. Add user message to history and DB
-    chat_history_list.append({"role": "user", "content": user_input})
-    add_chat_message("user", user_input)
-    memory.save_context({"input": user_input}, {"output": ""})
-
-    try:
-        # 2. Retrieve relevant context and similar past conversations
-        retrieved_context = ""
-        similar_chats = []
-        if retriever:
-            # Get relevant documents
-            retrieved_docs = retriever.invoke(user_input)
-            retrieved_context = "\n".join([doc.page_content for doc in retrieved_docs])
-            
-            # Get similar past conversations
-            conn = get_db()
-            c = conn.cursor()
-            c.execute('''
-                SELECT role, content 
-                FROM chat_history 
-                WHERE content LIKE ? 
-                ORDER BY timestamp DESC 
-                LIMIT 3
-            ''', (f'%{user_input}%',))
-            similar_chats = [{"role": row["role"], "content": row["content"]} for row in c.fetchall()]
-            conn.close()
-
-        # 3. Get response from agent
-        agent_response = agent.invoke({
-            "input": user_input,
-            "current_statement_draft": personal_statement_draft,
-            "retrieved_context": retrieved_context,
-            "chat_history": memory.load_memory_variables({})["chat_history"],
-            "similar_chats": similar_chats
-        })
-        
-        llm_response_text = agent_response["output"]
-
-        # 4. Parse LLM output
-        chat_response = "Sorry, I couldn't parse the response."
-        statement_suggestion = ""
+    def generate():
+        # 1. Add user message to history and DB
+        chat_history_list.append({"role": "user", "content": user_input})
+        add_chat_message("user", user_input)
+        memory.save_context({"input": user_input}, {"output": ""})
 
         try:
-            if "[CHAT]" in llm_response_text:
-                parts = llm_response_text.split("[CHAT]", 1)[1].split("[STATEMENT_SUGGESTION]", 1)
-                chat_response = parts[0].strip()
-                if len(parts) > 1:
-                    statement_suggestion = parts[1].strip()
-            elif "[STATEMENT_SUGGESTION]" in llm_response_text:
-                statement_suggestion = llm_response_text.split("[STATEMENT_SUGGESTION]", 1)[1].strip()
-                chat_response = "I have a suggestion for your personal statement."
-            else:
-                chat_response = llm_response_text.strip()
-                print("Warning: Response format not found in LLM output")
+            # 2. Retrieve relevant context and similar past conversations
+            retrieved_context = ""
+            similar_chats = []
+            if retriever:
+                retrieved_docs = retriever.invoke(user_input)
+                retrieved_context = "\n".join([doc.page_content for doc in retrieved_docs])
+                
+                conn = get_db()
+                c = conn.cursor()
+                c.execute('''
+                    SELECT role, content 
+                    FROM chat_history 
+                    WHERE content LIKE ? 
+                    ORDER BY timestamp DESC 
+                    LIMIT 3
+                ''', (f'%{user_input}%',))
+                similar_chats = [{"role": row["role"], "content": row["content"]} for row in c.fetchall()]
+                conn.close()
+
+            # 3. Create streaming queue
+            queue = asyncio.Queue()
+            streaming_handler = StreamingCallbackHandler(queue)
+
+            # 4. Get response from agent with streaming
+            agent_response = agent.invoke(
+                {
+                    "input": user_input,
+                    "current_statement_draft": personal_statement_draft,
+                    "retrieved_context": retrieved_context,
+                    "chat_history": memory.load_memory_variables({})["chat_history"],
+                    "similar_chats": similar_chats
+                },
+                callbacks=[streaming_handler]
+            )
+
+            # 5. Stream the response
+            current_chunk = ""
+            while True:
+                token = queue.get()
+                if token is None:  # 스트리밍 종료
+                    break
+                
+                current_chunk += token
+                if len(current_chunk) >= 50 or token in ['.', '!', '?', '\n']:
+                    yield f"data: {json.dumps({'chunk': current_chunk})}\n\n"
+                    current_chunk = ""
+
+            # 6. Parse final response
+            llm_response_text = agent_response["output"]
+            chat_response = "Sorry, I couldn't parse the response."
+            statement_suggestion = ""
+
+            try:
+                if "[CHAT]" in llm_response_text:
+                    parts = llm_response_text.split("[CHAT]", 1)[1].split("[STATEMENT_SUGGESTION]", 1)
+                    chat_response = parts[0].strip()
+                    if len(parts) > 1:
+                        statement_suggestion = parts[1].strip()
+                elif "[STATEMENT_SUGGESTION]" in llm_response_text:
+                    statement_suggestion = llm_response_text.split("[STATEMENT_SUGGESTION]", 1)[1].strip()
+                    chat_response = "I have a suggestion for your personal statement."
+                else:
+                    chat_response = llm_response_text.strip()
+
+                # 7. Add agent response to history and DB
+                chat_history_list.append({"role": "assistant", "content": chat_response})
+                add_chat_message("assistant", chat_response)
+                memory.save_context({"input": user_input}, {"output": chat_response})
+
+                # 8. Send final response
+                yield f"data: {json.dumps({'final': True, 'chat_response': chat_response, 'statement_suggestion': statement_suggestion, 'similar_chats': similar_chats, 'updated_draft': personal_statement_draft})}\n\n"
+
+            except Exception as parse_error:
+                print(f"Error parsing LLM response: {parse_error}")
                 print(f"Raw LLM response: {llm_response_text}")
-        except Exception as parse_error:
-            print(f"Error parsing LLM response: {parse_error}")
-            print(f"Raw LLM response: {llm_response_text}")
-            chat_response = "I apologize, but I had trouble processing the response. Could you please try again?"
+                error_response = "I apologize, but I had trouble processing the response. Could you please try again?"
+                chat_history_list.append({"role": "assistant", "content": error_response})
+                add_chat_message("assistant", error_response)
+                yield f"data: {json.dumps({'error': error_response})}\n\n"
 
-        # 5. Add agent response to history and DB
-        chat_history_list.append({"role": "assistant", "content": chat_response})
-        add_chat_message("assistant", chat_response)
-        memory.save_context({"input": user_input}, {"output": chat_response})
+        except Exception as e:
+            print(f"Error during AI processing: {e}")
+            import traceback
+            traceback.print_exc()
+            error_response = "An error occurred while processing your request."
+            chat_history_list.append({"role": "assistant", "content": error_response})
+            add_chat_message("assistant", error_response)
+            yield f"data: {json.dumps({'error': error_response})}\n\n"
 
-        # 6. Return response with additional data
-        return jsonify({
-            "chat_response": chat_response,
-            "statement_suggestion": statement_suggestion,
-            "similar_chats": similar_chats,
-            "updated_draft": personal_statement_draft
-        })
-
-    except Exception as e:
-        print(f"Error during AI processing: {e}")
-        import traceback
-        traceback.print_exc()
-        error_response = "An error occurred while processing your request."
-        chat_history_list.append({"role": "assistant", "content": error_response})
-        add_chat_message("assistant", error_response)
-        return jsonify({"chat_response": error_response}), 500
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
 @app.route('/get_initial_state', methods=['GET'])
 def get_initial_state():
