@@ -86,14 +86,75 @@ def clear_chat_history():
     conn.close()
 
 class StreamingCallbackHandler(BaseCallbackHandler):
-    def __init__(self, queue):
+    def __init__(self, queue, loop): # Add loop parameter
         self.queue = queue
+        self.loop = loop # Store the loop
 
     def on_llm_new_token(self, token: str, **kwargs) -> None:
-        self.queue.put(token)
+        # Send as a dictionary to distinguish from other event types
+        asyncio.run_coroutine_threadsafe(self.queue.put({"type": "token", "content": token}), self.loop)
 
     def on_llm_end(self, *args, **kwargs) -> None:
-        self.queue.put(None)  # 스트리밍 종료 신호
+        # Signal end of LLM token stream
+        asyncio.run_coroutine_threadsafe(self.queue.put({"type": "llm_end"}), self.loop)
+
+    def on_agent_action(self, action, **kwargs) -> None:
+        log_text = ""
+        if hasattr(action, 'log') and action.log:
+            log_text = action.log.strip()
+
+        thought_message = ""
+
+        if log_text.startswith("Thought:"):
+            thought_message = log_text
+            # Check if Action details are missing from the log text but an action is being taken
+            if "Action:" not in log_text and "Tool:" not in log_text and action.tool: # "Tool:" check for some agent variants
+                thought_message += f"\nAction: {action.tool}"
+                # Ensure tool_input is a non-empty string before appending
+                tool_input_str = str(action.tool_input) if action.tool_input is not None else ""
+                if tool_input_str.strip(): # Only add Action Input if it's meaningful
+                    thought_message += f"\nAction Input: {tool_input_str}"
+        elif log_text: # Log exists but doesn't start with "Thought:" (e.g. LLM directly outputted action details)
+            thought_message = f"Thought: (Interpreted action from LLM log)\n{log_text}"
+            # If action.tool was parsed by Langchain and not explicitly in log_text, add it for clarity
+            if action.tool and action.tool not in log_text:
+                 tool_input_str = str(action.tool_input) if action.tool_input is not None else ""
+                 thought_message += f"\n(Interpreted Action: {action.tool}, Input: {tool_input_str})"
+        elif action.tool: # No log_text, but Langchain parsed a tool. Agent decided to use a tool.
+            thought_message = f"Thought: Decided to use tool.\nAction: {action.tool}"
+            tool_input_str = str(action.tool_input) if action.tool_input is not None else ""
+            if tool_input_str.strip():
+                thought_message += f"\nAction Input: {tool_input_str}"
+        else: # Fallback: No log, no tool. This state should ideally not be reached in on_agent_action.
+            thought_message = "Thought: (Agent is processing an action without detailed log)"
+
+        asyncio.run_coroutine_threadsafe(self.queue.put({"type": "thought", "content": thought_message}), self.loop)
+
+    def on_tool_end(self, output: str, **kwargs) -> None:
+        # Send tool outputs as 'thought'
+        # Limit output length if it's too long for display
+        max_len = 200
+        tool_output_display = output[:max_len] + "..." if len(output) > max_len else output
+        asyncio.run_coroutine_threadsafe(self.queue.put({"type": "thought", "content": f"Tool Output: {tool_output_display}"}), self.loop)
+
+    # Add other handlers if needed, e.g., on_chain_start, on_chain_end
+    def on_chain_start(self, serialized, inputs, **kwargs) -> None:
+        chain_name = serialized.get("name", serialized.get("id", ["Unknown Chain"])[-1])
+        # Avoid overly verbose starts like the main agent executor
+        if "AgentExecutor" not in chain_name and "RunnableSequence" not in chain_name and "LLMChain" not in chain_name: # Also avoid LLMChain itself
+             asyncio.run_coroutine_threadsafe(self.queue.put({"type": "thought", "content": f"Starting sub-chain: {chain_name}"}), self.loop)
+
+    def on_agent_finish(self, finish, **kwargs) -> None:
+        # Stream the agent's final thoughts/log before the actual output is processed
+        if hasattr(finish, 'log') and finish.log:
+            final_thought_log = finish.log.strip()
+            # Remove the "Final Answer:" part from this log if present, as the actual answer is handled separately
+            if "Final Answer:" in final_thought_log:
+                final_thought_log = final_thought_log.split("Final Answer:", 1)[0].strip()
+            
+            if final_thought_log: # Only send if there's content
+                 asyncio.run_coroutine_threadsafe(self.queue.put({"type": "thought", "content": f"Final thoughts:\n{final_thought_log}"}), self.loop)
+        # The actual 'output' from agent.invoke is handled after the streaming loop
 
 # Define Flask routes
 @app.route('/')
@@ -111,100 +172,143 @@ def chat():
         return jsonify({"error": "No message provided"}), 400
 
     def generate():
-        # 1. Add user message to history and DB
-        chat_history_list.append({"role": "user", "content": user_input})
-        add_chat_message("user", user_input)
-        memory.save_context({"input": user_input}, {"output": ""})
-
-        try:
-            # 2. Retrieve relevant context and similar past conversations
-            retrieved_context = ""
-            similar_chats = []
-            if retriever:
-                retrieved_docs = retriever.invoke(user_input)
-                retrieved_context = "\n".join([doc.page_content for doc in retrieved_docs])
-                
-                conn = get_db()
-                c = conn.cursor()
-                c.execute('''
-                    SELECT role, content 
-                    FROM chat_history 
-                    WHERE content LIKE ? 
-                    ORDER BY timestamp DESC 
-                    LIMIT 3
-                ''', (f'%{user_input}%',))
-                similar_chats = [{"role": row["role"], "content": row["content"]} for row in c.fetchall()]
-                conn.close()
-
-            # 3. Create streaming queue
-            queue = asyncio.Queue()
-            streaming_handler = StreamingCallbackHandler(queue)
-
-            # 4. Get response from agent with streaming
-            agent_response = agent.invoke(
-                {
-                    "input": user_input,
-                    "current_statement_draft": personal_statement_draft,
-                    "retrieved_context": retrieved_context,
-                    "chat_history": memory.load_memory_variables({})["chat_history"],
-                    "similar_chats": similar_chats
-                },
-                callbacks=[streaming_handler]
-            )
-
-            # 5. Stream the response
-            current_chunk = ""
-            while True:
-                token = queue.get()
-                if token is None:  # 스트리밍 종료
-                    break
-                
-                current_chunk += token
-                if len(current_chunk) >= 50 or token in ['.', '!', '?', '\n']:
-                    yield f"data: {json.dumps({'chunk': current_chunk})}\n\n"
-                    current_chunk = ""
-
-            # 6. Parse final response
-            llm_response_text = agent_response["output"]
-            chat_response = "Sorry, I couldn't parse the response."
-            statement_suggestion = ""
+        async def async_generate():
+            # 1. Add user message to history and DB
+            chat_history_list.append({"role": "user", "content": user_input})
+            add_chat_message("user", user_input)
+            memory.save_context({"input": user_input}, {"output": ""})
 
             try:
-                if "[CHAT]" in llm_response_text:
-                    parts = llm_response_text.split("[CHAT]", 1)[1].split("[STATEMENT_SUGGESTION]", 1)
-                    chat_response = parts[0].strip()
-                    if len(parts) > 1:
-                        statement_suggestion = parts[1].strip()
-                elif "[STATEMENT_SUGGESTION]" in llm_response_text:
-                    statement_suggestion = llm_response_text.split("[STATEMENT_SUGGESTION]", 1)[1].strip()
-                    chat_response = "I have a suggestion for your personal statement."
-                else:
-                    chat_response = llm_response_text.strip()
+                # 2. Retrieve relevant context and similar past conversations
+                retrieved_context = ""
+                similar_chats = []
+                if retriever:
+                    retrieved_docs = retriever.invoke(user_input)
+                    retrieved_context = "\n".join([doc.page_content for doc in retrieved_docs])
+                    
+                    conn = get_db()
+                    c = conn.cursor()
+                    c.execute('''
+                        SELECT role, content 
+                        FROM chat_history 
+                        WHERE content LIKE ? 
+                        ORDER BY timestamp DESC 
+                        LIMIT 3
+                    ''', (f'%{user_input}%',))
+                    similar_chats = [{"role": row["role"], "content": row["content"]} for row in c.fetchall()]
+                    conn.close()
 
-                # 7. Add agent response to history and DB
-                chat_history_list.append({"role": "assistant", "content": chat_response})
-                add_chat_message("assistant", chat_response)
-                memory.save_context({"input": user_input}, {"output": chat_response})
+                # 3. Create streaming queue
+                queue = asyncio.Queue()
+                current_loop = asyncio.get_event_loop() # Get the current loop
+                streaming_handler = StreamingCallbackHandler(queue, current_loop) # Pass the loop
 
-                # 8. Send final response
-                yield f"data: {json.dumps({'final': True, 'chat_response': chat_response, 'statement_suggestion': statement_suggestion, 'similar_chats': similar_chats, 'updated_draft': personal_statement_draft})}\n\n"
+                # 4. Get response from agent with streaming
+                agent_response = agent.invoke(
+                    {
+                        "input": f"""Current draft: {personal_statement_draft}
+                        Context: {retrieved_context}
+                        Similar chats: {similar_chats}
+                        User input: {user_input}"""
+                    },
+                    callbacks=[streaming_handler]
+                )
 
-            except Exception as parse_error:
-                print(f"Error parsing LLM response: {parse_error}")
-                print(f"Raw LLM response: {llm_response_text}")
-                error_response = "I apologize, but I had trouble processing the response. Could you please try again?"
+                # 5. Stream the response
+                llm_token_buffer = ""
+                while True:
+                    event_data = await queue.get() # event_data is now a dictionary
+
+                    if event_data is None: # Should not happen if on_llm_end sends a specific type
+                        continue
+
+                    if event_data.get("type") == "token":
+                        llm_token_buffer += event_data["content"]
+                        # Buffer tokens and send them in slightly larger chunks or on sentence breaks
+                        if len(llm_token_buffer) >= 30 or any(p in event_data["content"] for p in ['.', '!', '?', '\n']):
+                            if llm_token_buffer:
+                                yield f"data: {json.dumps({'chunk': llm_token_buffer})}\n\n"
+                                llm_token_buffer = ""
+                    elif event_data.get("type") == "thought":
+                        yield f"data: {json.dumps({'thought': event_data['content']})}\n\n"
+                    elif event_data.get("type") == "llm_end":
+                        # If there's any remaining buffered text, send it
+                        if llm_token_buffer:
+                            yield f"data: {json.dumps({'chunk': llm_token_buffer})}\n\n"
+                            llm_token_buffer = ""
+                        # This signals the end of the LLM's direct output stream.
+                        # The agent's final processing and yielding of the 'final' message will follow.
+                        break # Break from this loop to proceed to agent_response parsing
+
+                # Ensure any final buffered tokens are sent before parsing agent_response
+                if llm_token_buffer:
+                    yield f"data: {json.dumps({'chunk': llm_token_buffer})}\n\n"
+
+                # 6. Parse final response
+                llm_response_text = agent_response.get("output", "")
+                chat_response = "Sorry, I couldn't parse the response."
+                statement_suggestion = ""
+
+                try:
+                    if "[CHAT]" in llm_response_text:
+                        parts = llm_response_text.split("[CHAT]", 1)[1].split("[STATEMENT_SUGGESTION]", 1)
+                        chat_response = parts[0].strip()
+                        if len(parts) > 1:
+                            statement_suggestion = parts[1].strip()
+                    elif "[STATEMENT_SUGGESTION]" in llm_response_text:
+                        statement_suggestion = llm_response_text.split("[STATEMENT_SUGGESTION]", 1)[1].strip()
+                        chat_response = "I have a suggestion for your personal statement."
+                    else:
+                        # Ensure "Final Answer:" prefix is removed if present in the direct output
+                        if llm_response_text.startswith("Final Answer:"):
+                            chat_response = llm_response_text.split("Final Answer:", 1)[1].strip()
+                        else:
+                            chat_response = llm_response_text.strip()
+
+                    # 7. Add agent response to history and DB
+                    chat_history_list.append({"role": "assistant", "content": chat_response})
+                    add_chat_message("assistant", chat_response)
+                    memory.save_context({"input": user_input}, {"output": chat_response})
+
+                    # 8. Send final response
+                    yield f"data: {json.dumps({'final': True, 'chat_response': chat_response, 'statement_suggestion': statement_suggestion, 'similar_chats': similar_chats, 'updated_draft': personal_statement_draft})}\n\n"
+
+                except Exception as parse_error:
+                    print(f"Error parsing LLM response: {parse_error}")
+                    print(f"Raw LLM response: {llm_response_text}")
+                    error_response = "I apologize, but I had trouble processing the response. Could you please try again?"
+                    chat_history_list.append({"role": "assistant", "content": error_response})
+                    add_chat_message("assistant", error_response)
+                    yield f"data: {json.dumps({'error': error_response})}\n\n"
+
+            except Exception as e:
+                print(f"Error during AI processing: {e}")
+                import traceback
+                traceback.print_exc()
+                error_response = "An error occurred while processing your request."
                 chat_history_list.append({"role": "assistant", "content": error_response})
                 add_chat_message("assistant", error_response)
                 yield f"data: {json.dumps({'error': error_response})}\n\n"
 
-        except Exception as e:
-            print(f"Error during AI processing: {e}")
-            import traceback
-            traceback.print_exc()
-            error_response = "An error occurred while processing your request."
-            chat_history_list.append({"role": "assistant", "content": error_response})
-            add_chat_message("assistant", error_response)
-            yield f"data: {json.dumps({'error': error_response})}\n\n"
+        # Run the async function in a new event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            # async_generate() returns an async generator.
+            # We need a coroutine to consume it for run_until_complete.
+            async def collect_chunks_from_async_gen():
+                all_chunks = []
+                # async_generate is defined in the outer scope of this nested function
+                async for chunk_data in async_generate(): 
+                    all_chunks.append(chunk_data)
+                return all_chunks
+
+            all_yielded_chunks = loop.run_until_complete(collect_chunks_from_async_gen())
+            for chunk in all_yielded_chunks:
+                yield chunk
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None) # Reset the event loop for the current thread
 
     return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
