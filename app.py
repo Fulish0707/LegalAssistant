@@ -178,6 +178,8 @@ def chat():
             add_chat_message("user", user_input)
             memory.save_context({"input": user_input}, {"output": ""})
 
+            full_streamed_llm_output = "" # Initialize full_streamed_llm_output
+
             try:
                 # 2. Retrieve relevant context and similar past conversations
                 retrieved_context = ""
@@ -223,9 +225,11 @@ def chat():
                         continue
 
                     if event_data.get("type") == "token":
-                        llm_token_buffer += event_data["content"]
+                        token_content = event_data["content"]
+                        full_streamed_llm_output += token_content # Accumulate token
+                        llm_token_buffer += token_content
                         # Buffer tokens and send them in slightly larger chunks or on sentence breaks
-                        if len(llm_token_buffer) >= 30 or any(p in event_data["content"] for p in ['.', '!', '?', '\n']):
+                        if len(llm_token_buffer) >= 30 or any(p in token_content for p in ['.', '!', '?', '\n']):
                             if llm_token_buffer:
                                 yield f"data: {json.dumps({'chunk': llm_token_buffer})}\n\n"
                                 llm_token_buffer = ""
@@ -245,25 +249,40 @@ def chat():
                     yield f"data: {json.dumps({'chunk': llm_token_buffer})}\n\n"
 
                 # 6. Parse final response
-                llm_response_text = agent_response.get("output", "")
+                # Use full_streamed_llm_output as the primary source for parsing
+                # Fallback to agent_response.get("output", "") if full_streamed_llm_output is empty
+                parsing_source = full_streamed_llm_output
+                if not parsing_source.strip():
+                    print("Warning: full_streamed_llm_output was empty. Falling back to agent_response.get('output').")
+                    parsing_source = agent_response.get("output", "")
+                
                 chat_response = "Sorry, I couldn't parse the response."
                 statement_suggestion = ""
 
                 try:
-                    if "[CHAT]" in llm_response_text:
-                        parts = llm_response_text.split("[CHAT]", 1)[1].split("[STATEMENT_SUGGESTION]", 1)
+                    if "[CHAT]" in parsing_source:
+                        parts = parsing_source.split("[CHAT]", 1)[1].split("[STATEMENT_SUGGESTION]", 1)
                         chat_response = parts[0].strip()
                         if len(parts) > 1:
                             statement_suggestion = parts[1].strip()
-                    elif "[STATEMENT_SUGGESTION]" in llm_response_text:
-                        statement_suggestion = llm_response_text.split("[STATEMENT_SUGGESTION]", 1)[1].strip()
+                    elif "[STATEMENT_SUGGESTION]" in parsing_source:
+                        statement_suggestion = parsing_source.split("[STATEMENT_SUGGESTION]", 1)[1].strip()
                         chat_response = "I have a suggestion for your personal statement."
                     else:
                         # Ensure "Final Answer:" prefix is removed if present in the direct output
-                        if llm_response_text.startswith("Final Answer:"):
-                            chat_response = llm_response_text.split("Final Answer:", 1)[1].strip()
+                        if parsing_source.startswith("Final Answer:"):
+                            chat_response = parsing_source.split("Final Answer:", 1)[1].strip()
                         else:
-                            chat_response = llm_response_text.strip()
+                            chat_response = parsing_source.strip()
+                        # If after stripping, chat_response is empty and agent_response.get("output") has content,
+                        # it might be that the agent's final answer was not part of the token stream (e.g. direct tool output as final answer)
+                        if not chat_response and agent_response.get("output", ""):
+                            agent_output_fallback = agent_response.get("output", "")
+                            if agent_output_fallback.startswith("Final Answer:"):
+                                chat_response = agent_output_fallback.split("Final Answer:", 1)[1].strip()
+                            else:
+                                chat_response = agent_output_fallback.strip()
+
 
                     # 7. Add agent response to history and DB
                     chat_history_list.append({"role": "assistant", "content": chat_response})
@@ -275,7 +294,9 @@ def chat():
 
                 except Exception as parse_error:
                     print(f"Error parsing LLM response: {parse_error}")
-                    print(f"Raw LLM response: {llm_response_text}")
+                    print(f"Raw parsing source (full_streamed_llm_output or fallback): {parsing_source}")
+                    if parsing_source != agent_response.get("output", ""):
+                        print(f"Agent response output for comparison: {agent_response.get('output', '')}")
                     error_response = "I apologize, but I had trouble processing the response. Could you please try again?"
                     chat_history_list.append({"role": "assistant", "content": error_response})
                     add_chat_message("assistant", error_response)
