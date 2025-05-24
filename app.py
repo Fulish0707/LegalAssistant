@@ -180,15 +180,10 @@ def chat():
 
     def generate_response_stream():
         full_streamed_llm_output = ""
-        # Langchain memory might need to be loaded/prepared if it's not globally persistent
-        # For this example, FakeMemory is simple. Real memory (e.g. ConversationBufferWindowMemory)
-        # might need loading from DB or other store if not persisting across requests.
-        # memory.chat_memory.add_user_message(user_input) # If using specific methods
 
         try:
             # 1. Retrieve context (REMOVED - Agent uses its own RAG tool)
             # 2. Fetch similar past conversations (REMOVED - Agent's memory handles history. If needed explicitly, prompt engineering required)
-            
             # 3. Create streaming queue
             q = queue.Queue()
             streaming_handler = StreamingCallbackHandler(q)

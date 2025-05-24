@@ -8,7 +8,6 @@ from langchain.agents import initialize_agent
 from langchain.chains import RetrievalQA
 from langchain.chains.question_answering import load_qa_chain
 from llm_model import embedding_model, llm
-from llm_prompt import prompt
 import os
 from langchain.tools import Tool
 from dotenv import load_dotenv
