@@ -22,56 +22,61 @@
             padding: 1rem 2rem;
             text-align: center;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            flex-shrink: 0;
         }
 
         .container {
-            display: flex; /* Changed to side-by-side for chat and draft */
-            flex-direction: row; /* Main axis is horizontal */
+            display: flex;
+            flex-direction: row;
             flex-grow: 1;
             padding: 1rem;
-            gap: 1.5rem; /* Increased gap */
-            max-width: 95%; /* Use more width */
-            margin: 1rem auto; /* Add some top/bottom margin */
+            gap: 1.5rem;
+            max-width: 95%;
+            margin: 1rem auto;
             width: 100%;
             box-sizing: border-box;
-            align-items: stretch; /* Make children stretch to full height */
+            align-items: stretch;
+            overflow: hidden; /* Prevent container from causing scrollbars due to its children's growth */
         }
 
-        .main-chat-area { /* Renamed from main-content for clarity */
-            flex: 3; /* Chat takes more space */
+        .main-chat-area {
+            flex: 3;
             display: flex;
             flex-direction: column;
             gap: 1rem;
-            /* min-height removed to rely on flex-grow from parent */
+            min-height: 0; /* Allow shrinking */
         }
 
-        .draft-and-tools-area { /* Renamed from sidebar */
-            flex: 2; /* Draft and tools take less space but still significant */
+        .draft-and-tools-area {
+            flex: 2;
             display: flex;
             flex-direction: column;
             gap: 1rem;
-            /* min-height removed to rely on flex-grow from parent */
+            min-height: 0; /* Allow shrinking */
         }
         
-        .chat-container, .draft-container, .thoughts-container, .similar-chats-container {
+        .panel { /* Generic panel class */
             background-color: white;
             border-radius: 8px;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
             padding: 1.5rem;
-            display: flex; /* Added for internal flex control */
-            flex-direction: column; /* Added for internal flex control */
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; /* Important for child scrolling */
         }
 
         .chat-container {
-            flex-grow: 1; /* Takes available space in main-chat-area */
-            overflow-y: hidden; 
+            flex-grow: 1;
         }
         
         .draft-container {
-            flex-grow: 1; /* Takes available space in its column */
-            display: flex;
-            flex-direction: column;
+            flex-grow: 1; /* Takes more space in its column */
         }
+        .thoughts-container, .suggestions-container {
+             flex-shrink: 0; /* Don't shrink as much, content dictates height more */
+             max-height: 250px; /* Max height before scrolling for these */
+        }
+
 
         h2 {
             margin-top: 0;
@@ -79,18 +84,16 @@
             border-bottom: 2px solid #eef;
             padding-bottom: 0.5rem;
             font-size: 1.25rem;
-            flex-shrink: 0; /* Prevent h2 from shrinking */
+            flex-shrink: 0;
         }
 
         .chat-messages {
             flex-grow: 1;
-            flex-basis: 0; /* For proportional flex distribution */
             overflow-y: auto;
-            padding: 1rem 0.5rem; /* Adjusted padding */
+            padding: 1rem 0.5rem;
             margin-bottom: 1rem;
             border: 1px solid #eee;
             border-radius: 4px;
-            /* min-height removed to allow full flex scaling */
         }
 
         .message {
@@ -99,6 +102,7 @@
             border-radius: 6px;
             line-height: 1.6;
             max-width: 85%;
+            word-wrap: break-word; /* Prevent long words from breaking layout */
         }
 
         .user-message {
@@ -113,15 +117,21 @@
             color: #444;
             margin-right: auto;
         }
+        .error-message {
+            background-color: #ffebee;
+            color: #c62828;
+            border: 1px solid #ef9a9a;
+        }
         
-        .assistant-message strong { /* For [CHAT] prefix */
+        .assistant-message strong {
             color: #007bff; 
         }
 
         .chat-input {
             display: flex;
             gap: 0.5rem;
-            margin-top: auto; /* Pushes input to bottom of chat-container */
+            margin-top: auto;
+            flex-shrink: 0;
         }
 
         .chat-input textarea {
@@ -131,7 +141,9 @@
             border-radius: 4px;
             font-size: 1rem;
             resize: none;
-            min-height: 40px; /* Initial height for one line */
+            min-height: 40px;
+            max-height: 120px; /* Max height before scroll for input textarea */
+            overflow-y: auto;
         }
 
         .chat-input button {
@@ -143,28 +155,55 @@
             cursor: pointer;
             font-size: 1rem;
             transition: background-color 0.2s;
+            align-self: flex-end; /* Align with bottom of textarea */
+        }
+        .chat-input button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .chat-input button:hover:not(:disabled) {
+            background-color: #0056b3;
+        }
+        
+        .draft-actions {
+            margin-top: 0.5rem;
+            display: flex;
+            justify-content: flex-end; /* Align button to the right */
+            flex-shrink: 0;
         }
 
-        .chat-input button:hover {
-            background-color: #0056b3;
+        #saveDraftButton {
+            padding: 0.5rem 1rem;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        #saveDraftButton:hover {
+            background-color: #1e7e34;
+        }
+         #saveDraftButton:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
         }
 
         #personalStatementDraft {
             width: 100%;
-            /* min-height removed to allow full flex scaling */
-            flex-grow: 1; /* Allow textarea to grow */
-            flex-basis: 0; /* For proportional flex distribution */
+            flex-grow: 1;
             padding: 0.75rem;
             border: 1px solid #ccc;
             border-radius: 4px;
             font-size: 0.95rem;
             line-height: 1.6;
             box-sizing: border-box;
-            margin-top: 0.5rem; /* Add some space above textarea */
+            margin-top: 0.5rem;
+            resize: vertical; /* Allow vertical resize by user */
         }
 
-        .thoughts-log, .similar-chats-log {
-            max-height: 150px; /* Reduced height as they are secondary */
+        .thoughts-log, .suggestions-log {
+            flex-grow: 1; /* Allow them to take space within their container */
             overflow-y: auto;
             background-color: #f9f9f9;
             border: 1px solid #eee;
@@ -172,21 +211,20 @@
             padding: 0.75rem;
             font-size: 0.85rem;
             color: #555;
-            white-space: pre-wrap; /* Preserve formatting */
+            white-space: pre-wrap;
         }
-        
-        .similar-chat-item {
-            border-bottom: 1px dashed #ddd;
-            padding-bottom: 0.5rem;
+        .suggestion-item {
+            padding: 0.5rem;
             margin-bottom: 0.5rem;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            border: 1px solid #ced4da;
         }
-        .similar-chat-item:last-child {
-            border-bottom: none;
-            margin-bottom: 0;
-        }
-        .similar-chat-item .role {
-            font-weight: bold;
-            color: #007bff;
+        .suggestion-item button {
+            margin-left: 10px;
+            padding: 0.2rem 0.5rem;
+            font-size: 0.8rem;
+            cursor: pointer;
         }
 
         footer {
@@ -195,24 +233,34 @@
             background-color: #343a40;
             color: white;
             font-size: 0.9rem;
-            margin-top: auto;
+            margin-top: auto; /* Pushes footer to bottom */
+            flex-shrink: 0;
         }
 
-        /* Responsive adjustments */
-        @media (max-width: 1024px) { /* Adjusted breakpoint for stacking */
+        .status-indicator {
+            padding: 0.5rem;
+            text-align: center;
+            font-style: italic;
+            color: #555;
+            height: 2em; /* Reserve space */
+            flex-shrink: 0;
+        }
+
+
+        @media (max-width: 1024px) {
             .container {
                 flex-direction: column;
-                max-width: 100%; /* Full width on smaller screens */
+                max-width: 100%;
                 padding: 0.5rem;
+                overflow: visible; /* Reset for stacked layout */
             }
             .main-chat-area, .draft-and-tools-area {
                 flex: none;
                 width: 100%;
-                min-height: auto; /* Reset min-height for stacked layout */
             }
-            #personalStatementDraft {
-                min-height: 250px; /* Adjust for smaller screens */
-            }
+            .chat-messages { min-height: 200px; }
+            #personalStatementDraft { min-height: 200px; }
+            .thoughts-container, .suggestions-container { max-height: 150px; }
         }
     </style>
 </head>
@@ -223,8 +271,9 @@
 
     <div class="container">
         <div class="main-chat-area">
-            <div class="chat-container">
+            <div class="chat-container panel">
                 <h2>Chat</h2>
+                <div class="status-indicator" id="statusIndicator"></div>
                 <div class="chat-messages" id="chatMessages">
                     <!-- Chat messages will be appended here -->
                 </div>
@@ -236,220 +285,291 @@
         </div>
 
         <div class="draft-and-tools-area">
-            <div class="draft-container">
+            <div class="draft-container panel">
                 <h2>Personal Statement Draft</h2>
-                <textarea id="personalStatementDraft" placeholder="Your personal statement draft will appear here..."></textarea>
+                <textarea id="personalStatementDraft" placeholder="Your personal statement draft..."></textarea>
+                <div class="draft-actions">
+                    <button id="saveDraftButton">Save Draft</button>
+                </div>
             </div>
 
-            <div class="thoughts-container">
+            <div class="suggestions-container panel">
+                <h2>Suggestions</h2>
+                <div class="suggestions-log" id="suggestionsLog">
+                    <!-- Agent suggestions will appear here -->
+                </div>
+            </div>
+
+            <div class="thoughts-container panel">
                 <h2>Agent Thoughts</h2>
                 <div class="thoughts-log" id="thoughtsLog">
                     <!-- Agent thoughts will appear here -->
-                </div>
-            </div>
-            
-            <div class="similar-chats-container">
-                <h2>Similar Past Chats</h2>
-                <div class="similar-chats-log" id="similarChatsLog">
-                    <!-- Similar chats will appear here -->
                 </div>
             </div>
         </div>
     </div>
 
     <footer>
-        <p>&copy; 2024 AI Assistant. All rights reserved.</p>
+        <p>© 2024 AI Assistant. All rights reserved.</p>
     </footer>
 
     <script>
-        const chatMessages = document.getElementById('chatMessages');
-        const userInput = document.getElementById('userInput');
-        const sendButton = document.getElementById('sendButton');
-        const personalStatementDraft = document.getElementById('personalStatementDraft');
-        const thoughtsLog = document.getElementById('thoughtsLog');
-        const similarChatsLog = document.getElementById('similarChatsLog');
+        const chatMessagesEl = document.getElementById('chatMessages');
+        const userInputEl = document.getElementById('userInput');
+        const sendButtonEl = document.getElementById('sendButton');
+        const personalStatementDraftEl = document.getElementById('personalStatementDraft');
+        const saveDraftButtonEl = document.getElementById('saveDraftButton');
+        const thoughtsLogEl = document.getElementById('thoughtsLog');
+        const suggestionsLogEl = document.getElementById('suggestionsLog');
+        const statusIndicatorEl = document.getElementById('statusIndicator');
 
-        // Auto-resize textarea
-        userInput.addEventListener('input', () => {
-            userInput.style.height = 'auto';
-            userInput.style.height = (userInput.scrollHeight) + 'px';
+        let currentAssistantMessageDiv = null; // To append streamed tokens
+
+        // Auto-resize input textarea
+        userInputEl.addEventListener('input', () => {
+            userInputEl.style.height = 'auto';
+            userInputEl.style.height = (userInputEl.scrollHeight) + 'px';
         });
 
-        function addMessageToChat(role, content, isThought = false, isSimilarChat = false) {
+        function escapeHTML(str) {
+            const p = document.createElement('p');
+            p.textContent = str;
+            return p.innerHTML;
+        }
+
+        function addMessageToChat(role, content, isError = false) {
             const messageDiv = document.createElement('div');
-            if (isThought) {
-                messageDiv.innerHTML = `<pre>${content}</pre>`; // Use pre for thoughts to keep formatting
-                thoughtsLog.appendChild(messageDiv);
-                thoughtsLog.scrollTop = thoughtsLog.scrollHeight;
-            } else if (isSimilarChat) {
-                const itemDiv = document.createElement('div');
-                itemDiv.classList.add('similar-chat-item');
-                itemDiv.innerHTML = `<span class="role">${role === 'user' ? 'You' : 'Assistant'}:</span> ${content}`;
-                similarChatsLog.appendChild(itemDiv);
-                similarChatsLog.scrollTop = similarChatsLog.scrollHeight;
+            messageDiv.classList.add('message');
+            if (role === 'user') {
+                messageDiv.classList.add('user-message');
             } else {
-                messageDiv.classList.add('message', role === 'user' ? 'user-message' : 'assistant-message');
-                // Sanitize content before setting innerHTML if it can contain HTML
-                // For now, assuming plain text or simple markdown that converts to text
-                messageDiv.textContent = content; 
-                chatMessages.appendChild(messageDiv);
-                chatMessages.scrollTop = chatMessages.scrollHeight;
+                messageDiv.classList.add('assistant-message');
+                if (isError) {
+                    messageDiv.classList.add('error-message');
+                }
             }
+            messageDiv.innerHTML = escapeHTML(content); // Sanitize by default
+            chatMessagesEl.appendChild(messageDiv);
+            chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+            return messageDiv; // Return for potential modification (streaming)
         }
         
+        function addThought(content) {
+            const thoughtDiv = document.createElement('div');
+            thoughtDiv.innerHTML = `<pre>${escapeHTML(content)}</pre>`;
+            thoughtsLogEl.appendChild(thoughtDiv);
+            thoughtsLogEl.scrollTop = thoughtsLogEl.scrollHeight;
+        }
+
+        function addSuggestion(suggestionText) {
+            const suggestionDiv = document.createElement('div');
+            suggestionDiv.classList.add('suggestion-item');
+            suggestionDiv.innerHTML = `${escapeHTML(suggestionText)} <button onclick="applySuggestion(this.previousSibling.textContent)">Apply</button>`;
+            suggestionsLogEl.appendChild(suggestionDiv);
+            suggestionsLogEl.scrollTop = suggestionsLogEl.scrollHeight;
+        }
+
+        window.applySuggestion = function(textToApply) { // Make it global for inline onclick
+            const currentDraft = personalStatementDraftEl.value;
+            // Simple append, user can refine. Or offer to replace selection.
+            personalStatementDraftEl.value = currentDraft + (currentDraft ? "\n\n" : "") + textToApply.trim();
+            personalStatementDraftEl.focus();
+            // Optionally, save after applying: saveDraft(); 
+        }
+
+
         async function fetchInitialState() {
+            setStatus('Loading initial state...');
             try {
                 const response = await fetch('/get_initial_state');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 const state = await response.json();
-                personalStatementDraft.value = state.personal_statement_draft || "";
+                
+                personalStatementDraftEl.value = state.personal_statement_draft || "";
+                chatMessagesEl.innerHTML = ''; // Clear any placeholders
                 if (state.chat_history && state.chat_history.length > 0) {
                     state.chat_history.forEach(msg => addMessageToChat(msg.role, msg.content));
                 } else {
                     addMessageToChat('assistant', 'Welcome! How can I help you with your personal statement today?');
                 }
+                setStatus('');
             } catch (error) {
                 console.error("Error fetching initial state:", error);
-                addMessageToChat('assistant', 'Error loading initial state. Please try refreshing.');
+                addMessageToChat('assistant', 'Error loading initial state. Please try refreshing.', true);
+                setStatus('Error loading.');
+            }
+        }
+
+        function setStatus(message) {
+            statusIndicatorEl.textContent = message;
+        }
+
+        async function handleStreamedEvent(data) {
+            // console.log("Streamed data:", data);
+            switch (data.type) {
+                case 'token_chunk':
+                    if (!currentAssistantMessageDiv) {
+                        currentAssistantMessageDiv = addMessageToChat('assistant', '');
+                    }
+                    currentAssistantMessageDiv.innerHTML += escapeHTML(data.content); // Append sanitized chunk
+                    chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+                    break;
+                case 'thought':
+                    addThought(data.content);
+                    break;
+                case 'final_response':
+                    if (currentAssistantMessageDiv) {
+                        // If chunks were streamed, finalize its content with the full response
+                        currentAssistantMessageDiv.innerHTML = escapeHTML(data.chat_response);
+                    } else if (data.chat_response) {
+                        // If no chunks (e.g., very short response), create the message now
+                        addMessageToChat('assistant', data.chat_response);
+                    }
+                    currentAssistantMessageDiv = null; // Reset for next message
+
+                    if (data.statement_suggestion) {
+                        addSuggestion(data.statement_suggestion);
+                    }
+                    // current_draft_processed is for info, no action needed on frontend
+                    setStatus('Assistant finished.');
+                    setTimeout(() => setStatus(''), 2000); // Clear status after a bit
+                    break;
+                case 'error':
+                    addMessageToChat('assistant', data.content, true);
+                    setStatus('Error processing request.');
+                    currentAssistantMessageDiv = null;
+                    break;
+                case 'stream_end':
+                    sendButtonEl.disabled = false;
+                    sendButtonEl.textContent = 'Send';
+                    if (!statusIndicatorEl.textContent.includes('Error') && !statusIndicatorEl.textContent.includes('finished')) {
+                        setStatus(''); // Clear "Processing..." if not already an error/finished
+                    }
+                    currentAssistantMessageDiv = null; // Ensure it's reset
+                    break;
+                default:
+                    console.warn("Unknown stream event type:", data.type, data);
             }
         }
 
         async function sendMessage() {
-            const messageText = userInput.value.trim();
+            const messageText = userInputEl.value.trim();
             if (!messageText) return;
 
             addMessageToChat('user', messageText);
-            userInput.value = '';
-            userInput.style.height = 'auto'; // Reset height
-            sendButton.disabled = true;
-            sendButton.textContent = 'Sending...';
+            userInputEl.value = '';
+            userInputEl.style.height = 'auto'; // Reset height
+            
+            sendButtonEl.disabled = true;
+            sendButtonEl.textContent = '...';
+            setStatus('Assistant is thinking...');
+
+            // Clear previous outputs for the new interaction
+            thoughtsLogEl.innerHTML = '';
+            suggestionsLogEl.innerHTML = '';
+            currentAssistantMessageDiv = null;
 
             try {
                 const response = await fetch('/chat', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         message: messageText,
-                        personal_statement_draft: personalStatementDraft.value 
+                        personal_statement_draft: personalStatementDraftEl.value 
                     }),
                 });
 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    const errorData = await response.json().catch(() => ({ error: `HTTP error! Status: ${response.status}` }));
+                    throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
                 }
                 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = "";
 
-                // Clear previous similar chats and thoughts on new message
-                similarChatsLog.innerHTML = ''; 
-                // thoughtsLog.innerHTML = ''; // Optionally clear thoughts, or let them accumulate
-
                 while (true) {
                     const { done, value } = await reader.read();
-                    if (done) break;
+                    if (done) {
+                        // Stream might end before a final 'stream_end' event if connection drops
+                        // If sendButton is still disabled, it means stream_end wasn't received
+                        if(sendButtonEl.disabled) {
+                            console.warn("Stream ended abruptly by server or network.");
+                            setStatus('Stream ended.');
+                            sendButtonEl.disabled = false;
+                            sendButtonEl.textContent = 'Send';
+                            currentAssistantMessageDiv = null;
+                        }
+                        break;
+                    }
                     
                     buffer += decoder.decode(value, { stream: true });
                     
-                    // Process buffer line by line (event-stream lines are separated by \n\n)
-                    let boundary = buffer.indexOf('\n\n');
-                    while (boundary !== -1) {
-                        const line = buffer.substring(0, boundary).replace(/^data: /, '');
-                        buffer = buffer.substring(boundary + 2);
+                    let eventBoundary = buffer.indexOf('\n\n');
+                    while (eventBoundary !== -1) {
+                        const eventString = buffer.substring(0, eventBoundary).replace(/^data: /, '');
+                        buffer = buffer.substring(eventBoundary + 2);
                         
-                        if (line.trim()) {
+                        if (eventString.trim()) {
                             try {
-                                const data = JSON.parse(line);
-                                if (data.chunk) {
-                                    let lastMessage = chatMessages.querySelector('.assistant-message:not([data-finalized="true"])');
-                                    if (!lastMessage) {
-                                        const newMessageDiv = document.createElement('div');
-                                        newMessageDiv.classList.add('message', 'assistant-message');
-                                        // Add a temporary ID to grab it if needed for finalization, or rely on querySelector
-                                        chatMessages.appendChild(newMessageDiv);
-                                        lastMessage = newMessageDiv;
-                                    }
-                                    lastMessage.textContent += data.chunk; // Append chunk
-                                    chatMessages.scrollTop = chatMessages.scrollHeight;
-                                } else if (data.thought) {
-                                    addMessageToChat(null, data.thought, true);
-                                } else if (data.final) {
-                                    let lastMessage = chatMessages.querySelector('.assistant-message:not([data-finalized="true"])');
-                                    
-                                    // If there was no streaming (e.g. error or direct final response)
-                                    // or if the last message was somehow finalized prematurely.
-                                    if (!lastMessage && data.chat_response) { 
-                                        const newMessageDiv = document.createElement('div');
-                                        newMessageDiv.classList.add('message', 'assistant-message');
-                                        chatMessages.appendChild(newMessageDiv);
-                                        lastMessage = newMessageDiv;
-                                    }
-
-                                    if (lastMessage) {
-                                        // Set the definitive final content from data.final.chat_response
-                                        if (data.chat_response) {
-                                            lastMessage.textContent = data.chat_response; 
-                                        }
-                                        lastMessage.dataset.finalized = "true"; // Mark as finalized
-                                    } else if (data.chat_response) { 
-                                        // Fallback if no message was prepared by chunks (e.g. very short response or error)
-                                        addMessageToChat('assistant', data.chat_response);
-                                        // The addMessageToChat function itself doesn't set 'finalized', so the next chunk would create a new bubble.
-                                        // We need to ensure the message added this way is also marked, or that addMessageToChat can handle it.
-                                        // For now, let's assume if data.final comes, it's for an existing or just-created bubble.
-                                        let veryLastMessage = chatMessages.querySelector('.assistant-message:last-child');
-                                        if(veryLastMessage) veryLastMessage.dataset.finalized = "true";
-                                    }
-
-
-                                    if (data.statement_suggestion) {
-                                        // Offer suggestion, maybe with a button to apply it
-                                        addMessageToChat('assistant', `Suggestion for your draft: "${data.statement_suggestion}" (You can copy this to your draft area if you like.)`);
-                                        // Or directly update: personalStatementDraft.value = data.statement_suggestion;
-                                    }
-                                    if (data.updated_draft) { // If backend sends back the full draft
-                                        personalStatementDraft.value = data.updated_draft;
-                                    }
-                                    if (data.similar_chats && data.similar_chats.length > 0) {
-                                        similarChatsLog.innerHTML = '<h3>Related Past Interactions:</h3>'; // Clear and add title
-                                        data.similar_chats.forEach(chat => {
-                                            addMessageToChat(chat.role, chat.content, false, true);
-                                        });
-                                    }
-                                } else if (data.error) {
-                                    addMessageToChat('assistant', `Error: ${data.error}`);
-                                }
+                                const eventData = JSON.parse(eventString);
+                                handleStreamedEvent(eventData);
                             } catch (e) {
-                                console.error("Error parsing stream data:", e, "Data:", line);
+                                console.error("Error parsing stream event:", e, "Event string:", eventString);
+                                // Potentially display a general stream parsing error to user
                             }
                         }
-                        boundary = buffer.indexOf('\n\n');
+                        eventBoundary = buffer.indexOf('\n\n');
                     }
                 }
-
             } catch (error) {
-                console.error('Error sending message:', error);
-                addMessageToChat('assistant', 'Sorry, I encountered an error. Please try again.');
+                console.error('Error sending message or processing stream:', error);
+                addMessageToChat('assistant', `Error: ${error.message}`, true);
+                setStatus(`Error: ${error.message}`);
+                sendButtonEl.disabled = false;
+                sendButtonEl.textContent = 'Send';
+                currentAssistantMessageDiv = null;
+            } 
+            // 'finally' block removed because stream_end event now handles button re-enabling
+        }
+
+        async function saveDraft() {
+            const draftContent = personalStatementDraftEl.value;
+            saveDraftButtonEl.disabled = true;
+            saveDraftButtonEl.textContent = 'Saving...';
+            setStatus('Saving draft...');
+            try {
+                const response = await fetch('/update_statement', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ personal_statement_draft: draftContent }),
+                });
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({error: 'Failed to save draft.'}));
+                    throw new Error(errorData.error || 'Failed to save draft.');
+                }
+                const result = await response.json();
+                setStatus(result.message || 'Draft saved!');
+                setTimeout(() => setStatus(''), 2000);
+            } catch (error) {
+                console.error('Error saving draft:', error);
+                setStatus(`Error: ${error.message}`);
+                // Optionally show error near save button or as an alert
             } finally {
-                sendButton.disabled = false;
-                sendButton.textContent = 'Send';
+                saveDraftButtonEl.disabled = false;
+                saveDraftButtonEl.textContent = 'Save Draft';
             }
         }
 
-        sendButton.addEventListener('click', sendMessage);
-        userInput.addEventListener('keypress', (event) => {
+        sendButtonEl.addEventListener('click', sendMessage);
+        userInputEl.addEventListener('keypress', (event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 sendMessage();
             }
         });
+        saveDraftButtonEl.addEventListener('click', saveDraft);
 
-        // Load initial state when the page loads
         document.addEventListener('DOMContentLoaded', fetchInitialState);
     </script>
 </body>
