@@ -159,7 +159,7 @@ class StreamingCallbackHandler(BaseCallbackHandler):
 # Define Flask routes
 @app.route('/')
 def index():
-    return render_template('html_template.html')
+    return render_template('stylish_chat_interface.html')
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -249,54 +249,59 @@ def chat():
                     yield f"data: {json.dumps({'chunk': llm_token_buffer})}\n\n"
 
                 # 6. Parse final response
-                # Use full_streamed_llm_output as the primary source for parsing
-                # Fallback to agent_response.get("output", "") if full_streamed_llm_output is empty
-                parsing_source = full_streamed_llm_output
-                if not parsing_source.strip():
-                    print("Warning: full_streamed_llm_output was empty. Falling back to agent_response.get('output').")
-                    parsing_source = agent_response.get("output", "")
-                
-                chat_response = "Sorry, I couldn't parse the response."
-                statement_suggestion = ""
+                # Prioritize agent_response.get("output") for the definitive final message content.
+                final_agent_text = agent_response.get("output", "") 
+
+                parsed_chat_response = ""
+                parsed_statement_suggestion = ""
 
                 try:
-                    if "[CHAT]" in parsing_source:
-                        parts = parsing_source.split("[CHAT]", 1)[1].split("[STATEMENT_SUGGESTION]", 1)
-                        chat_response = parts[0].strip()
-                        if len(parts) > 1:
-                            statement_suggestion = parts[1].strip()
-                    elif "[STATEMENT_SUGGESTION]" in parsing_source:
-                        statement_suggestion = parsing_source.split("[STATEMENT_SUGGESTION]", 1)[1].strip()
-                        chat_response = "I have a suggestion for your personal statement."
+                    # Attempt to parse [CHAT] and [STATEMENT_SUGGESTION] from the agent's final text
+                    if "[CHAT]" in final_agent_text and "[STATEMENT_SUGGESTION]" in final_agent_text:
+                        # Determine order if both tags are present
+                        if final_agent_text.index("[CHAT]") < final_agent_text.index("[STATEMENT_SUGGESTION]"):
+                            parts = final_agent_text.split("[CHAT]", 1)[1].split("[STATEMENT_SUGGESTION]", 1)
+                            parsed_chat_response = parts[0].strip()
+                            parsed_statement_suggestion = parts[1].strip() if len(parts) > 1 else ""
+                        else: # [STATEMENT_SUGGESTION] comes before [CHAT]
+                            parts = final_agent_text.split("[STATEMENT_SUGGESTION]", 1)[1].split("[CHAT]", 1)
+                            parsed_statement_suggestion = parts[0].strip()
+                            parsed_chat_response = parts[1].strip() if len(parts) > 1 else ""
+                    elif "[CHAT]" in final_agent_text:
+                        parsed_chat_response = final_agent_text.split("[CHAT]", 1)[1].strip()
+                    elif "[STATEMENT_SUGGESTION]" in final_agent_text:
+                        parsed_statement_suggestion = final_agent_text.split("[STATEMENT_SUGGESTION]", 1)[1].strip()
+                        # If only suggestion, provide a default chat response
+                        if not parsed_chat_response: # Ensure we don't overwrite if [CHAT] was also (incorrectly) present
+                            parsed_chat_response = "I have a suggestion for your personal statement."
                     else:
-                        # Ensure "Final Answer:" prefix is removed if present in the direct output
-                        if parsing_source.startswith("Final Answer:"):
-                            chat_response = parsing_source.split("Final Answer:", 1)[1].strip()
+                        # No special tags, assume the whole output is the chat response
+                        # Remove "Final Answer:" prefix if present, as this is common from agents
+                        if final_agent_text.startswith("Final Answer:"):
+                            parsed_chat_response = final_agent_text.split("Final Answer:", 1)[1].strip()
                         else:
-                            chat_response = parsing_source.strip()
-                        # If after stripping, chat_response is empty and agent_response.get("output") has content,
-                        # it might be that the agent's final answer was not part of the token stream (e.g. direct tool output as final answer)
-                        if not chat_response and agent_response.get("output", ""):
-                            agent_output_fallback = agent_response.get("output", "")
-                            if agent_output_fallback.startswith("Final Answer:"):
-                                chat_response = agent_output_fallback.split("Final Answer:", 1)[1].strip()
-                            else:
-                                chat_response = agent_output_fallback.strip()
-
+                            parsed_chat_response = final_agent_text.strip()
+                    
+                    # Fallback if parsing resulted in no actual chat content but there might be a suggestion
+                    if not parsed_chat_response.strip() and parsed_statement_suggestion.strip() and not "[STATEMENT_SUGGESTION]" in final_agent_text:
+                         # This case should ideally be caught by the "[STATEMENT_SUGGESTION]" only block above
+                         parsed_chat_response = "I have a suggestion for your personal statement."
+                    elif not parsed_chat_response.strip() and not parsed_statement_suggestion.strip():
+                        # If both are empty (e.g. agent returned empty string or only whitespace)
+                        print(f"Warning: Agent returned empty or unparseable final text: '{final_agent_text}'")
+                        parsed_chat_response = "I'm sorry, I didn't get a valid response. Please try again."
 
                     # 7. Add agent response to history and DB
-                    chat_history_list.append({"role": "assistant", "content": chat_response})
-                    add_chat_message("assistant", chat_response)
-                    memory.save_context({"input": user_input}, {"output": chat_response})
+                    chat_history_list.append({"role": "assistant", "content": parsed_chat_response})
+                    add_chat_message("assistant", parsed_chat_response)
+                    memory.save_context({"input": user_input}, {"output": parsed_chat_response})
 
-                    # 8. Send final response
-                    yield f"data: {json.dumps({'final': True, 'chat_response': chat_response, 'statement_suggestion': statement_suggestion, 'similar_chats': similar_chats, 'updated_draft': personal_statement_draft})}\n\n"
+                    # 8. Send final response object
+                    yield f"data: {json.dumps({'final': True, 'chat_response': parsed_chat_response, 'statement_suggestion': parsed_statement_suggestion, 'similar_chats': similar_chats, 'updated_draft': personal_statement_draft})}\n\n"
 
                 except Exception as parse_error:
-                    print(f"Error parsing LLM response: {parse_error}")
-                    print(f"Raw parsing source (full_streamed_llm_output or fallback): {parsing_source}")
-                    if parsing_source != agent_response.get("output", ""):
-                        print(f"Agent response output for comparison: {agent_response.get('output', '')}")
+                    print(f"Error parsing LLM final response: {parse_error}")
+                    print(f"Raw final_agent_text from agent.invoke(): {final_agent_text}")
                     error_response = "I apologize, but I had trouble processing the response. Could you please try again?"
                     chat_history_list.append({"role": "assistant", "content": error_response})
                     add_chat_message("assistant", error_response)
