@@ -1,4 +1,3 @@
-import google.generativeai as genai
 import os
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -10,8 +9,7 @@ google_api_key = os.getenv("GOOGLE_API_KEY")
 os.environ["GOOGLE_API_KEY"] = google_api_key
 
 llm = ChatGoogleGenerativeAI(
-    model = "gemini-2.5-flash-preview-04-17",
-    temperature = 0
+    model = "gemini-2.5-flash-preview-04-17"
     )
 embedding_model = GoogleGenerativeAIEmbeddings(
     model="models/text-embedding-004"
