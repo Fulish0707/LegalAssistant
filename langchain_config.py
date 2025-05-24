@@ -1,10 +1,11 @@
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, DirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain_chroma import Chroma
 from langchain_community.agent_toolkits.load_tools import load_tools
 from langchain.memory import ConversationBufferMemory
 from langchain.agents import initialize_agent
-from langchain.chains import RetrievalQA, StuffDocumentsChain
+from langchain.chains import RetrievalQA
 from langchain.chains.question_answering import load_qa_chain
 from llm_model import embedding_model, llm
 from llm_prompt import prompt
@@ -87,9 +88,10 @@ def rag_tool_func(query):
             
             # 2. RetrievalQA 체인 생성
             qa_chain = load_qa_chain(
-                llm=llm,
+                llm = llm,
                 chain_type="stuff"
             )
+
             qa = RetrievalQA(
                 combine_documents_chain=qa_chain,
                 retriever=retriever,
@@ -133,10 +135,13 @@ tools = [rag_tool] + serpapi_tools
 
 # Create agent with custom prompt
 agent = initialize_agent(
-    tools=tools,
-    llm=llm,
+    tools = tools,
+    llm = llm,
     agent="conversational-react-description",
-    verbose=True,
     memory=memory,
-    system_message=prompt.messages[0].prompt.template
+    streaming = True,
+    callbacks = [StreamingStdOutCallbackHandler()],
+    verbose = True,
+    handle_parsing_errors = True,
+    temperature = 0.0
 )
