@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context, g
-# from langchain_config import retriever, memory, agent # Assuming these are correctly configured
+from langchain_config import retriever, memory, agent # Assuming these are correctly configured
 import time # Needed for a brief pause
 import logging
 import sqlite3
@@ -7,80 +7,10 @@ import json
 import queue
 from langchain.callbacks.base import BaseCallbackHandler
 import os
+import sys
 
-# --- FAKE Langchain components for standalone testing ---
-# In your actual setup, you'll use: from langchain_config import retriever, memory, agent
-class FakeRetriever:
-    def invoke(self, query):
-        print(f"[FakeRetriever] Invoked with query: {query}")
-        return [{"page_content": f"Document related to '{query}' 1"}, {"page_content": "General advice document"}]
-
-class FakeMemory:
-    def __init__(self):
-        self.chat_memory = {"messages": []} # Simplified in-memory store for the fake
-        print("[FakeMemory] Initialized")
-
-    def save_context(self, inputs, outputs):
-        print(f"[FakeMemory] Saving context: inputs={inputs}, outputs={outputs}")
-        self.chat_memory["messages"].append({"input": inputs.get("input"), "output": outputs.get("output")})
-
-    def load_memory_variables(self, inputs=None):
-        # This is a simplified representation. Real memory objects might format history differently.
-        history = "\n".join([f"Human: {msg['input']}\nAI: {msg['output']}" for msg in self.chat_memory["messages"]])
-        return {"history": history}
-
-class FakeAgent:
-    def invoke(self, inputs, callbacks=None):
-        print(f"[FakeAgent] Invoked with inputs: {inputs}")
-        user_input_detail = inputs.get("input", "") # The full input string
-        
-        # Simulate streaming for callbacks
-        if callbacks:
-            for handler in callbacks:
-                if hasattr(handler, 'on_agent_action'):
-                    # Simulate a thought process
-                    handler.on_agent_action(
-                        type('obj', (object,), {'log': 'Thought: I need to analyze the user input and draft.', 'tool': 'analysis_tool', 'tool_input': 'details'})
-                    )
-                    time.sleep(0.1) # simulate work
-                    handler.on_tool_end(output="Analysis complete, draft seems okay.")
-                    time.sleep(0.1) # simulate work
-                if hasattr(handler, 'on_llm_new_token'):
-                    response_chat = "This is a streamed chat response from the fake agent. "
-                    response_suggestion = "Consider adding more examples to your draft."
-                    
-                    # Simulate streaming the structured response
-                    # For demonstration, we'll stream it as if it's a JSON string
-                    # In reality, the agent would produce this JSON as its final output.
-                    
-                    # Stream chat part
-                    for char in "Okay, I've processed that. ":
-                        handler.on_llm_new_token(char)
-                        time.sleep(0.01)
-                    
-                    # Stream suggestion part
-                    for char in "How about this: add more details about your leadership experience? ":
-                        handler.on_llm_new_token(char)
-                        time.sleep(0.01)
-                        
-                if hasattr(handler, 'on_llm_end'):
-                    handler.on_llm_end()
-
-        # Simulate the agent's structured output (what it *would* produce if prompted for JSON)
-        # The actual prompt engineering for the real agent to produce this is key.
-        structured_response = {
-            "chat_response": f"Okay, I've processed your input regarding: '{user_input_detail[:30]}...'.",
-            "statement_suggestion": "Based on your input, consider elaborating on your future goals in the personal statement."
-        }
-        # For the purpose of this fake agent, we'll return this directly.
-        # The streaming part above simulates how tokens would arrive. The `invoke` should return the *final* complete output.
-        return {"output": json.dumps(structured_response)} # Agent output is now a JSON string
-
-retriever = FakeRetriever()
-memory = FakeMemory() # Re-initialize for each run if it's stateful and not persisted
-agent = FakeAgent()
-# --- END FAKE Langchain components ---
-
+# --- FAKE Langchain components REMOVED ---
+# Real components are now imported from langchain_config
 
 # Disable Flask's default request logging for cleaner output if not needed
 log = logging.getLogger('werkzeug')
@@ -108,6 +38,7 @@ def close_connection(exception):
         db.close()
 
 def init_db():
+    print("Attempting to initialize database...")
     with app.app_context(): # Operations outside a request need an app context for get_db
         conn = get_db()
         c = conn.cursor()
@@ -127,6 +58,7 @@ def init_db():
         ''')
         c.execute('INSERT OR IGNORE INTO personal_statement (id, draft) VALUES (1, "")')
         conn.commit()
+        print("Database initialized successfully.")
         # No need to close here, teardown_appcontext will handle it if get_db was called
         # For standalone init, explicitly closing is safer if not within app context management
         # but since we used `with app.app_context()`, `close_connection` will be triggered.
@@ -206,8 +138,12 @@ class StreamingCallbackHandler(BaseCallbackHandler):
         self.queue.put({"type": "thought", "content": f"Tool Output: {tool_output_display}"})
 
     def on_chain_start(self, serialized, inputs, **kwargs) -> None:
-        chain_name = serialized.get("name", serialized.get("id", ["Unknown Chain"])[-1])
-        if "AgentExecutor" not in chain_name and "RunnableSequence" not in chain_name and "LLMChain" not in chain_name:
+        chain_name = "Unknown Chain"
+        if serialized: # Check if serialized is not None
+            chain_name = serialized.get("name", serialized.get("id", ["Unknown Chain"])[-1])
+        
+        # Only log certain chain types to avoid too much noise, or adjust as needed
+        if chain_name and "AgentExecutor" not in chain_name and "RunnableSequence" not in chain_name and "LLMChain" not in chain_name:
             self.queue.put({"type": "thought", "content": f"Starting sub-chain: {chain_name}"})
 
     def on_agent_finish(self, finish, **kwargs) -> None:
@@ -250,40 +186,27 @@ def chat():
         # memory.chat_memory.add_user_message(user_input) # If using specific methods
 
         try:
-            # 1. Retrieve context (if enabled)
-            retrieved_context = ""
-            if retriever: # Assuming retriever is configured
-                retrieved_docs = retriever.invoke(user_input)
-                retrieved_context = "\n".join([doc.page_content for doc in retrieved_docs])
-
-            # 2. Fetch similar past conversations (optional, for agent context)
-            conn = get_db()
-            c = conn.cursor()
-            c.execute('''
-                SELECT role, content FROM chat_history
-                WHERE id != (SELECT MAX(id) FROM chat_history) AND content LIKE ?
-                ORDER BY timestamp DESC LIMIT 3
-            ''', (f'%{user_input}%',)) # Exclude the message just added
-            similar_chats_raw = c.fetchall()
-            similar_chats_for_agent = [{"role": row["role"], "content": row["content"]} for row in similar_chats_raw]
-            # Convert to a string format suitable for the agent prompt
-            similar_chats_str = json.dumps(similar_chats_for_agent)
-
-
+            # 1. Retrieve context (REMOVED - Agent uses its own RAG tool)
+            # 2. Fetch similar past conversations (REMOVED - Agent's memory handles history. If needed explicitly, prompt engineering required)
+            
             # 3. Create streaming queue
             q = queue.Queue()
             streaming_handler = StreamingCallbackHandler(q)
 
             # 4. Prepare agent input
-            # The agent's prompt needs to be designed to use these effectively
+            # For conversational-react-description, "input" is the main key.
+            # current_draft could be passed if the agent's prompt is designed for it.
             agent_input_payload = {
-                "input": user_input, # Clearer to just pass user_input directly
-                "current_draft": current_personal_statement_draft,
-                "retrieved_context": retrieved_context,
-                "similar_historical_chats": similar_chats_str,
-                # Langchain memory variables are often implicitly added by the AgentExecutor
-                # or you might pass `memory.load_memory_variables({})` if needed explicitly.
+                "input": user_input,
+                # "current_draft": current_personal_statement_draft, # Keep if prompt handles it
+                # Langchain memory (ConversationBufferMemory) is part of the agent from langchain_config
             }
+            
+            # Add current_draft to input if it's not empty, assuming prompt might use it.
+            # This is a placeholder; ideally, the prompt is explicitly designed for this.
+            if current_personal_statement_draft:
+                agent_input_payload["input"] += f"\n\n[Current Draft Context]\n{current_personal_statement_draft}"
+
 
             # 5. Invoke agent (this now runs in the main thread of the request handler)
             # To make this non-blocking for other requests, the agent.invoke itself would need to be async
@@ -329,36 +252,22 @@ def chat():
 
 
             # 7. Process final agent output
-            # IMPORTANT: The agent's prompt MUST be updated to return a JSON string.
-            # Example expected JSON: {"chat_response": "...", "statement_suggestion": "..."}
-            raw_agent_output_str = agent_response_obj.get("output", "{}")
+            # IMPORTANT: The real agent is expected to return a dict like {"output": "response_string"}
+            # The "output" field contains the direct string response.
+            agent_output_string = agent_response_obj.get("output", "")
 
-            parsed_chat_response = "Sorry, I encountered an issue processing the response."
-            parsed_statement_suggestion = ""
+            parsed_chat_response = agent_output_string
+            # Statement suggestion logic is removed as the real agent might not produce it by default.
+            # If suggestions are needed, the agent's prompt (from llm_prompt.py) must be designed for it.
+            parsed_statement_suggestion = "" # Default to no suggestion
 
-            try:
-                # The agent is now expected to output a JSON string
-                parsed_output = json.loads(raw_agent_output_str)
-                parsed_chat_response = parsed_output.get("chat_response", "No chat response provided.")
-                parsed_statement_suggestion = parsed_output.get("statement_suggestion", "") # Can be empty
-
-                if not parsed_chat_response and not parsed_statement_suggestion:
-                    # This case indicates the agent returned valid JSON but with empty/missing fields
-                    parsed_chat_response = "I don't have a specific chat reply, but I've processed your input."
-                    print(f"Warning: Agent returned JSON with empty/missing 'chat_response' and 'statement_suggestion'. Raw: {raw_agent_output_str}")
-
-
-            except json.JSONDecodeError:
-                # Fallback if the agent DID NOT return valid JSON
-                # This means the agent's prompt needs fixing.
-                print(f"ERROR: Agent output was not valid JSON: {raw_agent_output_str}")
-                # Attempt to use the raw output as chat response if JSON parsing fails
-                parsed_chat_response = raw_agent_output_str if raw_agent_output_str.strip() else parsed_chat_response
-                # No suggestion if parsing failed
-                parsed_statement_suggestion = "Could not parse suggestion."
-
+            if not parsed_chat_response:
+                parsed_chat_response = "Sorry, I couldn't generate a response."
+                print(f"Warning: Agent returned an empty 'output'. Full response object: {agent_response_obj}")
 
             # 8. Save assistant message and update Langchain memory
+            # The memory object used here is the one imported from langchain_config,
+            # which is also used by the agent.
             add_chat_message_to_db("assistant", parsed_chat_response)
             memory.save_context(
                 {"input": user_input}, # What the user sent
@@ -447,23 +356,20 @@ def clear_chat_history_endpoint():
         return jsonify({"error": "Failed to clear chat history."}), 500
 
 
-# --- Main Execution ---
+def application_setup():
+    """Encapsulates setup that should happen in the worker process."""
+    print("--- Worker Process Setup ---")
+    print("Initializing DB...")
+    init_db()
+    # Add any other one-time initializations for the worker here
+    print("--- Worker Process Setup Complete ---")
+
+# This part runs every time the module is loaded.
+# FakeMemory() will be initialized here, so its print will appear for each process.
+print(f"Module loaded. WERKZEUG_RUN_MAIN: {os.environ.get('WERKZEUG_RUN_MAIN')}")
+# memory = FakeMemory() # REMOVED - Real memory is imported
+
 if __name__ == '__main__':
-    # init_db() should ideally be idempotent, but running it only once is cleaner.
-    # The FakeMemory initialization is a bit trickier if you want only one instance globally
-    # when using the reloader. For true singletons, other patterns are needed, but for
-    # development, this often suffices to prevent double console output.
-
-    # This check ensures these run only in the main process started by the reloader
-    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
-        print("Initializing DB (main process)...")
-        init_db()
-        # If FakeMemory and other fakes were meant to be initialized only once globally,
-        # this is tricky with the reloader, as each process gets its own memory space.
-        # The current FakeMemory will be re-initialized in the reloaded worker process.
-        # This is usually fine for development fakes.
-        # If these were real resources (e.g., a database connection pool),
-        # you'd initialize them lazily or within the app context.
-
-    print("Starting Flask server (Flask `app.run` call)...")
-    app.run(host="0.0.0.0", port=5005, debug=True, use_reloader=True)
+    print(f"Running __main__. WERKZEUG_RUN_MAIN: {os.environ.get('WERKZEUG_RUN_MAIN')}")
+    init_db() # Initialize the database
+    app.run(host="0.0.0.0", port=5005, debug=True, use_reloader=False)
