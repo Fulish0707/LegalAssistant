@@ -359,12 +359,7 @@ def application_setup():
     # Add any other one-time initializations for the worker here
     print("--- Worker Process Setup Complete ---")
 
-# This part runs every time the module is loaded.
-# FakeMemory() will be initialized here, so its print will appear for each process.
-print(f"Module loaded. WERKZEUG_RUN_MAIN: {os.environ.get('WERKZEUG_RUN_MAIN')}")
-# memory = FakeMemory() # REMOVED - Real memory is imported
 
 if __name__ == '__main__':
-    print(f"Running __main__. WERKZEUG_RUN_MAIN: {os.environ.get('WERKZEUG_RUN_MAIN')}")
     init_db() # Initialize the database
     app.run(host="0.0.0.0", port=5005, debug=True, use_reloader=False)

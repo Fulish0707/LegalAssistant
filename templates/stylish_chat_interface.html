@@ -112,6 +112,7 @@
             background-color: #f0f0f0;
             color: #444;
             margin-right: auto;
+            white-space: pre-wrap; /* Preserve line breaks */
         }
         
         .assistant-message strong { /* For [CHAT] prefix */
@@ -372,58 +373,42 @@
                                         currentAssistantMessage.classList.add('message', 'assistant-message');
                                         chatMessages.appendChild(currentAssistantMessage);
                                     }
-                                    currentAssistantMessage.textContent += data.content;
-                                    // Force scroll to bottom after each update
-                                    chatMessages.scrollTop = chatMessages.scrollHeight;
-                                    // Force a reflow to ensure the scroll happens
-                                    currentAssistantMessage.offsetHeight;
-                                    let lastMessage = chatMessages.querySelector('.assistant-message:not([data-finalized="true"])');
-                                    if (!lastMessage) {
-                                        const newMessageDiv = document.createElement('div');
-                                        newMessageDiv.classList.add('message', 'assistant-message');
-                                        chatMessages.appendChild(newMessageDiv);
-                                        lastMessage = newMessageDiv;
-                                    }
-                                    lastMessage.textContent += data.content; // Append content from token_chunk
+                                    currentAssistantMessage.textContent += data.content; // Append content ONCE
                                     chatMessages.scrollTop = chatMessages.scrollHeight;
                                 } else if (data.type === 'thought') {
                                     addMessageToChat(null, data.content, true);
                                 } else if (data.type === 'final_response') {
-                                    let lastMessage = chatMessages.querySelector('.assistant-message:not([data-finalized="true"])');
-                                    
-                                    if (!lastMessage && data.chat_response) { 
-                                        const newMessageDiv = document.createElement('div');
-                                        newMessageDiv.classList.add('message', 'assistant-message');
-                                        chatMessages.appendChild(newMessageDiv);
-                                        lastMessage = newMessageDiv;
-                                    }
-
-                                    if (lastMessage) {
-                                        if (data.chat_response) {
-                                            lastMessage.textContent = data.chat_response; 
+                                    if (data.chat_response) {
+                                        if (currentAssistantMessage) {
+                                            currentAssistantMessage.textContent = data.chat_response;
+                                            currentAssistantMessage.dataset.finalized = "true";
+                                        } else {
+                                            // If no currentAssistantMessage (e.g., very short response, no chunks)
+                                            addMessageToChat('assistant', data.chat_response);
+                                            // Ensure the newly added message is marked finalized
+                                            let lastAddedMessage = chatMessages.querySelector('.assistant-message:last-child');
+                                            if (lastAddedMessage) lastAddedMessage.dataset.finalized = "true";
                                         }
-                                        lastMessage.dataset.finalized = "true";
-                                    } else if (data.chat_response) { 
-                                        addMessageToChat('assistant', data.chat_response);
-                                        let veryLastMessage = chatMessages.querySelector('.assistant-message:last-child');
-                                        if(veryLastMessage) veryLastMessage.dataset.finalized = "true";
+                                    } else if (currentAssistantMessage) {
+                                        // If no chat_response in final_response, but we had chunks, finalize the existing one
+                                        currentAssistantMessage.dataset.finalized = "true";
                                     }
+                                    currentAssistantMessage = null; // Reset for the next message stream
 
                                     if (data.statement_suggestion) {
                                         addMessageToChat('assistant', `Suggestion for your draft: "${data.statement_suggestion}" (You can copy this to your draft area if you like.)`);
                                     }
                                     // Note: 'updated_draft' and 'similar_chats' are not currently sent by app.py's final_response
                                     // If they were, data.updated_draft and data.similar_chats would be correct here.
-
                                 } else if (data.type === 'error') {
                                     addMessageToChat('assistant', `Error: ${data.content}`);
                                 } else if (data.type === 'stream_end') {
                                     console.log("Stream ended.");
-                                    // Perform any cleanup or final UI updates if needed
-                                    let lastMessage = chatMessages.querySelector('.assistant-message:not([data-finalized="true"])');
-                                    if(lastMessage) { // If there's an unfinalized message when stream ends, mark it.
-                                        lastMessage.dataset.finalized = "true";
+                                    if (currentAssistantMessage && !currentAssistantMessage.dataset.finalized) {
+                                        // If stream ends and the message wasn't finalized by a 'final_response'
+                                        currentAssistantMessage.dataset.finalized = "true";
                                     }
+                                    currentAssistantMessage = null; // Reset for the next message stream
                                 }
 
                             } catch (e) {
