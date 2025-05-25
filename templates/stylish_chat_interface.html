@@ -1,319 +1,224 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Personal Statement Assistant</title>
+    <title>자기소개서 도우미</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
     <style>
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f4f7f9;
-            color: #333;
-            display: flex;
-            flex-direction: column;
+            background-color: #f8f9fa;
             min-height: 100vh;
-        }
-
-        header {
-            background-color: #007bff;
-            color: white;
-            padding: 1rem 2rem;
-            text-align: center;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-
-        .container {
-            display: flex; /* Changed to side-by-side for chat and draft */
-            flex-direction: row; /* Main axis is horizontal */
-            flex-grow: 1;
-            padding: 1rem;
-            gap: 1.5rem; /* Increased gap */
-            max-width: 95%; /* Use more width */
-            margin: 1rem auto; /* Add some top/bottom margin */
-            width: 100%;
-            box-sizing: border-box;
-            align-items: stretch; /* Make children stretch to full height */
-        }
-
-        .main-chat-area { /* Renamed from main-content for clarity */
-            flex: 3; /* Chat takes more space */
             display: flex;
             flex-direction: column;
-            gap: 1rem;
-            /* min-height removed to rely on flex-grow from parent */
         }
-
-        .draft-and-tools-area { /* Renamed from sidebar */
-            flex: 2; /* Draft and tools take less space but still significant */
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-            /* min-height removed to rely on flex-grow from parent */
-        }
-        
-        .chat-container, .draft-container, .thoughts-container, .similar-chats-container {
-            background-color: white;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-            padding: 1.5rem;
-            display: flex; /* Added for internal flex control */
-            flex-direction: column; /* Added for internal flex control */
-        }
-
         .chat-container {
-            flex-grow: 1; /* Takes available space in main-chat-area */
-            overflow-y: hidden; 
-        }
-        
-        .draft-container {
-            flex-grow: 1; /* Takes available space in its column */
             display: flex;
             flex-direction: column;
+            /* height: calc(100vh - 150px); */ /* Removed */
+            flex-grow: 1; /* Added */
         }
-
-        h2 {
-            margin-top: 0;
-            color: #0056b3;
-            border-bottom: 2px solid #eef;
-            padding-bottom: 0.5rem;
-            font-size: 1.25rem;
-            flex-shrink: 0; /* Prevent h2 from shrinking */
-        }
-
         .chat-messages {
             flex-grow: 1;
-            flex-basis: 0; /* For proportional flex distribution */
             overflow-y: auto;
-            padding: 1rem 0.5rem; /* Adjusted padding */
-            margin-bottom: 1rem;
-            border: 1px solid #eee;
-            border-radius: 4px;
-            /* min-height removed to allow full flex scaling */
-        }
-
-        .message {
-            margin-bottom: 0.75rem;
-            padding: 0.75rem 1rem;
-            border-radius: 6px;
-            line-height: 1.6;
-            max-width: 85%;
-        }
-
-        .user-message {
-            background-color: #e6f2ff;
-            color: #0056b3;
-            margin-left: auto;
-            text-align: right;
-        }
-
-        .assistant-message {
-            background-color: #f0f0f0;
-            color: #444;
-            margin-right: auto;
-            white-space: pre-wrap; /* Preserve line breaks */
-        }
-        
-        .assistant-message strong { /* For [CHAT] prefix */
-            color: #007bff; 
-        }
-
-        .chat-input {
-            display: flex;
-            gap: 0.5rem;
-            margin-top: auto; /* Pushes input to bottom of chat-container */
-        }
-
-        .chat-input textarea {
-            flex-grow: 1;
-            padding: 0.75rem;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            font-size: 1rem;
-            resize: none;
-            min-height: 40px; /* Initial height for one line */
-        }
-
-        .chat-input button {
-            padding: 0.75rem 1.5rem;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 1rem;
-            transition: background-color 0.2s;
-        }
-
-        .chat-input button:hover {
-            background-color: #0056b3;
-        }
-
-        #personalStatementDraft {
-            width: 100%;
-            /* min-height removed to allow full flex scaling */
-            flex-grow: 1; /* Allow textarea to grow */
-            flex-basis: 0; /* For proportional flex distribution */
-            padding: 0.75rem;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            font-size: 0.95rem;
-            line-height: 1.6;
-            box-sizing: border-box;
-            margin-top: 0.5rem; /* Add some space above textarea */
-        }
-
-        .thoughts-log, .similar-chats-log {
-            max-height: 150px; /* Reduced height as they are secondary */
-            overflow-y: auto;
-            background-color: #f9f9f9;
-            border: 1px solid #eee;
-            border-radius: 4px;
-            padding: 0.75rem;
-            font-size: 0.85rem;
-            color: #555;
-            white-space: pre-wrap; /* Preserve formatting */
-        }
-        
-        .similar-chat-item {
-            border-bottom: 1px dashed #ddd;
-            padding-bottom: 0.5rem;
-            margin-bottom: 0.5rem;
-        }
-        .similar-chat-item:last-child {
-            border-bottom: none;
-            margin-bottom: 0;
-        }
-        .similar-chat-item .role {
-            font-weight: bold;
-            color: #007bff;
-        }
-
-        footer {
-            text-align: center;
+            scroll-behavior: smooth;
             padding: 1rem;
-            background-color: #343a40;
-            color: white;
-            font-size: 0.9rem;
-            margin-top: auto;
+            background-color: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+            min-height: 0; /* Added */
         }
-
-        /* Responsive adjustments */
-        @media (max-width: 1024px) { /* Adjusted breakpoint for stacking */
-            .container {
-                flex-direction: column;
-                max-width: 100%; /* Full width on smaller screens */
-                padding: 0.5rem;
-            }
-            .main-chat-area, .draft-and-tools-area {
-                flex: none;
-                width: 100%;
-                min-height: auto; /* Reset min-height for stacked layout */
-            }
-            #personalStatementDraft {
-                min-height: 250px; /* Adjust for smaller screens */
-            }
+        .chat-input {
+            position: sticky;
+            bottom: 0;
+            background: #fff;
+            padding: 0.5rem;
+            border-top: 1px solid #dee2e6;
+        }
+        .message {
+            max-width: 85%;
+            margin-bottom: 0.75rem;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            animation: fadeIn 0.3s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .thoughts-log {
+            max-height: 150px;
+            overflow-y: auto;
+            padding: 0.75rem;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+        }
+        .saving-indicator.saving {
+            opacity: 1;
+        }
+        .function-bar .btn {
+            margin-right: 0.5rem;
+        }
+        .draft-container {
+            display: flex;
+            flex-direction: column;
+            /* height: calc(100vh - 300px); */ /* Removed */
+            flex-grow: 1; /* Added */
+        }
+        .draft-container textarea {
+            flex-grow: 1; /* 초안이 나머지 공간을 채움 */
+            min-height: 0; /* Added */
         }
     </style>
 </head>
 <body>
-    <header>
-        <h1>Personal Statement Assistant</h1>
+    <!-- 헤더 -->
+    <header class="bg-light border-bottom py-3">
+        <div class="container">
+            <h1 class="h4 mb-3">자기소개서 도우미</h1>
+            <div class="function-bar">
+                <button class="btn btn-outline-primary" onclick="scrollToSection('chat-container')"><i class="bi bi-chat"></i> 채팅</button>
+                <button class="btn btn-outline-primary" onclick="scrollToSection('draft-container')"><i class="bi bi-file-text"></i> 문서</button>
+                <button class="btn btn-outline-primary" onclick="scrollToSection('thoughts-container')"><i class="bi bi-mic"></i> 음성</button>
+                <button class="btn btn-outline-primary" onclick="scrollToSection('thoughts-container')"><i class="bi bi-camera-reels"></i> 영상</button>
+            </div>
+        </div>
     </header>
 
-    <div class="container">
-        <div class="main-chat-area">
-            <div class="chat-container">
-                <h2>Chat</h2>
-                <div class="chat-messages" id="chatMessages">
-                    <!-- Chat messages will be appended here -->
+    <!-- 메인 콘텐츠 -->
+    <main class="flex-grow-1 py-4">
+        <div class="container h-100 d-flex flex-column">
+            <div class="row flex-grow-1">
+                <div class="col-md-4 mb-4 d-flex flex-column">
+                    <div class="card chat-container" id="chat-container">
+                        <div class="card-body d-flex flex-column">
+                            <h2 class="card-title h5">채팅</h2>
+                            <div class="chat-messages">
+                                <!-- 채팅 메시지가 여기에 추가됩니다 -->
+                            </div>
+                            <div class="chat-input mt-3">
+                                <div class="input-group">
+                                    <textarea id="userInput" class="form-control" placeholder="메시지를 입력하세요..." rows="1"></textarea>
+                                    <button id="sendButton" class="btn btn-primary">보내기</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="chat-input">
-                    <textarea id="userInput" placeholder="Type your message..." rows="1"></textarea>
-                    <button id="sendButton">Send</button>
+                <div class="col-md-8 mb-4 d-flex flex-column">
+                    <div class="card draft-container" id="draft-container">
+                        <div class="card-body d-flex flex-column">
+                            <h2 class="card-title h5 d-flex justify-content-between align-items-center">
+                                자기소개서 초안
+                                <span id="savingIndicator" class="saving-indicator opacity-0 text-muted small">저장됨</span>
+                            </h2>
+                            <textarea id="personalStatementDraft" class="form-control" placeholder="자기소개서 초안이 여기에 표시됩니다..."></textarea>
+                        </div>
+                    </div>
+                    <div class="card thoughts-container mt-4" id="thoughts-container">
+                        <div class="card-body">
+                            <h2 class="card-title h5 collapsible-header" onclick="toggleCollapse('thoughtsLog')">에이전트 생각</h2>
+                            <div class="thoughts-log" id="thoughtsLog">
+                                <!-- 에이전트 생각이 여기에 표시됩니다 -->
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
+    </main>
 
-        <div class="draft-and-tools-area">
-            <div class="draft-container">
-                <h2>Personal Statement Draft</h2>
-                <textarea id="personalStatementDraft" placeholder="Your personal statement draft will appear here..."></textarea>
-            </div>
-
-            <div class="thoughts-container">
-                <h2>Agent Thoughts</h2>
-                <div class="thoughts-log" id="thoughtsLog">
-                    <!-- Agent thoughts will appear here -->
-                </div>
-            </div>
-            
-            <div class="similar-chats-container">
-                <h2>Similar Past Chats</h2>
-                <div class="similar-chats-log" id="similarChatsLog">
-                    <!-- Similar chats will appear here -->
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <footer>
-        <p>&copy; 2024 AI Assistant. All rights reserved.</p>
+    <!-- 푸터 -->
+    <footer class="bg-dark text-white text-center py-3 mt-auto">
+        <p>© 2025 AI 도우미. 모든 권리 보유.</p>
     </footer>
 
+    <!-- Bootstrap 5 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         const chatMessages = document.getElementById('chatMessages');
         const userInput = document.getElementById('userInput');
         const sendButton = document.getElementById('sendButton');
         const personalStatementDraft = document.getElementById('personalStatementDraft');
         const thoughtsLog = document.getElementById('thoughtsLog');
-        const similarChatsLog = document.getElementById('similarChatsLog');
+        const savingIndicator = document.getElementById('savingIndicator');
 
-        // Auto-resize textarea
+        // 텍스트 입력창 자동 크기 조정
         userInput.addEventListener('input', () => {
             userInput.style.height = 'auto';
             userInput.style.height = (userInput.scrollHeight) + 'px';
         });
 
-        function addMessageToChat(role, content, isThought = false, isSimilarChat = false) {
+        // 초안 자동 저장
+        let draftSaveTimeout;
+        personalStatementDraft.addEventListener('input', () => {
+            savingIndicator.textContent = '저장 중...';
+            savingIndicator.classList.add('saving');
+            clearTimeout(draftSaveTimeout);
+            draftSaveTimeout = setTimeout(async () => {
+                try {
+                    await fetch('/save_draft', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ draft: personalStatementDraft.value }),
+                    });
+                    savingIndicator.textContent = '저장됨';
+                    savingIndicator.classList.remove('saving');
+                } catch (error) {
+                    console.error('초안 저장 오류:', error);
+                    savingIndicator.textContent = '저장 오류';
+                }
+            }, 1000);
+        });
+
+        // 접이식 섹션
+        function toggleCollapse(id) {
+            const element = document.getElementById(id);
+            element.classList.toggle('d-none');
+        }
+
+        // 섹션으로 스크롤 및 버튼 강조
+        function scrollToSection(id) {
+            const element = document.getElementById(id);
+            element.scrollIntoView({ behavior: 'smooth' });
+            const buttons = document.querySelectorAll('.function-bar .btn');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            const activeButton = Array.from(buttons).find(btn => btn.onclick.toString().includes(id));
+            if (activeButton) activeButton.classList.add('active');
+        }
+
+        function addMessageToChat(role, content, isThought = false) {
             const messageDiv = document.createElement('div');
             if (isThought) {
-                messageDiv.innerHTML = `<pre>${content}</pre>`; // Use pre for thoughts to keep formatting
+                messageDiv.innerHTML = `<pre class="small">${content}</pre>`;
                 thoughtsLog.appendChild(messageDiv);
                 thoughtsLog.scrollTop = thoughtsLog.scrollHeight;
-            } else if (isSimilarChat) {
-                const itemDiv = document.createElement('div');
-                itemDiv.classList.add('similar-chat-item');
-                itemDiv.innerHTML = `<span class="role">${role === 'user' ? 'You' : 'Assistant'}:</span> ${content}`;
-                similarChatsLog.appendChild(itemDiv);
-                similarChatsLog.scrollTop = similarChatsLog.scrollHeight;
             } else {
-                messageDiv.classList.add('message', role === 'user' ? 'user-message' : 'assistant-message');
-                // Sanitize content before setting innerHTML if it can contain HTML
-                // For now, assuming plain text or simple markdown that converts to text
-                messageDiv.textContent = content; 
+                messageDiv.classList.add('message', role === 'user' ? 'bg-primary-subtle' : 'bg-light', 'p-3', 'rounded', 'mb-2', role === 'user' ? 'ms-auto' : 'me-auto');
+                messageDiv.textContent = content;
                 chatMessages.appendChild(messageDiv);
                 chatMessages.scrollTop = chatMessages.scrollHeight;
             }
         }
-        
+
         async function fetchInitialState() {
             try {
                 const response = await fetch('/get_initial_state');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                if (!response.ok) throw new Error(`HTTP 오류! 상태: ${response.status}`);
                 const state = await response.json();
                 personalStatementDraft.value = state.personal_statement_draft || "";
                 if (state.chat_history && state.chat_history.length > 0) {
                     state.chat_history.forEach(msg => addMessageToChat(msg.role, msg.content));
                 } else {
-                    addMessageToChat('assistant', 'Welcome! How can I help you with your personal statement today?');
+                    addMessageToChat('assistant', '안녕하세요! 오늘 자기소개서를 어떻게 도와드릴까요?');
                 }
             } catch (error) {
-                console.error("Error fetching initial state:", error);
-                addMessageToChat('assistant', 'Error loading initial state. Please try refreshing.');
+                console.error("초기 상태 로드 오류:", error);
+                addMessageToChat('assistant', '초기 상태를 로드하는 데 오류가 발생했습니다. 새로고침을 시도해 주세요.');
             }
         }
 
@@ -325,55 +230,48 @@
             userInput.value = '';
             userInput.style.height = 'auto';
             sendButton.disabled = true;
-            sendButton.textContent = 'Sending...';
+            sendButton.textContent = '전송 중...';
+            sendButton.classList.add('opacity-50');
 
             try {
                 const response = await fetch('/chat', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         message: messageText,
                         personal_statement_draft: personalStatementDraft.value 
                     }),
                 });
 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
+                if (!response.ok) throw new Error(`HTTP 오류! 상태: ${response.status}`);
+
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = "";
                 let currentAssistantMessage = null;
 
-                // Clear previous similar chats and thoughts on new message
-                similarChatsLog.innerHTML = '';
-
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
-                    
+
                     buffer += decoder.decode(value, { stream: true });
-                    
-                    // Process buffer line by line
+
                     let boundary = buffer.indexOf('\n\n');
                     while (boundary !== -1) {
                         const line = buffer.substring(0, boundary).replace(/^data: /, '');
                         buffer = buffer.substring(boundary + 2);
-                        
+
                         if (line.trim()) {
                             try {
                                 const data = JSON.parse(line);
-                                
+
                                 if (data.type === 'token_chunk') {
                                     if (!currentAssistantMessage) {
                                         currentAssistantMessage = document.createElement('div');
-                                        currentAssistantMessage.classList.add('message', 'assistant-message');
+                                        currentAssistantMessage.classList.add('message', 'bg-light', 'p-3', 'rounded', 'mb-2', 'me-auto');
                                         chatMessages.appendChild(currentAssistantMessage);
                                     }
-                                    currentAssistantMessage.textContent += data.content; // Append content ONCE
+                                    currentAssistantMessage.textContent += data.content;
                                     chatMessages.scrollTop = chatMessages.scrollHeight;
                                 } else if (data.type === 'thought') {
                                     addMessageToChat(null, data.content, true);
@@ -383,48 +281,37 @@
                                             currentAssistantMessage.textContent = data.chat_response;
                                             currentAssistantMessage.dataset.finalized = "true";
                                         } else {
-                                            // If no currentAssistantMessage (e.g., very short response, no chunks)
                                             addMessageToChat('assistant', data.chat_response);
-                                            // Ensure the newly added message is marked finalized
-                                            let lastAddedMessage = chatMessages.querySelector('.assistant-message:last-child');
+                                            let lastAddedMessage = chatMessages.querySelector('.message:last-child');
                                             if (lastAddedMessage) lastAddedMessage.dataset.finalized = "true";
                                         }
-                                    } else if (currentAssistantMessage) {
-                                        // If no chat_response in final_response, but we had chunks, finalize the existing one
-                                        currentAssistantMessage.dataset.finalized = "true";
                                     }
-                                    currentAssistantMessage = null; // Reset for the next message stream
-
+                                    currentAssistantMessage = null;
                                     if (data.statement_suggestion) {
-                                        addMessageToChat('assistant', `Suggestion for your draft: "${data.statement_suggestion}" (You can copy this to your draft area if you like.)`);
+                                        addMessageToChat('assistant', `초안에 대한 제안: "${data.statement_suggestion}" (원하시면 초안 영역에 복사할 수 있습니다.)`);
                                     }
-                                    // Note: 'updated_draft' and 'similar_chats' are not currently sent by app.py's final_response
-                                    // If they were, data.updated_draft and data.similar_chats would be correct here.
                                 } else if (data.type === 'error') {
-                                    addMessageToChat('assistant', `Error: ${data.content}`);
+                                    addMessageToChat('assistant', `오류: ${data.content}`);
                                 } else if (data.type === 'stream_end') {
-                                    console.log("Stream ended.");
                                     if (currentAssistantMessage && !currentAssistantMessage.dataset.finalized) {
-                                        // If stream ends and the message wasn't finalized by a 'final_response'
                                         currentAssistantMessage.dataset.finalized = "true";
                                     }
-                                    currentAssistantMessage = null; // Reset for the next message stream
+                                    currentAssistantMessage = null;
                                 }
-
                             } catch (e) {
-                                console.error("Error parsing stream data:", e, "Data:", line);
+                                console.error("스트림 데이터 파싱 오류:", e, "데이터:", line);
                             }
                         }
                         boundary = buffer.indexOf('\n\n');
                     }
                 }
-
             } catch (error) {
-                console.error('Error sending message:', error);
-                addMessageToChat('assistant', 'Sorry, I encountered an error. Please try again.');
+                console.error('메시지 전송 오류:', error);
+                addMessageToChat('assistant', '죄송합니다, 오류가 발생했습니다. 다시 시도해 주세요.');
             } finally {
                 sendButton.disabled = false;
-                sendButton.textContent = 'Send';
+                sendButton.textContent = '보내기';
+                sendButton.classList.remove('opacity-50');
             }
         }
 
@@ -436,7 +323,6 @@
             }
         });
 
-        // Load initial state when the page loads
         document.addEventListener('DOMContentLoaded', fetchInitialState);
     </script>
 </body>
