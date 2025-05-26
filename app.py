@@ -162,7 +162,7 @@ class StreamingCallbackHandler(BaseCallbackHandler):
 # --- Flask Routes ---
 @app.route('/')
 def index():
-    return render_template('stylish_chat_interface.html') # Ensure this HTML file exists
+    return render_template('chatbot.html') # Ensure this HTML file exists
 
 @app.route('/chat', methods=['POST'])
 def chat():
