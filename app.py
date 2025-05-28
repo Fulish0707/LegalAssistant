@@ -8,6 +8,20 @@ import queue
 from langchain.callbacks.base import BaseCallbackHandler
 import os
 import sys
+from werkzeug.utils import secure_filename
+import tempfile
+from dotenv import load_dotenv
+import requests
+import sounddevice as sd
+import soundfile as sf
+
+# Assuming llm_ocr.py is in the same directory or accessible via PYTHONPATH
+import llm_ocr
+import llm_stt # Added for audio processing
+# Assuming the main prompt template and llm model can be accessed
+# This might require adjustments if langchain_config doesn't expose llm directly
+from llm_prompt import prompt as main_chat_prompt_template
+from langchain_config import llm # TRYING TO IMPORT LLM DIRECTLY
 
 # --- FAKE Langchain components REMOVED ---
 # Real components are now imported from langchain_config
@@ -162,7 +176,22 @@ class StreamingCallbackHandler(BaseCallbackHandler):
 # --- Flask Routes ---
 @app.route('/')
 def index():
-    return render_template('chatbot.html') # Ensure this HTML file exists
+    return render_template('chatbot.html')
+
+@app.route('/chatbot.html') # Explicit route for chatbot.html if users type it
+def chatbot_page_explicit():
+    return render_template('chatbot.html')
+
+@app.route('/document.html')
+def document_page():
+    return render_template('document.html')
+
+@app.route('/audio.html')
+def audio_page():
+    return render_template('audio.html')
+
+# Note: No route for video.html yet as it doesn't exist.
+# The link in chatbot.html for video should be updated.
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -359,6 +388,312 @@ def application_setup():
     # Add any other one-time initializations for the worker here
     print("--- Worker Process Setup Complete ---")
 
+# --- File Upload Configuration (Shared for OCR and STT) ---
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS_OCR = {'png', 'jpg', 'jpeg', 'txt', 'pdf', 'docx'}
+ALLOWED_EXTENSIONS_AUDIO = {'wav', 'mp3', 'ogg', 'flac', 'm4a', 'webm'} # Common audio formats
+
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+def allowed_file(filename, allowed_extensions):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in allowed_extensions
+
+# --- OCR Processing Route (Existing) ---
+@app.route('/process_document_ocr', methods=['POST'])
+def process_document_ocr():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    user_instructions = request.form.get('user_instructions', '')
+
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+
+    if file and allowed_file(file.filename, ALLOWED_EXTENSIONS_OCR):
+        filename = secure_filename(file.filename)
+        temp_file = tempfile.NamedTemporaryFile(delete=False, dir=app.config['UPLOAD_FOLDER'], suffix=os.path.splitext(filename)[1])
+        temp_file_path = temp_file.name
+        file.save(temp_file_path)
+        temp_file.close() # Close the file handle so OCR can open it if needed
+
+        extracted_text = ""
+        file_extension = filename.rsplit('.', 1)[1].lower()
+
+        try:
+            if file_extension in {'png', 'jpg', 'jpeg'}:
+                extracted_text = llm_ocr.detect_text(temp_file_path)
+            elif file_extension == 'txt':
+                with open(temp_file_path, 'r', encoding='utf-8') as f:
+                    extracted_text = f.read()
+            elif file_extension in {'pdf', 'docx'}:
+                # Placeholder: PDF/DOCX processing requires additional libraries
+                # For now, we'll return a message.
+                # In a real scenario, you'd integrate PyPDF2, python-docx, etc.
+                # and potentially convert to images for OCR if direct text extraction is poor.
+                os.remove(temp_file_path) # Clean up temp file
+                return jsonify({"error": f".{file_extension} processing not yet fully implemented. Requires dedicated libraries."}), 501
+
+            if not extracted_text.strip():
+                os.remove(temp_file_path) # Clean up temp file
+                return jsonify({"error": "Could not extract text from the document or the document is empty."}), 400
+
+            # Now, use the LLM to generate the report HTML
+            # We use the main_chat_prompt_template and format it for a report generation task
+            # The llm_prompt.py has specific instructions for [REPORT_SUGGESTION]
+            
+            # Construct a focused input for the LLM based on the OCR'd text and user instructions
+            # This is a simplified approach. The main prompt is complex.
+            # We need to simulate a "human" turn that triggers the report generation logic within the prompt.
+            report_generation_input = f"""Please generate a report based on the following document content and instructions.
+The document content is:
+--- DOCUMENT CONTENT START ---
+{extracted_text}
+--- DOCUMENT CONTENT END ---
+
+User instructions for the report:
+{user_instructions if user_instructions else "No specific instructions provided. Please generate a comprehensive summary and analysis."}
+
+The report should be in HTML format. If relevant, include diagrams or images as described in the system prompt (e.g., using HTML/CSS for simple diagrams, or base64 encoded images if you can generate them).
+Focus on clarity, logical structure, and engagement, suitable for bosses or business clients as per the system prompt's [REPORT_SUGGESTION] guidelines.
+"""
+            
+            # We need to invoke the LLM with the main system prompt and this constructed input.
+            # The main_chat_prompt_template is a ChatPromptTemplate.
+            # We'll use the 'llm' instance imported from langchain_config.
+            
+            # Create a message sequence for the ChatPromptTemplate
+            # The system prompt is already part of main_chat_prompt_template
+            # We add a human message with our constructed input.
+            # No chat_history is explicitly passed here, assuming a fresh interaction for report generation.
+            formatted_prompt_messages = main_chat_prompt_template.format_messages(
+                current_document_draft="", # Not relevant here or handled by user_instructions
+                retrieved_context="", # No RAG context for this specific flow yet
+                chat_history=[], # Fresh interaction for report generation
+                input=report_generation_input 
+            )
+            
+            # Invoke the LLM model directly with the formatted messages
+            ai_response = llm.invoke(formatted_prompt_messages)
+            
+            # The response from the LLM (ai_response) will be an AIMessage object.
+            # Its content should be the generated HTML report.
+            report_html = ai_response.content if hasattr(ai_response, 'content') else str(ai_response)
+
+            # Basic check if HTML was likely generated (very naive)
+            if not ("<html" in report_html.lower() or "<body" in report_html.lower() or "<div" in report_html.lower()):
+                 # If not, wrap it in basic HTML structure
+                 report_html = f"<html><head><title>Generated Report</title></head><body><pre>{report_html}</pre></body></html>"
+
+
+            os.remove(temp_file_path) # Clean up temp file
+            return jsonify({"report_html": report_html})
+
+        except Exception as e:
+            logging.exception("Error processing document for OCR report")
+            if os.path.exists(temp_file_path): # Ensure cleanup even on error
+                os.remove(temp_file_path)
+            return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+        finally:
+            # Ensure temp file is deleted if it still exists for some reason
+            if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                except Exception as e_clean:
+                    logging.error(f"Error cleaning up temp file {temp_file_path}: {e_clean}")
+    else:
+        return jsonify({"error": "File type not allowed for OCR"}), 400
+
+# --- New Audio Processing Routes ---
+def record_audio_to_file(filename="recorded_audio.wav", duration=5, samplerate=16000):
+    """
+    Records audio from the microphone and saves it to a WAV file.
+    """
+    print(f"Recording for {duration} seconds... Speak now!")
+    try:
+        recording = sd.rec(int(duration * samplerate), samplerate=samplerate, channels=1, dtype='float32')
+        sd.wait()
+        sf.write(filename, recording, samplerate)
+        print(f"Recording saved to {filename}")
+        return filename
+    except Exception as e:
+        print(f"Error during audio recording: {e}")
+        return None
+
+# Load environment variables
+load_dotenv()
+
+# Get Naver credentials
+NAVER_CLIENT_ID = os.getenv('client_id')
+NAVER_CLIENT_SECRET = os.getenv('client_secret')
+
+def process_audio_common(audio_file_path):
+    """
+    Transcribes and summarizes an audio file.
+    Returns a dictionary with 'transcript', 'summary', or 'error'.
+    """
+    transcript = ""
+    summary = ""
+    
+    if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
+        app.logger.error("Naver Cloud Platform credentials not found in .env file")
+        # Ensure this returns a structure the calling function can check for "error"
+        return {"error": "Naver Cloud Platform credentials not configured on server."}
+
+    # 1. Transcribe audio using Naver STT (from llm_stt.py logic)
+    lang = "Kor"
+    url = f"https://naveropenapi.apigw.ntruss.com/recog/v1/stt?lang={lang}"
+    try:
+        with open(audio_file_path, 'rb') as audio_data_file:
+            headers = {
+                "X-NCP-APIGW-API-KEY-ID": NAVER_CLIENT_ID,
+                "X-NCP-APIGW-API-KEY": NAVER_CLIENT_SECRET,
+                "Content-Type": "application/octet-stream" # Naver STT expects this for many formats
+            }
+            response = requests.post(url, data=audio_data_file, headers=headers)
+            rescode = response.status_code
+            
+            if rescode == 200:
+                result_json = response.json()
+                transcript = result_json.get('text', '')
+                app.logger.info(f"Naver STT successful: {transcript[:100]}...")
+            else:
+                app.logger.error(f"Naver STT API Error (HTTP {rescode}): {response.text}")
+                return {"error": f"Audio transcription failed with Naver STT (HTTP {rescode}): {response.text}", "transcript": ""}
+    except Exception as e:
+        app.logger.error(f"Exception during Naver STT call: {str(e)}")
+        return {"error": f"Exception during transcription: {str(e)}", "transcript": ""}
+
+    if not transcript.strip():
+        app.logger.info("Transcription is empty or audio was silent.")
+        return {"summary": "Audio appears to be silent or could not be transcribed.", "transcript": transcript}
+
+    # 2. Summarize transcript using LLM
+    try:
+        summarization_input_text = f"""Please summarize the following audio transcript concisely:
+--- TRANSCRIPT START ---
+{transcript}
+--- TRANSCRIPT END ---
+
+Provide a brief summary of the key points.
+"""
+        formatted_prompt_messages = main_chat_prompt_template.format_messages(
+            current_document_draft="", 
+            retrieved_context="", 
+            chat_history=[], 
+            input=summarization_input_text
+        )
+        
+        ai_response = llm.invoke(formatted_prompt_messages)
+        summary = ai_response.content if hasattr(ai_response, 'content') else str(ai_response)
+        app.logger.info(f"LLM summarization successful: {summary[:100]}...")
+        return {"transcript": transcript, "summary": summary}
+    except Exception as e:
+        app.logger.error(f"Exception during LLM summarization: {str(e)}")
+        return {"error": f"Error during summarization: {str(e)}", "transcript": transcript, "summary": ""}
+
+@app.route('/transcribe_and_summarize_audio_file', methods=['POST'])
+def transcribe_and_summarize_audio_file_route():
+    app.logger.info("Received request for /transcribe_and_summarize_audio_file")
+    if 'audio_file' not in request.files:
+        app.logger.warning("No 'audio_file' part in request.files")
+        return jsonify({"error": "No audio_file part"}), 400
+    
+    file = request.files['audio_file']
+    if file.filename == '':
+        app.logger.warning("No selected audio file (filename is empty)")
+        return jsonify({"error": "No selected audio file"}), 400
+
+    if file and allowed_file(file.filename, ALLOWED_EXTENSIONS_AUDIO):
+        filename = secure_filename(file.filename)
+        app.logger.info(f"Processing uploaded file: {filename}")
+        temp_file_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, dir=app.config['UPLOAD_FOLDER'], suffix=os.path.splitext(filename)[1]) as temp_file_obj:
+                temp_file_path = temp_file_obj.name
+                file.save(temp_file_obj)
+            # temp_file_obj is now closed, and file is saved at temp_file_path
+
+            result = process_audio_common(temp_file_path)
+            
+            # Check error from process_audio_common (which now returns a dict)
+            if result.get("error"):
+                status_code = 500
+                if "credentials not configured" in result["error"]:
+                    status_code = 400 # Or 503 Service Unavailable
+                elif "transcription failed" in result["error"].lower() or "naver stt api error" in result["error"].lower():
+                    status_code = 502 # Bad Gateway from STT provider
+                return jsonify(result), status_code
+            
+            return jsonify(result)
+            
+        except Exception as e:
+            app.logger.error(f"Exception in /transcribe_and_summarize_audio_file: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Server error during file processing: {str(e)}"}), 500
+        finally:
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.unlink(temp_file_path)
+                    app.logger.info(f"Cleaned up temp file: {temp_file_path}")
+                except Exception as e_clean:
+                    app.logger.error(f"Error cleaning up temp file {temp_file_path}: {e_clean}")
+    else:
+        app.logger.warning(f"Audio file type not allowed: {file.filename if file else 'Unknown'}")
+        return jsonify({"error": "Audio file type not allowed"}), 400
+
+
+@app.route('/transcribe_and_summarize_audio_blob', methods=['POST'])
+def transcribe_and_summarize_audio_blob_route():
+    app.logger.info(f"Received request for /transcribe_and_summarize_audio_blob. Headers: {request.headers}, Content-Type: {request.content_type}")
+    app.logger.info(f"Request.files: {list(request.files.keys())}")
+
+    if 'audio_blob' not in request.files:
+        app.logger.warning("No 'audio_blob' part in request.files for blob route.")
+        return jsonify({"error": "No audio_blob part"}), 400
+    
+    audio_blob = request.files['audio_blob']
+    
+    if not audio_blob.filename: # Check if filename is present and not empty
+        app.logger.warning("Audio blob has no filename or filename is empty.")
+        return jsonify({"error": "Audio blob has no filename"}), 400
+
+    filename = secure_filename(audio_blob.filename)
+    app.logger.info(f"Processing audio blob: {filename}")
+    temp_file_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, dir=app.config['UPLOAD_FOLDER'], suffix=os.path.splitext(filename)[1]) as temp_file_obj:
+            temp_file_path = temp_file_obj.name
+            audio_blob.save(temp_file_obj)
+        # temp_file_obj is now closed
+
+        result = process_audio_common(temp_file_path)
+        
+        if result.get("error"):
+            status_code = 500
+            if "credentials not configured" in result["error"]:
+                status_code = 400
+            elif "transcription failed" in result["error"].lower() or "naver stt api error" in result["error"].lower():
+                status_code = 502
+            return jsonify(result), status_code
+        
+        return jsonify(result)
+            
+    except Exception as e:
+        app.logger.error(f"Exception in /transcribe_and_summarize_audio_blob: {str(e)}", exc_info=True)
+        return jsonify({"error": f"Server error during blob processing: {str(e)}"}), 500
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.unlink(temp_file_path)
+                app.logger.info(f"Cleaned up temp blob file: {temp_file_path}")
+            except Exception as e_clean:
+                app.logger.error(f"Error cleaning up temp blob file {temp_file_path}: {e_clean}")
+
+# Removed the /record_and_transcribe route as it's not used by the current frontend
+# and llm_stt.py's record_audio_to_file is for fixed duration.
 
 if __name__ == '__main__':
     init_db() # Initialize the database

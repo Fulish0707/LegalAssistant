@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 도우미 - 문서</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 150px);
+            flex-grow: 1;
+        }
+        .chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+            padding: 1rem;
+            background-color: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+            min-height: 0;
+        }
+        .chat-input {
+            position: sticky;
+            bottom: 0;
+            background: #fff;
+            padding: 0.5rem;
+            border-top: 1px solid #dee2e6;
+        }
+        .message {
+            max-width: 85%;
+            margin-bottom: 0.75rem;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            animation: fadeIn 0.3s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .thoughts-log {
+            max-height: 150px;
+            overflow-y: auto;
+            padding: 0.75rem;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+        }
+        .saving-indicator.saving {
+            opacity: 1;
+        }
+        .function-bar .btn {
+            margin-right: 0.5rem;
+        }
+        .draft-container {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 300px);
+            flex-grow: 1;
+        }
+        .draft-container textarea {
+            flex-grow: 1;
+            min-height: 0;
+        }
+    </style>
+</head>
+<body>
+    <!-- 헤더 -->
+    <header class="bg-light border-bottom py-3">
+        <div class="container">
+            <h1 class="h2 mb-3">무엇을 도와줄까?</h1>
+            <div class="function-bar">
+                <a href="chatbot.html" class="btn btn-outline-primary"><i class="bi bi-chat"></i> 작성</a>
+                <button class="btn btn-primary active"><i class="bi bi-file-text"></i> 문서</button>
+                <a href="audio.html" class="btn btn-outline-primary"><i class="bi bi-mic"></i> 음성</a>
+                <a href="video.html" class="btn btn-outline-primary"><i class="bi bi-camera-reels"></i> 영상</a>
+            </div>
+        </div>
+    </header>
+
+    <!-- 메인 콘텐츠 -->
+    <main class="flex-grow-1 py-4">
+        <div class="container h-100 d-flex flex-column">
+            <div class="row flex-grow-1">
+                <div class="col-md-12 mb-4 d-flex flex-column">
+                    <div class="card flex-grow-1" id="document-content-area">
+                        <div class="card-body d-flex flex-column">
+                            <h2 class="card-title h5">문서 분석 및 보고서 생성</h2>
+                            
+                            <div class="mb-3">
+                                <label for="fileUpload" class="form-label">분석할 파일 선택:</label>
+                                <input class="form-control" type="file" id="fileUpload" accept=".pdf,.png,.jpg,.jpeg,.docx,.txt">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="userInstructions" class="form-label">보고서 세부 지시사항 (선택 사항):</label>
+                                <textarea class="form-control" id="userInstructions" rows="3" placeholder="예: 이 문서에서 주요 재무 수치를 요약하고 표 형태로 제시해주세요. 또는 특정 주제에 대한 분석을 요청할 수 있습니다. 이 지시사항은 llm_prompt.py의 기본 프롬프트와 함께 사용됩니다."></textarea>
+                            </div>
+                            
+                            <button class="btn btn-primary mb-3" id="generateReportButton"><i class="bi bi-gear-fill"></i> 보고서 생성 시작</button>
+                            
+                            <hr>
+                            
+                            <h3 class="h5 mt-3 d-flex justify-content-between align-items-center">
+                                생성된 보고서
+                                <button class="btn btn-success btn-sm d-none" id="downloadReportButton"><i class="bi bi-download"></i> 다운로드</button>
+                            </h3>
+                            <div id="reportOutput" class="flex-grow-1 p-3" style="background-color: #e9ecef; border: 1px solid #ced4da; border-radius: 0.25rem; min-height: 300px; overflow-y: auto;">
+                                <p class="text-muted">보고서가 여기에 표시됩니다...</p>
+                                <!-- Images and diagrams will be rendered here as HTML -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Bootstrap 5 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log("Document page loaded with OCR features.");
+
+            const fileUpload = document.getElementById('fileUpload');
+            const userInstructionsInput = document.getElementById('userInstructions');
+            const generateReportButton = document.getElementById('generateReportButton');
+            const reportOutput = document.getElementById('reportOutput');
+            const downloadReportButton = document.getElementById('downloadReportButton');
+            let generatedReportHtmlContent = null; // To store the HTML report content for display and download
+
+            generateReportButton.addEventListener('click', async () => {
+                const file = fileUpload.files[0];
+                const userInstructions = userInstructionsInput.value.trim(); // This is the user's specific request for this report
+
+                if (!file) {
+                    alert('분석할 파일을 선택해주세요.');
+                    return;
+                }
+                // User instructions are optional, so no check for emptiness.
+
+                reportOutput.innerHTML = '<div class="d-flex align-items-center"><strong role="status">보고서 생성 중...</strong><div class="spinner-border ms-auto" aria-hidden="true"></div></div>';
+                generateReportButton.disabled = true;
+                downloadReportButton.classList.add('d-none');
+
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('user_instructions', userInstructions); // Pass user instructions to backend
+
+                try {
+                    // Endpoint to be implemented in app.py
+                    // This endpoint will use llm_ocr.py, which internally uses the prompt from llm_prompt.py
+                    // and incorporates the 'user_instructions'.
+                    const response = await fetch('/process_document_ocr', {
+                        method: 'POST',
+                        body: formData, 
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({ detail: '서버 응답 처리 중 오류 발생' }));
+                        throw new Error(`보고서 생성 실패 (HTTP ${response.status}): ${errorData.detail || response.statusText}`);
+                    }
+
+                    const result = await response.json(); // Expecting { report_html: "...", ... } or { error: "..." }
+                    
+                    if (result.error) {
+                        reportOutput.innerHTML = `<p class="text-danger"><strong>오류:</strong> ${result.error}</p>`;
+                        generatedReportHtmlContent = null;
+                    } else if (result.report_html) {
+                        reportOutput.innerHTML = result.report_html; 
+                        generatedReportHtmlContent = result.report_html; 
+                        downloadReportButton.classList.remove('d-none');
+                    } else {
+                        reportOutput.innerHTML = `<p class="text-warning">보고서 내용을 받지 못했습니다. 서버 응답을 확인해주세요.</p>`;
+                        generatedReportHtmlContent = null;
+                    }
+
+                } catch (error) {
+                    console.error('Error generating report:', error);
+                    reportOutput.innerHTML = `<p class="text-danger"><strong>보고서 생성 중 클라이언트 측 오류:</strong> ${error.message}</p>`;
+                    generatedReportHtmlContent = null;
+                } finally {
+                    generateReportButton.disabled = false;
+                }
+            });
+
+            downloadReportButton.addEventListener('click', () => {
+                if (generatedReportHtmlContent) {
+                    // Download as an HTML file. For other formats (PDF, DOCX), server-side conversion would be needed.
+                    const blob = new Blob([generatedReportHtmlContent], { type: 'text/html;charset=utf-8' });
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    const fileName = (fileUpload.files[0] ? fileUpload.files[0].name.split('.')[0] : 'generated') + '_report.html';
+                    link.download = fileName;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(link.href);
+                } else {
+                    alert('다운로드할 보고서 내용이 없습니다.');
+                }
+            });
+
+            fileUpload.addEventListener('change', () => {
+                // Reset report output and download button when a new file is selected
+                reportOutput.innerHTML = '<p class="text-muted">보고서가 여기에 표시됩니다...</p>';
+                downloadReportButton.classList.add('d-none');
+                generatedReportHtmlContent = null;
+                if (fileUpload.files[0]) {
+                    console.log(`File selected: ${fileUpload.files[0].name}`);
+                }
+            });
+            
+            console.log("Event listeners for OCR page set up.");
+        });
+    </script>
+</body>
+</html>

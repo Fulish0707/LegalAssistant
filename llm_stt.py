@@ -1,15 +1,22 @@
 # stt_utils.py
 
-from google.cloud import speech
+import requests
+import json
+import time
 import sounddevice as sd
 import soundfile as sf
 import os
-import numpy as np
-import time
+import hmac
+import hashlib
+import base64
+from dotenv import load_dotenv
 
-# Ensure you have authenticated with Google Cloud:
-# gcloud auth application-default login
-# And enabled the Cloud Speech-to-Text API in your GCP project.
+# Load environment variables
+load_dotenv()
+
+# Get credentials from .env
+NAVER_CLIENT_ID = os.getenv('client_id')
+NAVER_CLIENT_SECRET = os.getenv('client_secret')
 
 def record_audio_to_file(filename="recorded_audio.wav", duration=5, samplerate=16000):
     """
@@ -40,62 +47,50 @@ def record_audio_to_file(filename="recorded_audio.wav", duration=5, samplerate=1
         print("  Debian/Ubuntu: `sudo apt-get install libportaudio2`")
         return None
 
-def transcribe_audio_file(audio_file_path, language_code="ko-KR", sample_rate_hertz=16000):
+def transcribe_audio_file(audio_file_path, language="Kor"):
     """
-    Transcribes audio from a file using Google Cloud Speech-to-Text.
+    Transcribes audio using Naver Clova Speech Recognition.
     
     Args:
-        audio_file_path (str): The path to the audio file to transcribe.
-        language_code (str): The BCP-47 language tag for the audio (e.g., "en-US", "ko-KR").
-        sample_rate_hertz (int): The sample rate of the audio file in Hertz.
-                                 Must match the rate used during recording.
-    Returns:
-        str or None: The transcribed text if successful, None otherwise.
+        audio_file_path (str): Path to the audio file
+        language (str): Language code (default: ko-KR)
     """
-    client = speech.SpeechClient()
-
-    if not os.path.exists(audio_file_path):
-        print(f"Error: Audio file not found at {audio_file_path}")
-        return None
-
-    with open(audio_file_path, "rb") as audio_file:
-        content = audio_file.read()
-
-    audio = speech.RecognitionAudio(content=content)
-    config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-        sample_rate_hertz=sample_rate_hertz,
-        language_code=language_code,
-        # enable_automatic_punctuation=True, # Uncomment for automatic punctuation
-    )
-
-    print("Transcribing audio...")
-    try:
-        response = client.recognize(config=config, audio=audio)
-        transcript = ""
-        for result in response.results:
-            transcript += result.alternatives[0].transcript
-        print(f"Transcription: {transcript}")
-        return transcript
-    except Exception as e:
-        print(f"Error during transcription: {e}")
-        return None
+    url = f"https://naveropenapi.apigw.ntruss.com/recog/v1/stt?lang={language}"
+    
+    with open(audio_file_path, 'rb') as data:
+        headers = {
+            "X-NCP-APIGW-API-KEY-ID": NAVER_CLIENT_ID,
+            "X-NCP-APIGW-API-KEY": NAVER_CLIENT_SECRET,
+            "Content-Type": "application/octet-stream"
+        }
+        
+        response = requests.post(url, data=data, headers=headers)
+        rescode = response.status_code
+        
+        if rescode == 200:
+            result = response.json()
+            return result.get('text', '')
+        else:
+            print("Error: " + response.text)
+            return None
 
 # You can add a combined function for convenience
-def get_speech_input(duration=7, language_code="ko-KR", temp_audio_file="temp_recorded_audio.wav"):
+def get_speech_input(duration=7, language="Kor", temp_audio_file="temp_recorded_audio.wav"):
     """
-    Records audio and transcribes it, returning the text.
+    Records audio and transcribes it using Naver Clova Speech Recognition.
     
     Args:
-        duration (int): Duration of recording in seconds.
-        language_code (str): Language for transcription.
-        temp_audio_file (str): Temporary file to save audio.
-    Returns:
-        str or None: Transcribed text or None if failed.
+        duration (int): Duration of recording in seconds
+        language (str): Language code
+        temp_audio_file (str): Temporary file to save audio
     """
+    if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
+        print("Error: Naver Cloud Platform credentials not found in .env file")
+        return None
+        
     audio_path = record_audio_to_file(temp_audio_file, duration=duration)
     if audio_path:
-        transcript = transcribe_audio_file(audio_path, language_code=language_code)
+        transcript = transcribe_audio_file(audio_path, language)
         # Clean up the temporary audio file
         if os.path.exists(audio_path):
             os.remove(audio_path)
@@ -122,8 +117,14 @@ def get_speech_input_from_microphone(duration=7, language_code="ko-KR", temp_aud
     return None
         
 
-transcribed_text = get_speech_input(duration=5, language_code="ko-KR")
-if transcribed_text:
-    print(f"\nFinal Transcribed Text: '{transcribed_text}'")
-else:
-    print("\nSpeech-to-Text failed.")
+if __name__ == "__main__":
+    # This block will only execute when the script is run directly,
+    # not when it's imported as a module.
+    print("Running llm_stt.py as a standalone script for testing...")
+    
+    transcribed_text = get_speech_input(duration=5, language="Kor")
+    
+    if transcribed_text:
+        print(f"\nFinal Transcribed Text: '{transcribed_text}'")
+    else:
+        print("\nSpeech-to-Text failed.")
