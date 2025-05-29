@@ -1,5 +1,3 @@
-# stt_utils.py
-
 import requests
 import json
 import time
