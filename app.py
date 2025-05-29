@@ -18,15 +18,11 @@ import soundfile as sf
 # Assuming llm_ocr.py is in the same directory or accessible via PYTHONPATH
 import llm_ocr
 import llm_stt # Added for audio processing
-import PyPDF2
-import docx # for python-docx
+
 # Assuming the main prompt template and llm model can be accessed
 # This might require adjustments if langchain_config doesn't expose llm directly
 from llm_prompt import prompt as main_chat_prompt_template
 from langchain_config import llm # TRYING TO IMPORT LLM DIRECTLY
-
-# --- FAKE Langchain components REMOVED ---
-# Real components are now imported from langchain_config
 
 # Disable Flask's default request logging for cleaner output if not needed
 log = logging.getLogger('werkzeug')
@@ -432,98 +428,25 @@ def process_document_ocr():
             file.save(temp_file_obj) # Save the uploaded file object to the temp file
 
         # At this point, temp_file_obj is closed, and the file is saved at temp_file_path
-
-        extracted_text = ""
         file_extension = filename.rsplit('.', 1)[1].lower()
 
-        if file_extension in {'png', 'jpg', 'jpeg'}:
-            extracted_text = llm_ocr.detect_text(temp_file_path)
-        elif file_extension == 'txt':
-            with open(temp_file_path, 'r', encoding='utf-8') as f:
-                extracted_text = f.read()
-        elif file_extension == 'pdf':
-            try:
-                with open(temp_file_path, 'rb') as pdf_file_obj:
-                    reader = PyPDF2.PdfReader(pdf_file_obj)
-                    text_parts = []
-                    if not reader.pages: # Check if there are any pages
-                        app.logger.warning(f"PDF file {filename} has no pages.")
-                    for page_num, page in enumerate(reader.pages):
-                        page_text = page.extract_text()
-                        if page_text:
-                            text_parts.append(page_text)
-                    extracted_text = "\n".join(text_parts)
-                if not extracted_text.strip() and reader.pages: # If pages exist but no text extracted
-                     app.logger.warning(f"No text extracted from PDF {filename}. It might be image-based, scanned, or protected.")
-            except PyPDF2.errors.PdfReadError as e_pdf_read:
-                app.logger.error(f"PyPDF2 could not read PDF {filename}: {e_pdf_read}")
-                return jsonify({"error": f"Invalid or corrupted PDF file: {filename}. Error: {str(e_pdf_read)}"}), 400
-            except ImportError: 
-                app.logger.error("PyPDF2 library is not installed for PDF processing.")
-                return jsonify({"error": "PDF processing library (PyPDF2) not available on server."}), 501
-            except Exception as e_pdf:
-                app.logger.error(f"Error processing PDF {filename}: {e_pdf}", exc_info=True)
-                return jsonify({"error": f"Failed to extract text from PDF '{filename}': {str(e_pdf)}"}), 500
-        elif file_extension == 'docx':
-            try:
-                doc_obj = docx.Document(temp_file_path)
-                text_parts = [para.text for para in doc_obj.paragraphs if para.text]
-                extracted_text = "\n".join(text_parts)
-                if not extracted_text.strip() and doc_obj.paragraphs:
-                    app.logger.warning(f"No text extracted from DOCX {filename}, though it has paragraphs. Content might be non-textual.")
-            except ImportError: 
-                app.logger.error("python-docx library is not installed for DOCX processing.")
-                return jsonify({"error": "DOCX processing library (python-docx) not available on server."}), 501
-            except Exception as e_docx: 
-                app.logger.error(f"Error processing DOCX {filename}: {e_docx}", exc_info=True)
-                return jsonify({"error": f"Failed to extract text from DOCX '{filename}': {str(e_docx)}"}), 500
-        
-        # Central check for extracted text after all processing attempts
-        if not extracted_text.strip():
-            app.logger.warning(f"Could not extract text from '{filename}' or the document is empty/non-textual after processing.")
-            return jsonify({"error": "Could not extract text from the document, or the document is empty/non-textual."}), 400
-
-        # --- LLM Processing ---
-        report_generation_input = f"""Please generate a report based on the following document content and instructions.
-The document content is:
---- DOCUMENT CONTENT START ---
-{extracted_text}
---- DOCUMENT CONTENT END ---
-
-User instructions for the report:
-{user_instructions if user_instructions else "No specific instructions provided. Please generate a comprehensive summary and analysis."}
-
-The report should be in HTML format. If relevant, include diagrams or images as described in the system prompt (e.g., using HTML/CSS for simple diagrams, or base64 encoded images if you can generate them).
-Focus on clarity, logical structure, and engagement, suitable for bosses or business clients as per the system prompt's [REPORT_SUGGESTION] guidelines.
-
-Please write the report in Korean.
-The final output should be only the HTML report content, without any preliminary remarks, thoughts, or chat-like prefixes.
-"""
-        
-        formatted_prompt_messages = main_chat_prompt_template.format_messages(
-            current_document_draft="", 
-            retrieved_context="", 
-            chat_history=[], 
-            input=report_generation_input 
+        # Call the refactored function in llm_ocr.py
+        result_dict, status_code = llm_ocr.generate_report_from_document(
+            file_path=temp_file_path,
+            file_extension=file_extension,
+            user_instructions=user_instructions,
+            llm=llm, # Passed from app.py's imports
+            prompt_template=main_chat_prompt_template, # Passed from app.py's imports
+            logger=app.logger # Pass Flask app's logger
         )
         
-        ai_response = llm.invoke(formatted_prompt_messages)
-        report_html = ai_response.content if hasattr(ai_response, 'content') else str(ai_response)
-
-        # Post-process to remove unwanted markers
-        # Simple string replacement; for more complex patterns, consider regex
-        report_html = report_html.replace("Thought:", "").strip()
-        report_html = report_html.replace("[chat]", "").strip()
-        # Add more replacements if other variations of "thought" or unwanted markers appear
-
-        if not ("<html" in report_html.lower() or "<body" in report_html.lower() or "<div" in report_html.lower()):
-             report_html = f"<html><head><title>Generated Report</title></head><body><pre>{report_html}</pre></body></html>"
-        
-        return jsonify({"report_html": report_html})
+        return jsonify(result_dict), status_code
 
     except Exception as e:
-        app.logger.error(f"Unhandled error in process_document_ocr for {filename if 'filename' in locals() else 'unknown file'}: {str(e)}", exc_info=True)
-        return jsonify({"error": f"An unexpected server error occurred: {str(e)}"}), 500
+        # This catch block is for errors during file handling in app.py itself, 
+        # before calling generate_report_from_document.
+        app.logger.error(f"Unhandled error in process_document_ocr (file handling stage) for {filename if 'filename' in locals() else 'unknown file'}: {str(e)}", exc_info=True)
+        return jsonify({"error": f"An unexpected server error occurred during file preparation: {str(e)}"}), 500
     finally:
         # Cleanup the temporary file
         if temp_file_path and os.path.exists(temp_file_path):
@@ -603,12 +526,12 @@ def process_audio_common(audio_file_path):
     # 2. Summarize transcript using LLM
     try:
         summarization_input_text = f"""Please summarize the following audio transcript concisely:
---- TRANSCRIPT START ---
-{transcript}
---- TRANSCRIPT END ---
+        --- TRANSCRIPT START ---
+        {transcript}
+        --- TRANSCRIPT END ---
 
-Provide a brief summary of the key points.
-"""
+        Provide a brief summary of the key points in Korean.
+        """
         formatted_prompt_messages = main_chat_prompt_template.format_messages(
             current_document_draft="", 
             retrieved_context="", 
