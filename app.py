@@ -18,6 +18,8 @@ import soundfile as sf
 # Assuming llm_ocr.py is in the same directory or accessible via PYTHONPATH
 import llm_ocr
 import llm_stt # Added for audio processing
+import PyPDF2
+import docx # for python-docx
 # Assuming the main prompt template and llm model can be accessed
 # This might require adjustments if langchain_config doesn't expose llm directly
 from llm_prompt import prompt as main_chat_prompt_template
@@ -388,7 +390,9 @@ def application_setup():
     # Add any other one-time initializations for the worker here
     print("--- Worker Process Setup Complete ---")
 
-# --- File Upload Configuration (Shared for OCR and STT) ---
+##############################################################
+# --- File Upload Configuration (Shared for OCR and STT) --- #
+##############################################################
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS_OCR = {'png', 'jpg', 'jpeg', 'txt', 'pdf', 'docx'}
 ALLOWED_EXTENSIONS_AUDIO = {'wav', 'mp3', 'ogg', 'flac', 'm4a', 'webm'} # Common audio formats
@@ -413,42 +417,74 @@ def process_document_ocr():
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
 
-    if file and allowed_file(file.filename, ALLOWED_EXTENSIONS_OCR):
-        filename = secure_filename(file.filename)
-        temp_file = tempfile.NamedTemporaryFile(delete=False, dir=app.config['UPLOAD_FOLDER'], suffix=os.path.splitext(filename)[1])
-        temp_file_path = temp_file.name
-        file.save(temp_file_path)
-        temp_file.close() # Close the file handle so OCR can open it if needed
+    if not allowed_file(file.filename, ALLOWED_EXTENSIONS_OCR):
+        return jsonify({"error": "File type not allowed for OCR"}), 400
+
+    filename = secure_filename(file.filename)
+    temp_file_path = None  # Initialize to ensure it's defined for the finally block
+
+    try:
+        # Create a temporary file to save the upload
+        # Using 'with' ensures the file handle is closed even if errors occur during creation/saving
+        with tempfile.NamedTemporaryFile(delete=False, dir=app.config['UPLOAD_FOLDER'], 
+                                         suffix=os.path.splitext(filename)[1]) as temp_file_obj:
+            temp_file_path = temp_file_obj.name
+            file.save(temp_file_obj) # Save the uploaded file object to the temp file
+
+        # At this point, temp_file_obj is closed, and the file is saved at temp_file_path
 
         extracted_text = ""
         file_extension = filename.rsplit('.', 1)[1].lower()
 
-        try:
-            if file_extension in {'png', 'jpg', 'jpeg'}:
-                extracted_text = llm_ocr.detect_text(temp_file_path)
-            elif file_extension == 'txt':
-                with open(temp_file_path, 'r', encoding='utf-8') as f:
-                    extracted_text = f.read()
-            elif file_extension in {'pdf', 'docx'}:
-                # Placeholder: PDF/DOCX processing requires additional libraries
-                # For now, we'll return a message.
-                # In a real scenario, you'd integrate PyPDF2, python-docx, etc.
-                # and potentially convert to images for OCR if direct text extraction is poor.
-                os.remove(temp_file_path) # Clean up temp file
-                return jsonify({"error": f".{file_extension} processing not yet fully implemented. Requires dedicated libraries."}), 501
+        if file_extension in {'png', 'jpg', 'jpeg'}:
+            extracted_text = llm_ocr.detect_text(temp_file_path)
+        elif file_extension == 'txt':
+            with open(temp_file_path, 'r', encoding='utf-8') as f:
+                extracted_text = f.read()
+        elif file_extension == 'pdf':
+            try:
+                with open(temp_file_path, 'rb') as pdf_file_obj:
+                    reader = PyPDF2.PdfReader(pdf_file_obj)
+                    text_parts = []
+                    if not reader.pages: # Check if there are any pages
+                        app.logger.warning(f"PDF file {filename} has no pages.")
+                    for page_num, page in enumerate(reader.pages):
+                        page_text = page.extract_text()
+                        if page_text:
+                            text_parts.append(page_text)
+                    extracted_text = "\n".join(text_parts)
+                if not extracted_text.strip() and reader.pages: # If pages exist but no text extracted
+                     app.logger.warning(f"No text extracted from PDF {filename}. It might be image-based, scanned, or protected.")
+            except PyPDF2.errors.PdfReadError as e_pdf_read:
+                app.logger.error(f"PyPDF2 could not read PDF {filename}: {e_pdf_read}")
+                return jsonify({"error": f"Invalid or corrupted PDF file: {filename}. Error: {str(e_pdf_read)}"}), 400
+            except ImportError: 
+                app.logger.error("PyPDF2 library is not installed for PDF processing.")
+                return jsonify({"error": "PDF processing library (PyPDF2) not available on server."}), 501
+            except Exception as e_pdf:
+                app.logger.error(f"Error processing PDF {filename}: {e_pdf}", exc_info=True)
+                return jsonify({"error": f"Failed to extract text from PDF '{filename}': {str(e_pdf)}"}), 500
+        elif file_extension == 'docx':
+            try:
+                doc_obj = docx.Document(temp_file_path)
+                text_parts = [para.text for para in doc_obj.paragraphs if para.text]
+                extracted_text = "\n".join(text_parts)
+                if not extracted_text.strip() and doc_obj.paragraphs:
+                    app.logger.warning(f"No text extracted from DOCX {filename}, though it has paragraphs. Content might be non-textual.")
+            except ImportError: 
+                app.logger.error("python-docx library is not installed for DOCX processing.")
+                return jsonify({"error": "DOCX processing library (python-docx) not available on server."}), 501
+            except Exception as e_docx: 
+                app.logger.error(f"Error processing DOCX {filename}: {e_docx}", exc_info=True)
+                return jsonify({"error": f"Failed to extract text from DOCX '{filename}': {str(e_docx)}"}), 500
+        
+        # Central check for extracted text after all processing attempts
+        if not extracted_text.strip():
+            app.logger.warning(f"Could not extract text from '{filename}' or the document is empty/non-textual after processing.")
+            return jsonify({"error": "Could not extract text from the document, or the document is empty/non-textual."}), 400
 
-            if not extracted_text.strip():
-                os.remove(temp_file_path) # Clean up temp file
-                return jsonify({"error": "Could not extract text from the document or the document is empty."}), 400
-
-            # Now, use the LLM to generate the report HTML
-            # We use the main_chat_prompt_template and format it for a report generation task
-            # The llm_prompt.py has specific instructions for [REPORT_SUGGESTION]
-            
-            # Construct a focused input for the LLM based on the OCR'd text and user instructions
-            # This is a simplified approach. The main prompt is complex.
-            # We need to simulate a "human" turn that triggers the report generation logic within the prompt.
-            report_generation_input = f"""Please generate a report based on the following document content and instructions.
+        # --- LLM Processing ---
+        report_generation_input = f"""Please generate a report based on the following document content and instructions.
 The document content is:
 --- DOCUMENT CONTENT START ---
 {extracted_text}
@@ -459,55 +495,48 @@ User instructions for the report:
 
 The report should be in HTML format. If relevant, include diagrams or images as described in the system prompt (e.g., using HTML/CSS for simple diagrams, or base64 encoded images if you can generate them).
 Focus on clarity, logical structure, and engagement, suitable for bosses or business clients as per the system prompt's [REPORT_SUGGESTION] guidelines.
+
+Please write the report in Korean.
+The final output should be only the HTML report content, without any preliminary remarks, thoughts, or chat-like prefixes.
 """
-            
-            # We need to invoke the LLM with the main system prompt and this constructed input.
-            # The main_chat_prompt_template is a ChatPromptTemplate.
-            # We'll use the 'llm' instance imported from langchain_config.
-            
-            # Create a message sequence for the ChatPromptTemplate
-            # The system prompt is already part of main_chat_prompt_template
-            # We add a human message with our constructed input.
-            # No chat_history is explicitly passed here, assuming a fresh interaction for report generation.
-            formatted_prompt_messages = main_chat_prompt_template.format_messages(
-                current_document_draft="", # Not relevant here or handled by user_instructions
-                retrieved_context="", # No RAG context for this specific flow yet
-                chat_history=[], # Fresh interaction for report generation
-                input=report_generation_input 
-            )
-            
-            # Invoke the LLM model directly with the formatted messages
-            ai_response = llm.invoke(formatted_prompt_messages)
-            
-            # The response from the LLM (ai_response) will be an AIMessage object.
-            # Its content should be the generated HTML report.
-            report_html = ai_response.content if hasattr(ai_response, 'content') else str(ai_response)
+        
+        formatted_prompt_messages = main_chat_prompt_template.format_messages(
+            current_document_draft="", 
+            retrieved_context="", 
+            chat_history=[], 
+            input=report_generation_input 
+        )
+        
+        ai_response = llm.invoke(formatted_prompt_messages)
+        report_html = ai_response.content if hasattr(ai_response, 'content') else str(ai_response)
 
-            # Basic check if HTML was likely generated (very naive)
-            if not ("<html" in report_html.lower() or "<body" in report_html.lower() or "<div" in report_html.lower()):
-                 # If not, wrap it in basic HTML structure
-                 report_html = f"<html><head><title>Generated Report</title></head><body><pre>{report_html}</pre></body></html>"
+        # Post-process to remove unwanted markers
+        # Simple string replacement; for more complex patterns, consider regex
+        report_html = report_html.replace("Thought:", "").strip()
+        report_html = report_html.replace("[chat]", "").strip()
+        # Add more replacements if other variations of "thought" or unwanted markers appear
 
+        if not ("<html" in report_html.lower() or "<body" in report_html.lower() or "<div" in report_html.lower()):
+             report_html = f"<html><head><title>Generated Report</title></head><body><pre>{report_html}</pre></body></html>"
+        
+        return jsonify({"report_html": report_html})
 
-            os.remove(temp_file_path) # Clean up temp file
-            return jsonify({"report_html": report_html})
-
-        except Exception as e:
-            logging.exception("Error processing document for OCR report")
-            if os.path.exists(temp_file_path): # Ensure cleanup even on error
+    except Exception as e:
+        app.logger.error(f"Unhandled error in process_document_ocr for {filename if 'filename' in locals() else 'unknown file'}: {str(e)}", exc_info=True)
+        return jsonify({"error": f"An unexpected server error occurred: {str(e)}"}), 500
+    finally:
+        # Cleanup the temporary file
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
                 os.remove(temp_file_path)
-            return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-        finally:
-            # Ensure temp file is deleted if it still exists for some reason
-            if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-                try:
-                    os.remove(temp_file_path)
-                except Exception as e_clean:
-                    logging.error(f"Error cleaning up temp file {temp_file_path}: {e_clean}")
-    else:
-        return jsonify({"error": "File type not allowed for OCR"}), 400
+                app.logger.info(f"Cleaned up temp file: {temp_file_path}")
+            except Exception as e_clean:
+                app.logger.error(f"Error cleaning up temp file {temp_file_path}: {e_clean}")
 
-# --- New Audio Processing Routes ---
+#######################################
+# --- New Audio Processing Routes --- #
+#######################################
+
 def record_audio_to_file(filename="recorded_audio.wav", duration=5, samplerate=16000):
     """
     Records audio from the microphone and saves it to a WAV file.
