@@ -221,11 +221,16 @@
         const savingIndicator = document.getElementById('savingIndicator');
         const thoughtsHeader = document.getElementById('thoughtsHeader');
 
+        let tempMessageDiv = null; // token_chunk 누적용
+        let source = null; // 단일 EventSource 재사용
+
+        // 자동 높이 조정
         userInput.addEventListener('input', () => {
             userInput.style.height = 'auto';
-            userInput.style.height = (userInput.scrollHeight) + 'px';
+            userInput.style.height = `${userInput.scrollHeight}px`;
         });
 
+        // 드래프트 저장
         let draftSaveTimeout;
         personalStatementDraft.addEventListener('input', () => {
             savingIndicator.textContent = '저장 중...';
@@ -233,7 +238,7 @@
             clearTimeout(draftSaveTimeout);
             draftSaveTimeout = setTimeout(async () => {
                 try {
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    await new Promise(resolve => setTimeout(resolve, 500)); // 모의 저장
                     savingIndicator.textContent = '저장됨';
                     savingIndicator.classList.remove('saving');
                 } catch (error) {
@@ -243,42 +248,60 @@
             }, 1000);
         });
 
+        // 토글 기능
         function toggleCollapse(targetId, buttonElement) {
             const targetElement = document.getElementById(targetId);
             if (!targetElement || !buttonElement) return;
-
             targetElement.classList.toggle('d-none');
             const isHidden = targetElement.classList.contains('d-none');
             buttonElement.setAttribute('aria-expanded', !isHidden);
             targetElement.setAttribute('aria-hidden', isHidden);
         }
 
+        // 메시지 추가
         function addMessage(role, content, isThought = false) {
             const messageDiv = document.createElement('div');
-            if (isThought) {
+            if (isThought && !content.startsWith('AI: ')) {
+                // thought 메시지이지만 AI: 로 시작하지 않으면 thoughtsLog에 추가
+                if (thoughtsLog.classList.contains('d-none')) {
+                    toggleCollapse('thoughtsLog', thoughtsHeader); // thoughtsLog 표시
+                }
                 const preElement = document.createElement('pre');
                 preElement.classList.add('small', 'mb-0');
                 preElement.textContent = content;
                 messageDiv.appendChild(preElement);
                 thoughtsLog.appendChild(messageDiv);
                 thoughtsLog.scrollTop = thoughtsLog.scrollHeight;
+                console.log('Thought added to thoughtsLog:', content); // 디버깅
             } else {
-                messageDiv.classList.add('message', role === 'user' ? 'bg-primary-subtle' : 'bg-light', 'p-2', 'rounded', 'mb-2', role === 'user' ? 'ms-auto' : 'me-auto');
-                messageDiv.textContent = content;
-                chatMessages.appendChild(messageDiv);
-                chatMessages.scrollTop = chatMessages.scrollHeight;
+                // AI: 로 시작하는 thought 또는 다른 메시지는 chatMessages에 추가
+                const finalContent = content.startsWith('AI: ') ? content.slice(4).trim() : content; // AI: 접두어 제거
+                if (role === 'assistant' && tempMessageDiv) {
+                    tempMessageDiv.textContent += finalContent; // token_chunk 누적
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                } else {
+                    messageDiv.classList.add('message', role === 'user' ? 'bg-primary-subtle' : 'bg-light', 'p-2', 'rounded', 'mb-2', role === 'user' ? 'ms-auto' : 'me-auto');
+                    messageDiv.textContent = finalContent;
+                    chatMessages.appendChild(messageDiv);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                    if (role === 'assistant') tempMessageDiv = messageDiv; // 새 assistant 메시지 시작
+                    else tempMessageDiv = null; // user 메시지 후 초기화
+                }
+                console.log(`${role || 'thought'} message added to chatMessages:`, finalContent); // 디버깅
             }
         }
 
+        // 초기 상태 로드
         async function fetchInitialState() {
             try {
                 addMessage('assistant', '안녕하세요! 어떻게 도와드릴까요?');
             } catch (error) {
-                console.error("초기 상태 로드 오류:", error);
+                console.error('초기 상태 로드 오류:', error);
                 addMessage('assistant', '오류가 발생했습니다. 새로고침해 주세요.');
             }
         }
 
+        // 메시지 전송
         async function sendMessage() {
             if (!userInput) return;
             const messageText = userInput.value.trim();
@@ -292,12 +315,77 @@
             sendButton.classList.add('opacity-50');
 
             try {
-                const responseText = `응답: "${messageText}"에 대한 답변입니다.`;
-                addMessage('assistant', responseText);
-                addMessage(null, `생각: "${messageText}" 처리 중...`, true);
+                // POST 요청
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: messageText,
+                        personal_statement_draft: personalStatementDraft.value || ''
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`서버 응답 오류: ${response.statusText}`);
+                }
+
+                // 기존 EventSource 종료
+                if (source) {
+                    source.close();
+                    console.log('Previous EventSource closed');
+                }
+
+                // 새 EventSource 연결 (Query Parameters 추가)
+                const queryParams = new URLSearchParams({
+                    message: messageText,
+                    personal_statement_draft: personalStatementDraft.value || ''
+                });
+                source = new EventSource(`/chat?${queryParams.toString()}`);
+                console.log(`EventSource connected to /chat?${queryParams.toString()}`);
+
+                source.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log('SSE event received:', data); // 디버깅
+
+                        if (data.type === 'token_chunk') {
+                            addMessage('assistant', data.content); // 점진적 업데이트
+                        } else if (data.type === 'thought') {
+                            addMessage('assistant', data.content, true); // Correctly indicate this is a thought
+                        } else if (data.type === 'final_response') {
+                            tempMessageDiv = null; // token_chunk 누적 종료
+                            addMessage('assistant', data.chat_response);
+                            if (data.statement_suggestion) {
+                                addMessage('assistant', `제안: ${data.statement_suggestion}`);
+                            }
+                            source.close();
+                            console.log('EventSource closed after final_response');
+                        } else if (data.type === 'error') {
+                            addMessage('assistant', `오류: ${data.content}`);
+                            source.close();
+                        } else if (data.type === 'stream_end') {
+                            source.close();
+                            console.log('EventSource closed after stream_end');
+                        } else {
+                            console.warn('Unknown SSE event type:', data.type);
+                        }
+                    } catch (error) {
+                        console.error('SSE 데이터 파싱 오류:', error);
+                        addMessage('assistant', '데이터 처리 오류가 발생했습니다.');
+                    }
+                };
+
+                source.onerror = function() {
+                    console.error('SSE 연결 오류');
+                    addMessage('assistant', '서버 연결에 실패했습니다.');
+                    source.close();
+                };
             } catch (error) {
                 console.error('메시지 전송 오류:', error);
                 addMessage('assistant', '오류가 발생했습니다.');
+                if (source) source.close();
             } finally {
                 sendButton.disabled = false;
                 sendButton.textContent = '전송';
@@ -305,6 +393,7 @@
             }
         }
 
+        // 이벤트 리스너
         sendButton.addEventListener('click', sendMessage);
         userInput.addEventListener('keypress', (event) => {
             if (event.key === 'Enter' && !event.shiftKey) {

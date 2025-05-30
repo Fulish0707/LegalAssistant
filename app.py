@@ -5,6 +5,7 @@ import logging
 import sqlite3
 import json
 import queue
+import re # Added for cleaning output
 from langchain.callbacks.base import BaseCallbackHandler
 import os
 import sys
@@ -144,7 +145,40 @@ def clear_chat_history_in_db():
     print("Chat history cleared from DB and in-memory Langchain memory (if applicable).")
 
 
-# --- Langchain Callback Handler (no changes needed for backend logic refactor) ---
+# --- Text Cleaning Utility ---
+def clean_agent_output(text_content):
+    if not text_content:
+        return ""
+    
+    # Remove ANSI escape codes
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    cleaned_text = ansi_escape.sub('', text_content)
+
+    # Remove Markdown code blocks (```text``` or ```lang\ntext\n```)
+    # This regex looks for ``` followed by an optional language, then newline, then content, then newline, then ```
+    # Or ``` followed by content then ```
+    # It captures the content in between.
+    
+    # Pattern for ```lang\ncontent\n``` (multiline with language)
+    # and ```\ncontent\n``` (multiline without language)
+    multiline_code_block_pattern = re.compile(r"^```(?:[a-zA-Z]*)?\n(.*?)\n```$", re.DOTALL | re.MULTILINE)
+    
+    # Pattern for ```content``` (inline)
+    inline_code_block_pattern = re.compile(r"^```(.*?)```$", re.DOTALL | re.MULTILINE)
+
+    match = multiline_code_block_pattern.match(cleaned_text)
+    if match:
+        # For multiline blocks, we want the content inside
+        cleaned_text = match.group(1)
+    else:
+        # Check for inline blocks if multiline didn't match
+        match = inline_code_block_pattern.match(cleaned_text)
+        if match:
+            cleaned_text = match.group(1)
+            
+    return cleaned_text.strip()
+
+# --- Langchain Callback Handler ---
 class StreamingCallbackHandler(BaseCallbackHandler):
     def __init__(self, queue):
         self.queue = queue
@@ -171,11 +205,14 @@ class StreamingCallbackHandler(BaseCallbackHandler):
                 thought_message += f"\nAction Input: {tool_input_str}"
         else:
             thought_message = "Thought: (Agent is processing an action)"
-        self.queue.put({"type": "thought", "content": thought_message})
+        
+        cleaned_thought_message = clean_agent_output(thought_message)
+        self.queue.put({"type": "thought", "content": cleaned_thought_message})
 
     def on_tool_end(self, output: str, **kwargs) -> None:
+        cleaned_output = clean_agent_output(output) # Clean the full output first
         max_len = 200
-        tool_output_display = output[:max_len] + "..." if len(output) > max_len else output
+        tool_output_display = cleaned_output[:max_len] + "..." if len(cleaned_output) > max_len else cleaned_output
         self.queue.put({"type": "thought", "content": f"Tool Output: {tool_output_display}"})
 
     def on_chain_start(self, serialized, inputs, **kwargs) -> None:
@@ -190,22 +227,127 @@ class StreamingCallbackHandler(BaseCallbackHandler):
     def on_agent_finish(self, finish, **kwargs) -> None:
         if hasattr(finish, 'log') and finish.log:
             final_thought_log = finish.log.strip()
-            # Attempt to clean up "Final Answer:" if present in the log before the actual output
             if "Final Answer:" in final_thought_log:
-                 # This assumes the actual final answer is in `finish.return_values['output']`
-                 # and the log might contain preliminary final thoughts.
                 final_thought_log = final_thought_log.split("Final Answer:", 1)[0].strip()
+            
             if final_thought_log: # Only send if there's content
-                self.queue.put({"type": "thought", "content": f"Final thoughts:\n{final_thought_log}"})
-        # self.queue.put({"type": "agent_end"}) # Could add this if frontend needs to know agent finished before full parsing
+                cleaned_final_thought = clean_agent_output(f"Final thoughts:\n{final_thought_log}")
+                if cleaned_final_thought.startswith("Final thoughts:\n"): # Ensure prefix isn't stripped if content becomes empty
+                    cleaned_final_thought_content = cleaned_final_thought[len("Final thoughts:\n"):].strip()
+                    if cleaned_final_thought_content: # Only send if there's actual thought content left
+                         self.queue.put({"type": "thought", "content": f"Final thoughts:\n{cleaned_final_thought_content}"})
+                    # else: don't send "Final thoughts:" if there's nothing after cleaning
+                elif cleaned_final_thought.strip(): # If "Final thoughts:" was stripped but other content remains
+                    self.queue.put({"type": "thought", "content": cleaned_final_thought})
+
+        # self.queue.put({"type": "agent_end"})
 
 
 # --- Flask Routes ---
+
+def _generate_agent_response_stream(user_input, current_personal_statement_draft):
+    """
+    Helper function to generate agent response stream.
+    This function contains the core logic previously in the nested generate_response_stream.
+    """
+    full_streamed_llm_output = ""
+    try:
+        q = queue.Queue()
+        streaming_handler = StreamingCallbackHandler(q)
+
+        agent_input_payload = {
+            "input": user_input,
+        }
+        if current_personal_statement_draft:
+            agent_input_payload["input"] += f"\n\n[Current Draft Context]\n{current_personal_statement_draft}"
+
+        # Run agent.invoke in a separate thread to allow the queue to be processed concurrently.
+        # This is a common pattern for integrating synchronous Langchain calls with Flask streaming.
+        # However, for simplicity and given the current structure, we'll keep it synchronous
+        # within this generator function. The `stream_with_context` handles the yielding.
+        # If true non-blocking for other requests is needed, agent.invoke would need to be
+        # offloaded to a thread pool executor.
+
+        agent_response_obj = agent.invoke(
+            agent_input_payload,
+            {"callbacks": [streaming_handler]}
+        )
+
+        llm_token_buffer = ""
+        while True:
+            try:
+                event_data = q.get(timeout=10)
+            except queue.Empty:
+                print("Warning: Queue empty on get. Agent might have finished or stalled.")
+                break
+
+            if event_data.get("type") == "token":
+                token_content = event_data["content"]
+                full_streamed_llm_output += token_content
+                llm_token_buffer += token_content
+                if len(llm_token_buffer) >= 20 or any(p in token_content for p in ['.', '!', '?', '\n', ' ']):
+                    if llm_token_buffer:
+                        yield f"data: {json.dumps({'type': 'token_chunk', 'content': llm_token_buffer})}\n\n"
+                        llm_token_buffer = ""
+            elif event_data.get("type") == "thought":
+                yield f"data: {json.dumps({'type': 'thought', 'content': event_data['content']})}\n\n"
+            elif event_data.get("type") == "llm_end":
+                if llm_token_buffer:
+                    yield f"data: {json.dumps({'type': 'token_chunk', 'content': llm_token_buffer})}\n\n"
+                    llm_token_buffer = ""
+                break 
+        
+        if llm_token_buffer: # Final flush
+            yield f"data: {json.dumps({'type': 'token_chunk', 'content': llm_token_buffer})}\n\n"
+
+        agent_output_string = agent_response_obj.get("output", "")
+        # Clean the final agent output string
+        cleaned_agent_output_string = clean_agent_output(agent_output_string)
+        
+        parsed_chat_response = cleaned_agent_output_string if cleaned_agent_output_string else "Sorry, I couldn't generate a response."
+        if not agent_output_string: # Log warning based on original output
+             print(f"Warning: Agent returned an empty 'output'. Full response object: {agent_response_obj}")
+        elif not cleaned_agent_output_string and agent_output_string: # Log if cleaning resulted in empty
+             print(f"Warning: Agent output became empty after cleaning. Original: '{agent_output_string}'")
+
+
+        parsed_statement_suggestion = "" # Assuming agent doesn't produce this by default. If it did, it should also be cleaned.
+
+        # Save assistant message and update Langchain memory
+        # This needs to be done carefully. If called from GET, user_input might not be in DB yet
+        # if POST hasn't completed or if GET is called directly.
+        # For now, we assume POST has added the user message.
+        # A more robust solution might involve session management or passing a request ID.
+        add_chat_message_to_db("assistant", parsed_chat_response)
+        memory.save_context(
+            {"input": user_input}, # This user_input is from the GET request's params
+            {"output": parsed_chat_response}
+        )
+
+        final_data = {
+            "type": "final_response",
+            "chat_response": parsed_chat_response,
+            "statement_suggestion": parsed_statement_suggestion,
+            "current_draft_processed": current_personal_statement_draft
+        }
+        yield f"data: {json.dumps(final_data)}\n\n"
+
+    except Exception as e:
+        logging.exception("Error during AI processing stream (_generate_agent_response_stream)")
+        error_response_content = "An error occurred while processing your request. Please check server logs."
+        # Potentially add error to DB here as well, associated with the user_input from GET
+        add_chat_message_to_db("assistant", error_response_content) # Or a more specific error message
+        memory.save_context({"input": user_input}, {"output": error_response_content})
+        yield f"data: {json.dumps({'type': 'error', 'content': error_response_content})}\n\n"
+    finally:
+        yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
+
+
 @app.route('/')
 def index():
     return render_template('chatbot.html')
 
-@app.route('/chatbot.html') # Explicit route for chatbot.html if users type it
+@app.route('/chatbot.html') 
 def chatbot_page_explicit():
     return render_template('chatbot.html')
 
@@ -217,142 +359,38 @@ def document_page():
 def audio_page():
     return render_template('audio.html')
 
-# Note: No route for video.html yet as it doesn't exist.
-# The link in chatbot.html for video should be updated.
-
-@app.route('/chat', methods=['POST'])
+@app.route('/chat', methods=['GET', 'POST'])
 def chat():
-    user_input = request.json.get('message')
-    # The frontend must send the current state of the draft
-    current_personal_statement_draft = request.json.get('personal_statement_draft', '')
+    if request.method == 'POST':
+        user_input = request.json.get('message')
+        current_personal_statement_draft = request.json.get('personal_statement_draft', '')
 
-    if not user_input:
-        return jsonify({"error": "No message provided"}), 400
+        if not user_input:
+            return jsonify({"error": "No message provided"}), 400
 
-    # Add user message to DB
-    add_chat_message_to_db("user", user_input)
-    # The Langchain memory object handles its own state.
-    # We save context after getting the AI's response.
+        add_chat_message_to_db("user", user_input)
+        # The POST request now just acknowledges receipt.
+        # The actual processing and streaming will be triggered by the frontend's GET request.
+        return jsonify({"status": "message_received_ok", "message": "Proceed to connect to SSE for response."})
 
-    def generate_response_stream():
-        full_streamed_llm_output = ""
+    elif request.method == 'GET':
+        # For SSE, data comes from query parameters
+        user_input = request.args.get('message')
+        current_personal_statement_draft = request.args.get('personal_statement_draft', '')
 
-        try:
-            # 1. Retrieve context (REMOVED - Agent uses its own RAG tool)
-            # 2. Fetch similar past conversations (REMOVED - Agent's memory handles history. If needed explicitly, prompt engineering required)
-            # 3. Create streaming queue
-            q = queue.Queue()
-            streaming_handler = StreamingCallbackHandler(q)
+        if not user_input:
+            # SSE requires a specific format for errors if connection is established
+            def error_stream():
+                yield f"data: {json.dumps({'type': 'error', 'content': 'No message provided in SSE request.'})}\n\n"
+                yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
+            return Response(stream_with_context(error_stream()), mimetype='text/event-stream')
 
-            # 4. Prepare agent input
-            # For conversational-react-description, "input" is the main key.
-            # current_draft could be passed if the agent's prompt is designed for it.
-            agent_input_payload = {
-                "input": user_input,
-                # "current_draft": current_personal_statement_draft, # Keep if prompt handles it
-                # Langchain memory (ConversationBufferMemory) is part of the agent from langchain_config
-            }
-            
-            # Add current_draft to input if it's not empty, assuming prompt might use it.
-            # This is a placeholder; ideally, the prompt is explicitly designed for this.
-            if current_personal_statement_draft:
-                agent_input_payload["input"] += f"\n\n[Current Draft Context]\n{current_personal_statement_draft}"
+        # Note: The user message for this GET request is NOT added to DB here,
+        # as the POST request should have already handled it.
+        # If GET is called without a preceding POST, this could lead to inconsistencies
+        # in chat history if not handled carefully. The current frontend flow (POST then GET) is assumed.
 
-
-            # 5. Invoke agent (this now runs in the main thread of the request handler)
-            # To make this non-blocking for other requests, the agent.invoke itself would need to be async
-            # or run in a separate thread pool, but for streaming per *single* request, this is fine.
-            agent_response_obj = agent.invoke(
-                agent_input_payload,
-                {"callbacks": [streaming_handler]} # Correct way to pass callbacks
-            )
-
-            # 6. Stream response parts (tokens and thoughts)
-            llm_token_buffer = ""
-            while True:
-                try:
-                    event_data = q.get(timeout=10) # Add timeout to prevent indefinite blocking
-                except queue.Empty:
-                    # This can happen if the agent finishes but on_llm_end wasn't the last thing, or if there's a stall
-                    print("Warning: Queue empty on get. Agent might have finished or stalled.")
-                    break # Exit loop if queue is empty after timeout
-
-                if event_data.get("type") == "token":
-                    token_content = event_data["content"]
-                    full_streamed_llm_output += token_content
-                    llm_token_buffer += token_content
-                    # Adjust buffering strategy as needed
-                    if len(llm_token_buffer) >= 20 or any(p in token_content for p in ['.', '!', '?', '\n', ' ']):
-                        if llm_token_buffer:
-                            yield f"data: {json.dumps({'type': 'token_chunk', 'content': llm_token_buffer})}\n\n"
-                            llm_token_buffer = ""
-                elif event_data.get("type") == "thought":
-                    yield f"data: {json.dumps({'type': 'thought', 'content': event_data['content']})}\n\n"
-                elif event_data.get("type") == "llm_end":
-                    if llm_token_buffer: # Flush any remaining tokens
-                        yield f"data: {json.dumps({'type': 'token_chunk', 'content': llm_token_buffer})}\n\n"
-                        llm_token_buffer = ""
-                    # This signals the end of raw token streaming from LLM, agent processing continues
-                    # We break out of this loop once the *agent* is fully done, not just the LLM.
-                    # The agent's final output is in agent_response_obj.
-                    break # Break from the queue polling loop as LLM part is done
-
-            # Ensure any final buffered tokens are sent if llm_end wasn't hit or loop broke early
-            if llm_token_buffer:
-                yield f"data: {json.dumps({'type': 'token_chunk', 'content': llm_token_buffer})}\n\n"
-
-
-            # 7. Process final agent output
-            # IMPORTANT: The real agent is expected to return a dict like {"output": "response_string"}
-            # The "output" field contains the direct string response.
-            agent_output_string = agent_response_obj.get("output", "")
-
-            parsed_chat_response = agent_output_string
-            # Statement suggestion logic is removed as the real agent might not produce it by default.
-            # If suggestions are needed, the agent's prompt (from llm_prompt.py) must be designed for it.
-            parsed_statement_suggestion = "" # Default to no suggestion
-
-            if not parsed_chat_response:
-                parsed_chat_response = "Sorry, I couldn't generate a response."
-                print(f"Warning: Agent returned an empty 'output'. Full response object: {agent_response_obj}")
-
-            # 8. Save assistant message and update Langchain memory
-            # The memory object used here is the one imported from langchain_config,
-            # which is also used by the agent.
-            add_chat_message_to_db("assistant", parsed_chat_response)
-            memory.save_context(
-                {"input": user_input}, # What the user sent
-                {"output": parsed_chat_response} # What the AI responded in chat
-            )
-
-            # 9. Send final structured message
-            final_data = {
-                "type": "final_response",
-                "chat_response": parsed_chat_response,
-                "statement_suggestion": parsed_statement_suggestion,
-                # "similar_chats_retrieved_for_agent": similar_chats_for_agent, # For debugging on client
-                "current_draft_processed": current_personal_statement_draft # Confirm which draft was used
-            }
-            yield f"data: {json.dumps(final_data)}\n\n"
-
-        except Exception as e:
-            logging.exception("Error during AI processing stream") # Log full traceback
-            error_response_content = "An error occurred while processing your request. Please check server logs."
-            # Ensure assistant message for error is added to DB
-            # Check if user message was already added; if so, add corresponding error for assistant
-            # This logic might need refinement based on where the error occurs.
-            # If error is very early, user_input might not be in DB yet.
-            # For now, assume user message is added, and this is the assistant's error response.
-            add_chat_message_to_db("assistant", error_response_content)
-            memory.save_context({"input": user_input}, {"output": error_response_content})
-            yield f"data: {json.dumps({'type': 'error', 'content': error_response_content})}\n\n"
-        finally:
-            # Signal the absolute end of the stream to the client
-            yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
-
-
-    return Response(stream_with_context(generate_response_stream()), mimetype='text/event-stream')
-
+        return Response(stream_with_context(_generate_agent_response_stream(user_input, current_personal_statement_draft)), mimetype='text/event-stream')
 
 @app.route('/get_initial_state', methods=['GET'])
 def get_initial_state():
