@@ -30,7 +30,36 @@ log.setLevel(logging.ERROR) # or logging.INFO for more details
 
 app = Flask(__name__)
 
-DB_FILE = "sqlite_db/app_state.db"
+DB_FILE = "sqlite_db/app_state.db" # Define DB_FILE before use
+
+# Ensure DB is initialized when app module is loaded
+# This is a simple way for development; for production, a CLI command or more sophisticated setup might be used.
+with app.app_context():
+    # The init_db function already handles app_context internally for its operations.
+    # To ensure it runs on app startup:
+    conn = sqlite3.connect(DB_FILE) # Now DB_FILE is defined
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS personal_statement (
+            id INTEGER PRIMARY KEY,
+            draft TEXT
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            role TEXT,
+            content TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    # Ensure the default draft row exists
+    c.execute('INSERT OR IGNORE INTO personal_statement (id, draft) VALUES (1, "")')
+    conn.commit()
+    conn.close()
+    print("Database initialized directly on app startup.")
+
 # NO MORE GLOBAL DRAFT OR CHAT HISTORY LIST
 # personal_statement_draft = "" # REMOVED
 # chat_history_list = [] # REMOVED
