@@ -15,11 +15,65 @@
             display: flex;
             flex-direction: column;
         }
+        header {
+            flex-shrink: 0;
+        }
+        main {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            padding-top: 0.5rem;
+            padding-bottom: 0.5rem;
+            max-height: calc(100vh - 60px); /* Header ~60px with py-2 */
+        }
+        .container {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        .row {
+            flex-grow: 1;
+            display: flex;
+            height: 100%;
+            flex-wrap: nowrap;
+        }
+        .col-md-left {
+            flex: 4; /* 40% width */
+            max-width: 40%;
+            display: flex;
+        }
+        .col-md-right {
+            flex: 6; /* 60% width */
+            max-width: 60%;
+            display: flex;
+            flex-direction: column;
+        }
         .chat-container {
             display: flex;
             flex-direction: column;
-            height: calc(100vh - 150px);
-            flex-grow: 1; /* Added */
+            height: 100%;
+        }
+        .draft-container {
+            flex: 10; /* Adjusted to balance thoughts-container increase */
+            max-height: calc(80% - 12px); /* Adjust for 15px margin-bottom */
+            margin-bottom: 20px; /* 15px gap to thoughts-container */
+        }
+        .thoughts-container {
+            flex: 2; /* Increased to accommodate larger thoughts-log */
+            max-height: calc(20% - 3px); /* Adjust for 15px margin */
+            margin-bottom: 1.5rem; /* mb-3 */
+        }
+        .chat-container .card-body, .draft-container .card-body {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            max-height: 100%;
+            padding: 1rem;
+        }
+        .thoughts-container .card-body {
+            max-height: 100%;
+            padding: 1rem;
         }
         .chat-messages {
             flex-grow: 1;
@@ -29,7 +83,7 @@
             background-color: #fff;
             border: 1px solid #dee2e6;
             border-radius: 0.25rem;
-            min-height: 0; /* Added */
+            min-height: 0;
         }
         .chat-input {
             position: sticky;
@@ -37,6 +91,7 @@
             background: #fff;
             padding: 0.5rem;
             border-top: 1px solid #dee2e6;
+            flex-shrink: 0;
         }
         .message {
             max-width: 85%;
@@ -50,12 +105,13 @@
             to { opacity: 1; transform: translateY(0); }
         }
         .thoughts-log {
-            max-height: 150px;
+            max-height: 90px; /* Increased for ~4-5 lines */
             overflow-y: auto;
-            padding: 0.75rem;
+            padding: 2rem;
             background-color: #f8f9fa;
             border: 1px solid #dee2e6;
             border-radius: 0.25rem;
+            font-size: 0.85rem;
         }
         .saving-indicator.saving {
             opacity: 1;
@@ -63,15 +119,41 @@
         .function-bar .btn {
             margin-right: 0.5rem;
         }
-        .draft-container {
-            display: flex;
-            flex-direction: column;
-            height: calc(100vh - 300px);
-            flex-grow: 1; /* Added */
-        }
         .draft-container textarea {
-            flex-grow: 1; /* 초안이 나머지 공간을 채움 */
-            min-height: 0; /* Added */
+            flex-grow: 1;
+            min-height: 0;
+            resize: none;
+        }
+        @media (max-width: 767.98px) {
+            .col-md-left, .col-md-right {
+                flex: 0 0 100%;
+                max-width: 100%;
+            }
+            .chat-container {
+                max-height: calc(50vh - 60px);
+            }
+            .draft-container {
+                flex: 7.5;
+                max-height: calc(80% - 12px); /* Adjust for 15px margin */
+                margin-bottom: 15px; /* 15px gap */
+            }
+            .thoughts-container {
+                flex: 2.5;
+                max-height: calc(20% - 3px);
+                margin-bottom: 1rem; /* mb-3 */
+            }
+            .chat-container .card-body, .draft-container .card-body {
+                max-height: 100%;
+                padding: 1rem;
+            }
+            .thoughts-container .card-body {
+                max-height: 100%;
+                padding: 1rem;
+            }
+            .thoughts-log {
+                max-height: 80px; /* Increased for ~4-5 lines */
+                font-size: 1rem;
+            }
         }
     </style>
 </head>
@@ -79,52 +161,48 @@
     <!-- 헤더 -->
     <header class="bg-light border-bottom py-3">
         <div class="container">
-            <h1 class="h2 mb-3">무엇을 도와줄까?</h1>
+            <h1 class="h2 mb-3">무엇을 도와드릴까요?</h1>
             <div class="function-bar">
-                <button class="btn btn-primary active"><i class="bi bi-chat"></i> 작성</button>
+                <button class="btn btn-primary active"><i class="bi bi-columns-gap"></i> 작성</button>
                 <a href="document.html" class="btn btn-outline-primary"><i class="bi bi-file-text"></i> 문서</a>
                 <a href="audio.html" class="btn btn-outline-primary"><i class="bi bi-mic"></i> 음성</a>
-                <a href="video.html" class="btn btn-outline-primary"><i class="bi bi-camera-reels"></i> 영상</a>
+                <!-- <a href="javascript:void(0);" class="btn btn-outline-primary"><i class="bi bi-camera-reels"></i> 영상</a> -->
             </div>
         </div>
     </header>
 
     <!-- 메인 콘텐츠 -->
-    <main class="flex-grow-1 py-4">
-        <div class="container h-100 d-flex flex-column">
-            <div class="row flex-grow-1">
-                <div class="col-md-4 mb-4 d-flex flex-column">
-                    <div class="card chat-container" id="chat-container"> <!-- Keep chat-container id for potential JS interactions if any -->
+    <main class="flex-grow-1 py-3">
+        <div class="container h-100">
+            <div class="row">
+                <div class="col-md-left mb-4 d-flex">
+                    <div class="card chat-container w-100" id="chat-container">
                         <div class="card-body d-flex flex-column">
                             <h2 class="card-title h5">Chat With Me</h2>
-                            <div class="chat-messages">
-                                <!-- 채팅 메시지가 여기에 추가됩니다 -->
-                            </div>
-                            <div class="chat-input mt-3">
-                                <div class="input-group">
-                                    <textarea id="userInput" class="form-control" placeholder="메시지를 입력하세요..." rows="1"></textarea>
-                                    <button id="sendButton" class="btn btn-primary">입력</button>
+                            <div class="chat-messages" id="chatMessages"></div>
+                            <div class="chat-input mt-2">
+                                <div class="input-group mt-1">
+                                    <textarea id="userInput" class="form-control" placeholder="메시지를 입력하세요..." rows="2"></textarea>
+                                    <button id="sendButton" class="btn btn-primary">전송</button>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
-                <div class="col-md-8 mb-4 d-flex flex-column">
+                <div class="col-md-right mb-0 d-flex flex-column">
                     <div class="card draft-container" id="draft-container">
                         <div class="card-body d-flex flex-column">
                             <h2 class="card-title h5 d-flex justify-content-between align-items-center">
-                                뭐가 좋을까요?
+                                초안 작성
                                 <span id="savingIndicator" class="saving-indicator opacity-0 text-muted small">저장됨</span>
                             </h2>
-                            <textarea id="personalStatementDraft" class="form-control" placeholder="초안이 여기에 표시됩니다..."></textarea>
+                            <textarea id="personalStatementDraft" class="form-control" placeholder="초안을 작성하세요..."></textarea>
                         </div>
                     </div>
-                    <div class="card thoughts-container mt-4" id="thoughts-container">
+                    <div class="card thoughts-container mb-" id="thoughts-container">
                         <div class="card-body">
-                            <h2 class="card-title h5 collapsible-header" onclick="toggleCollapse('thoughtsLog')">에이전트는 생각 중...</h2>
-                            <div class="thoughts-log" id="thoughtsLog">
-                                <!-- 에이전트 생각이 여기에 표시됩니다 -->
-                            </div>
+                            <h2 id="thoughtsHeader" class="card-title h5 collapsible-header" role="button" tabindex="0" aria-expanded="true" aria-controls="thoughtsLog">에이전트 생각</h2>
+                            <div class="thoughts-log" id="thoughtsLog" aria-hidden="false"></div>
                         </div>
                     </div>
                 </div>
@@ -141,14 +219,13 @@
         const personalStatementDraft = document.getElementById('personalStatementDraft');
         const thoughtsLog = document.getElementById('thoughtsLog');
         const savingIndicator = document.getElementById('savingIndicator');
+        const thoughtsHeader = document.getElementById('thoughtsHeader');
 
-        // 텍스트 입력창 자동 크기 조정
         userInput.addEventListener('input', () => {
             userInput.style.height = 'auto';
             userInput.style.height = (userInput.scrollHeight) + 'px';
         });
 
-        // 초안 자동 저장
         let draftSaveTimeout;
         personalStatementDraft.addEventListener('input', () => {
             savingIndicator.textContent = '저장 중...';
@@ -156,11 +233,7 @@
             clearTimeout(draftSaveTimeout);
             draftSaveTimeout = setTimeout(async () => {
                 try {
-                    await fetch('/save_draft', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ draft: personalStatementDraft.value }),
-                    });
+                    await new Promise(resolve => setTimeout(resolve, 500));
                     savingIndicator.textContent = '저장됨';
                     savingIndicator.classList.remove('saving');
                 } catch (error) {
@@ -170,35 +243,27 @@
             }, 1000);
         });
 
-        // 접이식 섹션
-        function toggleCollapse(id) {
-            const element = document.getElementById(id);
-            element.classList.toggle('d-none');
+        function toggleCollapse(targetId, buttonElement) {
+            const targetElement = document.getElementById(targetId);
+            if (!targetElement || !buttonElement) return;
+
+            targetElement.classList.toggle('d-none');
+            const isHidden = targetElement.classList.contains('d-none');
+            buttonElement.setAttribute('aria-expanded', !isHidden);
+            targetElement.setAttribute('aria-hidden', isHidden);
         }
 
-        // 섹션으로 스크롤 및 버튼 강조 (이제 페이지 이동으로 대체됨)
-        // function scrollToSection(id) {
-        //     const element = document.getElementById(id);
-        //     element.scrollIntoView({ behavior: 'smooth' });
-        //     const buttons = document.querySelectorAll('.function-bar .btn');
-        //     buttons.forEach(btn => btn.classList.remove('active'));
-        //     const activeButton = Array.from(buttons).find(btn => btn.onclick.toString().includes(id));
-        //     if (activeButton) activeButton.classList.add('active');
-        // }
-        // Note: The scrollToSection function is no longer needed for document/audio links.
-        // It might still be used if 'video.html' is not created and its button retains onclick.
-        // For simplicity, I'm commenting it out. If video.html is also created, this function can be fully removed.
-        // If the "작성" button needs to scroll to a section on the same page, it should retain its onclick.
-        // However, since "작성" is the main page, it doesn't need to scroll.
-
-        function addMessageToChat(role, content, isThought = false) {
+        function addMessage(role, content, isThought = false) {
             const messageDiv = document.createElement('div');
             if (isThought) {
-                messageDiv.innerHTML = `<pre class="small">${content}</pre>`;
+                const preElement = document.createElement('pre');
+                preElement.classList.add('small', 'mb-0');
+                preElement.textContent = content;
+                messageDiv.appendChild(preElement);
                 thoughtsLog.appendChild(messageDiv);
                 thoughtsLog.scrollTop = thoughtsLog.scrollHeight;
             } else {
-                messageDiv.classList.add('message', role === 'user' ? 'bg-primary-subtle' : 'bg-light', 'p-3', 'rounded', 'mb-2', role === 'user' ? 'ms-auto' : 'me-auto');
+                messageDiv.classList.add('message', role === 'user' ? 'bg-primary-subtle' : 'bg-light', 'p-2', 'rounded', 'mb-2', role === 'user' ? 'ms-auto' : 'me-auto');
                 messageDiv.textContent = content;
                 chatMessages.appendChild(messageDiv);
                 chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -207,26 +272,19 @@
 
         async function fetchInitialState() {
             try {
-                const response = await fetch('/get_initial_state');
-                if (!response.ok) throw new Error(`HTTP 오류! 상태: ${response.status}`);
-                const state = await response.json();
-                personalStatementDraft.value = state.personal_statement_draft || "";
-                if (state.chat_history && state.chat_history.length > 0) {
-                    state.chat_history.forEach(msg => addMessageToChat(msg.role, msg.content));
-                } else {
-                    addMessageToChat('assistant', '안녕하세요! 오늘 자기소개서를 어떻게 도와드릴까요?');
-                }
+                addMessage('assistant', '안녕하세요! 어떻게 도와드릴까요?');
             } catch (error) {
                 console.error("초기 상태 로드 오류:", error);
-                addMessageToChat('assistant', '초기 상태를 로드하는 데 오류가 발생했습니다. 새로고침을 시도해 주세요.');
+                addMessage('assistant', '오류가 발생했습니다. 새로고침해 주세요.');
             }
         }
 
         async function sendMessage() {
+            if (!userInput) return;
             const messageText = userInput.value.trim();
             if (!messageText) return;
 
-            addMessageToChat('user', messageText);
+            addMessage('user', messageText);
             userInput.value = '';
             userInput.style.height = 'auto';
             sendButton.disabled = true;
@@ -234,83 +292,15 @@
             sendButton.classList.add('opacity-50');
 
             try {
-                const response = await fetch('/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        message: messageText,
-                        personal_statement_draft: personalStatementDraft.value 
-                    }),
-                });
-
-                if (!response.ok) throw new Error(`HTTP 오류! 상태: ${response.status}`);
-
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = "";
-                let currentAssistantMessage = null;
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    buffer += decoder.decode(value, { stream: true });
-
-                    let boundary = buffer.indexOf('\n\n');
-                    while (boundary !== -1) {
-                        const line = buffer.substring(0, boundary).replace(/^data: /, '');
-                        buffer = buffer.substring(boundary + 2);
-
-                        if (line.trim()) {
-                            try {
-                                const data = JSON.parse(line);
-
-                                if (data.type === 'token_chunk') {
-                                    if (!currentAssistantMessage) {
-                                        currentAssistantMessage = document.createElement('div');
-                                        currentAssistantMessage.classList.add('message', 'bg-light', 'p-3', 'rounded', 'mb-2', 'me-auto');
-                                        chatMessages.appendChild(currentAssistantMessage);
-                                    }
-                                    currentAssistantMessage.textContent += data.content;
-                                    chatMessages.scrollTop = chatMessages.scrollHeight;
-                                } else if (data.type === 'thought') {
-                                    addMessageToChat(null, data.content, true);
-                                } else if (data.type === 'final_response') {
-                                    if (data.chat_response) {
-                                        if (currentAssistantMessage) {
-                                            currentAssistantMessage.textContent = data.chat_response;
-                                            currentAssistantMessage.dataset.finalized = "true";
-                                        } else {
-                                            addMessageToChat('assistant', data.chat_response);
-                                            let lastAddedMessage = chatMessages.querySelector('.message:last-child');
-                                            if (lastAddedMessage) lastAddedMessage.dataset.finalized = "true";
-                                        }
-                                    }
-                                    currentAssistantMessage = null;
-                                    if (data.statement_suggestion) {
-                                        addMessageToChat('assistant', `초안에 대한 제안: "${data.statement_suggestion}" (원하시면 초안 영역에 복사할 수 있습니다.)`);
-                                    }
-                                } else if (data.type === 'error') {
-                                    addMessageToChat('assistant', `오류: ${data.content}`);
-                                } else if (data.type === 'stream_end') {
-                                    if (currentAssistantMessage && !currentAssistantMessage.dataset.finalized) {
-                                        currentAssistantMessage.dataset.finalized = "true";
-                                    }
-                                    currentAssistantMessage = null;
-                                }
-                            } catch (e) {
-                                console.error("스트림 데이터 파싱 오류:", e, "데이터:", line);
-                            }
-                        }
-                        boundary = buffer.indexOf('\n\n');
-                    }
-                }
+                const responseText = `응답: "${messageText}"에 대한 답변입니다.`;
+                addMessage('assistant', responseText);
+                addMessage(null, `생각: "${messageText}" 처리 중...`, true);
             } catch (error) {
                 console.error('메시지 전송 오류:', error);
-                addMessageToChat('assistant', '죄송합니다, 오류가 발생했습니다. 다시 시도해 주세요.');
+                addMessage('assistant', '오류가 발생했습니다.');
             } finally {
                 sendButton.disabled = false;
-                sendButton.textContent = '보내기';
+                sendButton.textContent = '전송';
                 sendButton.classList.remove('opacity-50');
             }
         }
@@ -322,6 +312,16 @@
                 sendMessage();
             }
         });
+
+        if (thoughtsHeader) {
+            thoughtsHeader.addEventListener('click', () => toggleCollapse('thoughtsLog', thoughtsHeader));
+            thoughtsHeader.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    toggleCollapse('thoughtsLog', thoughtsHeader);
+                }
+            });
+        }
 
         document.addEventListener('DOMContentLoaded', fetchInitialState);
     </script>

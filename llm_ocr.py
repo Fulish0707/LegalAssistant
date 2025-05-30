@@ -118,22 +118,22 @@ def generate_report_from_document(file_path, file_extension, user_instructions, 
 
         # --- LLM Processing ---
         report_generation_input = f"""Please generate a report based on the following document content and instructions.
-        The document content is:
-        --- DOCUMENT CONTENT START ---
-        {extracted_text}
-        --- DOCUMENT CONTENT END ---
+The document content is:
+--- DOCUMENT CONTENT START ---
+{extracted_text}
+--- DOCUMENT CONTENT END ---
 
-        User instructions for the report:
-        {user_instructions if user_instructions else "No specific instructions provided. Please generate a comprehensive summary and analysis."}
+User instructions for the report:
+{user_instructions if user_instructions else "No specific instructions provided. Please generate a comprehensive summary and analysis."}
 
-        The report should be in LaTeX format. If relevant, include diagrams or images as described in the system prompt (e.g., using HTML/CSS for simple diagrams, or base64 encoded images if you can generate them).
-        Focus on clarity, logical structure, and engagement, suitable for bosses or business clients as per the system prompt's [REPORT_SUGGESTION] guidelines.
+The report should be in HTML format. If relevant, include diagrams or images as described in the system prompt (e.g., using HTML/CSS for simple diagrams, or base64 encoded images if you can generate them).
+Focus on clarity, logical structure, and engagement, suitable for bosses or business clients as per the system prompt's [REPORT_SUGGESTION] guidelines.
 
-        Please write the report in Korean.
-        Please exclude '''html ''' from the report.
-        Please follow LaTeX formatting, especially font size.
-        The final output should be only the HTML report content, without any preliminary remarks, thoughts, or chat-like prefixes.
-        """
+Please write the report in Korean.
+Please exclude '''html ''' from the report.
+Please follow LaTeX formatting, especially font size.
+The final output should be only the HTML report content, without any preliminary remarks, thoughts, or chat-like prefixes.
+"""
         
         formatted_prompt_messages = prompt_template.format_messages(
             current_document_draft="", 
