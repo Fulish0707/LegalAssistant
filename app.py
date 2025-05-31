@@ -597,7 +597,7 @@ def process_audio_common(audio_file_path):
         {transcript}
         --- TRANSCRIPT END ---
 
-        Provide a brief summary of the key points in Korean.
+        Please provide a formal and concise summary of the key points from the transcript in Korean, suitable for a professional context.
         """
         formatted_prompt_messages = main_chat_prompt_template.format_messages(
             current_document_draft="", 
