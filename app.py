@@ -598,6 +598,7 @@ def process_audio_common(audio_file_path):
         --- TRANSCRIPT END ---
 
         Please provide a formal and concise summary of the key points from the transcript in Korean, suitable for a professional context.
+        Please exclude '''html''' from result.
         """
         formatted_prompt_messages = main_chat_prompt_template.format_messages(
             current_document_draft="", 
@@ -710,9 +711,6 @@ def transcribe_and_summarize_audio_blob_route():
                 app.logger.info(f"Cleaned up temp blob file: {temp_file_path}")
             except Exception as e_clean:
                 app.logger.error(f"Error cleaning up temp blob file {temp_file_path}: {e_clean}")
-
-# Removed the /record_and_transcribe route as it's not used by the current frontend
-# and llm_stt.py's record_audio_to_file is for fixed duration.
 
 if __name__ == '__main__':
     init_db() # Initialize the database

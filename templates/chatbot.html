@@ -99,6 +99,9 @@
             padding: 0.75rem;
             border-radius: 0.5rem;
             animation: fadeIn 0.3s ease-in;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
         }
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(10px); }
@@ -360,6 +363,11 @@
                             if (data.statement_suggestion) {
                                 addMessage('assistant', `제안: ${data.statement_suggestion}`);
                             }
+                            source.close();
+                            console.log('EventSource closed after final_response');
+                        } else if (data.type === 'update_draft') { // New: Handle direct draft updates
+                            personalStatementDraft.value = data.content;
+                            personalStatementDraft.dispatchEvent(new Event('input', { bubbles: true })); // Trigger input event for saving indicator
                             source.close();
                             console.log('EventSource closed after final_response');
                         } else if (data.type === 'error') {
