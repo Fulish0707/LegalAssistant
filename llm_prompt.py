@@ -36,6 +36,14 @@ Response Format Conditions:
   Observation: Tool output (skip for Final Answer).
   Repeat as needed.
 
+- Follow report foramt:
+  20 point font size for heading.
+  16 point font size for subheading.
+  12 point font size for main body text.
+  1.5 line spacing.
+  Must use Times New Roman for English.
+  Must use Nanum Gothic for Korean.
+
 - If no specific tool (RAG Retriever or Search) is required, default to "Action: Final Answer" and provide a direct response.
 
 In your Final Answer, include:

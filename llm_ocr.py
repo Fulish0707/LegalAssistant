@@ -2,21 +2,8 @@ import pytesseract
 from PIL import Image
 import os
 import PyPDF2 # Added for PDF processing
+import re # Added for improved post-processing
 import docx # Added for DOCX processing
-
-# Optional: If Tesseract is not in your PATH, you might need to set the command path
-# For macOS, if installed via Homebrew, it's usually in /usr/local/bin/tesseract or /opt/homebrew/bin/tesseract
-# For Windows, it's typically C:\Program Files\Tesseract-OCR\tesseract.exe
-# Example:
-# if os.name == 'posix': # For macOS/Linux
-#     # Check common paths for Tesseract
-#     if os.path.exists('/opt/homebrew/bin/tesseract'):
-#         pytesseract.pytesseract.tesseract_cmd = r'/opt/homebrew/bin/tesseract'
-#     elif os.path.exists('/usr/local/bin/tesseract'):
-#         pytesseract.pytesseract.tesseract_cmd = r'/usr/local/bin/tesseract'
-#     # Add other paths if necessary
-# elif os.name == 'nt': # For Windows
-#     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 def detect_text(image_path):
     """
@@ -126,20 +113,43 @@ The document content is:
 User instructions for the report:
 {user_instructions if user_instructions else "No specific instructions provided. Please generate a comprehensive summary and analysis."}
 
-The report should be in HTML format. If relevant, include diagrams or images as described in the system prompt (e.g., using HTML/CSS for simple diagrams, or base64 encoded images if you can generate them).
+The report should be in HTML format.
 Focus on clarity, logical structure, and engagement, suitable for bosses or business clients as per the system prompt's [REPORT_SUGGESTION] guidelines.
 
+Please adhere to the following HTML styling for the report:
+- Heading elements (e.g., <h1>, <h2>).
+- Subheading elements (e.g., <h3>, <h4>).
+- Main body text elements (e.g., <p>, <li>, general text).
+- Apply 1.5 line spacing for text content where appropriate.
+- Use 'Nanum Gothic' font for Korean text and 'Times New Roman' for English text, if specified in the overall system prompt.
+These styles should be embedded within the HTML, for example, using inline CSS (e.g., style="font-size: 20pt;") or a <style> block.
+
+You are an intelligent OCR assistant. Extract all readable content from the attached image and return it in a clean, structured report format. Use the following rules:
+
+- Bold section titles
+- Use bullet points for lists
+- Use tables (Markdown format) for any tabular data
+- Correct formatting inconsistencies
+- Remove any image noise, page numbers, or irrelevant artifacts
+The result should look like a clean text report ready for review.
+
+[Image]
+
 Please write the report in Korean.
-Please exclude '''html ''' from the report.
-Please follow LaTeX formatting, especially font size.
-The final output should be only the HTML report content, without any preliminary remarks, thoughts, or chat-like prefixes.
+
+The final output must be *only* the HTML content itself.
+- Do NOT include any markdown-style code block wrappers around the HTML (e.g., do not start with ```html or '''html and end with ``` or ''').
+- Do NOT include ```tool_code```.
+- Do NOT include ```Action```.
+- Do NOT include any LLM-specific logging, thoughts, or chat-like prefixes (e.g., "Thought:", "[chat]", "Okay, here is the HTML report:").
+The response should begin directly with <html> or a similar top-level HTML tag.
 """
         
         formatted_prompt_messages = prompt_template.format_messages(
             current_document_draft="", 
             retrieved_context="", 
             chat_history=[], 
-            input=report_generation_input 
+            input=report_generation_input
         )
         
         ai_response = llm.invoke(formatted_prompt_messages)
@@ -147,9 +157,53 @@ The final output should be only the HTML report content, without any preliminary
 
         # Post-process to remove unwanted markers
         report_html = report_html.replace("Thought:", "").strip()
-        report_html = report_html.replace("[chat]", "").strip()
-        # Add more replacements if other variations of "thought" or unwanted markers appear
+        report_html = report_html.replace("[CHAT]", "").strip() # Also handle uppercase
 
+        # More robust post-processing to remove common textual prefixes and markdown wrappers
+        
+        # 1. Remove known textual prefixes (case-insensitive, strips leading/trailing space around prefix)
+        text_prefixes_to_remove = [
+            "Thought:", "[CHAT]", "Okay, here is the HTML report:", "Okay, here's the HTML report:",
+            "Here is the HTML report:", "Here's the HTML report:", "Here is your HTML report:",
+            "Here's your HTML report:", "Sure, here is the HTML content:", "Sure, here's the HTML content:",
+            "The HTML report is as follows:", "The report is as follows:", "Here is the report:", "Here's the report:",
+            "Final Answer:", "Action Input:", "Observation:" # Other common agent outputs
+        ]
+        
+        current_html_processing = report_html.strip()
+        for _ in range(len(text_prefixes_to_remove) + 2): # Loop a few times for multiple/nested prefixes
+            made_change_in_pass = False
+            for prefix_str_template in text_prefixes_to_remove:
+                # Normalize the prefix_str_template to a regex pattern
+                # where spaces in the template can match one or more whitespace chars (incl. newlines).
+                # Special regex characters in the template are escaped.
+                
+                # Split the template by space, escape each part, then join with \s+
+                # This makes "Okay, here" match "Okay,\n here" or "Okay,  here" etc.
+                escaped_parts = [re.escape(part) for part in prefix_str_template.split(' ') if part]
+                if not escaped_parts: # If prefix_str_template was empty or only spaces
+                    continue
+                
+                # Construct regex: leading optional whitespace, then escaped parts joined by \s+, then trailing optional whitespace
+                # Example: "Okay, here" -> r"^\s*Okay,\s+here\s*"
+                # Example: "Thought:"   -> r"^\s*Thought:\s*" (no internal spaces to turn into \s+)
+                prefix_regex_core = r"\s+".join(escaped_parts)
+                full_pattern_for_match = rf"^\s*{prefix_regex_core}\s*"
+
+                match = re.match(full_pattern_for_match, current_html_processing, re.IGNORECASE) # \s includes newlines, so DOTALL often not needed here for \s
+                if match:
+                    current_html_processing = current_html_processing[match.end():].strip()
+                    made_change_in_pass = True
+                    break # Restart checking prefixes with the modified string as it has changed
+            if not made_change_in_pass:
+                break # No prefixes were removed in a full pass
+        report_html = current_html_processing
+
+        # 2. Remove markdown-style code block wrappers (``` or ''') if they enclose the entire content
+        match_wrapper = re.match(r"^\s*(?:```|''')(?:[a-zA-Z0-9]*)?\s*(.*?)\s*(?:```|''')\s*$", report_html, re.DOTALL | re.IGNORECASE)
+        if match_wrapper:
+            report_html = match_wrapper.group(1).strip()
+            
         if not ("<html" in report_html.lower() or "<body" in report_html.lower() or "<div" in report_html.lower()):
              report_html = f"<html><head><title>Generated Report</title></head><body><pre>{report_html}</pre></body></html>"
         
