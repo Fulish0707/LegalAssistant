@@ -62,20 +62,20 @@ graph LR
 
     subgraph Processing["처리 계층"]
         direction TB
-        P_Flask[Flask App: app.py]
-        P_Langchain[Langchain Agent: langchain_config.py]
-        P_LLM[LLM: Gemini (llm_model.py)]
-        P_Embed[Embedding: text-embedding-004 (llm_model.py)]
-        P_OCR[OCR: Tesseract (llm_ocr.py)]
-        P_STT[STT: Naver Clova (llm_stt.py)]
-        P_SerpAPI[Web Search: SerpAPI]
+        P_Flask["Flask App: app.py"]
+        P_Langchain["Langchain Agent: langchain_config.py"]
+        P_LLM["LLM: Gemini (llm_model.py)"]
+        P_Embed["Embedding: text-embedding-004 (llm_model.py)"]
+        P_OCR["OCR: Tesseract (llm_ocr.py)"]
+        P_STT["STT: Naver Clova (llm_stt.py)"]
+        P_SerpAPI["Web Search: SerpAPI"]
     end
 
     subgraph DataStorage["데이터 저장소"]
         direction TB
-        DS_Chroma[ChromaDB: Vector Store (RAG Documents)]
-        DS_SQLite[SQLite: Chat History, Drafts]
-        DS_Docs[./documents: Source Docs for RAG]
+        DS_Chroma["ChromaDB: Vector Store (RAG Documents)"]
+        DS_SQLite["SQLite: Chat History, Drafts"]
+        DS_Docs["./documents: Source Docs for RAG"]
     end
 
     UI_Text --> P_Flask
@@ -93,7 +93,7 @@ graph LR
 
     P_Flask -- Stores/Retrieves --> DS_SQLite
 
-    P_LLM --> UserOutput[사용자 출력: 웹 UI]
+    P_LLM --> UserOutput["사용자 출력: 웹 UI"]
 
     classDef user fill:#E6E6FA,stroke:#333,stroke-width:2px;
     classDef processing fill:#D4F1F4,stroke:#333,stroke-width:2px;
