@@ -54,14 +54,12 @@
 ```mermaid
 graph TD
     subgraph UserInput["사용자 입력"]
-        direction LR
         UI_Text[텍스트 입력]
         UI_DocUpload[문서 업로드 .pdf, .docx, .png]
         UI_Audio[음성 입력]
     end
 
     subgraph Processing["처리 계층"]
-        direction TB
         P_Flask["Flask App: app.py"]
         P_Langchain["Langchain Agent: langchain_config.py"]
         P_LLM["LLM: Gemini (llm_model.py)"]
@@ -72,7 +70,6 @@ graph TD
     end
 
     subgraph DataStorage["데이터 저장소"]
-        direction TB
         DS_Chroma["ChromaDB: Vector Store (RAG Documents)"]
         DS_SQLite["SQLite: Chat History, Drafts"]
         DS_Docs["./documents: Source Docs for RAG"]
