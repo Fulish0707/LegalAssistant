@@ -52,7 +52,7 @@
 ## 4. 시스템 아키텍처 및 작동 방식 (System Architecture & How it Works)
 
 ```mermaid
-graph LR
+graph TD
     subgraph UserInput["사용자 입력"]
         direction LR
         UI_Text[텍스트 입력]
