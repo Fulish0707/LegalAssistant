@@ -92,10 +92,6 @@ graph TD
 
     P_LLM --> UserOutput["사용자 출력: 웹 UI"]
 
-    classDef user fill:#E6E6FA,stroke:#333,stroke-width:2px;
-    classDef processing fill:#D4F1F4,stroke:#333,stroke-width:2px;
-    classDef data fill:#FFFACD,stroke:#333,stroke-width:2px;
-
     class UserInput,P_Flask,P_Langchain,P_LLM,P_Embed,P_OCR,P_STT,P_SerpAPI,DS_Chroma,DS_SQLite,DS_Docs,UserOutput user
     class Processing processing
     class DataStorage data
