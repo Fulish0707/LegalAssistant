@@ -1,4 +1,4 @@
-# PS_Agent: AI 기반 자기소개서 및 보고서 작성 보조 에이전트
+# PS_Agent: AI 기반 보고서 작성 보조 에이전트
 
 **RAG (Retrieval Augmented Generation) 및 LLM (Large Language Model) 기반 포트폴리오 프로젝트**
 
