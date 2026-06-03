@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.py[cod]
+*$py.class
+
+.venv/
+venv/
+env/
+
+uploads/
+sqlite_db/*.db
+chroma_db/
+
+.ipynb_checkpoints/
+.vscode/

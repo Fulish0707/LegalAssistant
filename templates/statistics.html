@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PS_Agent - Statistics</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background: #f6f7f9;
+            min-height: 100vh;
+        }
+        .function-bar .btn {
+            margin-right: 0.5rem;
+        }
+        .workspace {
+            min-height: calc(100vh - 150px);
+        }
+        .output-panel {
+            min-height: 560px;
+        }
+        #statisticsOutput {
+            min-height: 480px;
+            overflow-y: auto;
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 0.375rem;
+            padding: 1rem;
+        }
+        #statisticsOutput h2 {
+            font-size: 1.3rem;
+            margin-bottom: 0.5rem;
+        }
+        #statisticsOutput h3 {
+            font-size: 1.05rem;
+            margin-top: 1.2rem;
+        }
+        #statisticsOutput h4 {
+            font-size: 0.95rem;
+            margin-top: 0.9rem;
+        }
+        .stat-tile {
+            border: 1px solid #dee2e6;
+            border-radius: 0.375rem;
+            padding: 0.75rem;
+            background: #f8f9fa;
+        }
+        .stat-tile span {
+            display: block;
+            color: #6c757d;
+            font-size: 0.8rem;
+        }
+        .stat-tile strong {
+            font-size: 1.4rem;
+        }
+        .metadata {
+            font-size: 0.85rem;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <header class="bg-light border-bottom py-3">
+        <div class="container">
+            <h1 class="h2 mb-3">PS_Agent Work Companion</h1>
+            <div class="function-bar">
+                <a href="chatbot.html" class="btn btn-outline-primary"><i class="bi bi-chat"></i> Chat</a>
+                <a href="document.html" class="btn btn-outline-primary"><i class="bi bi-file-text"></i> Documents</a>
+                <a href="audio.html" class="btn btn-outline-primary"><i class="bi bi-mic"></i> Audio</a>
+                <button class="btn btn-primary active"><i class="bi bi-bar-chart"></i> Statistics</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="py-4">
+        <div class="container workspace">
+            <div class="row g-3">
+                <div class="col-lg-4">
+                    <section class="card">
+                        <div class="card-body">
+                            <h2 class="h5 mb-3">Data Workspace</h2>
+
+                            <div class="mb-3">
+                                <label for="dataUpload" class="form-label">Upload data</label>
+                                <input class="form-control" type="file" id="dataUpload" accept=".csv,.tsv,.xlsx">
+                                <div class="form-text">CSV, TSV, XLSX</div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="analysisQuestion" class="form-label">Focus</label>
+                                <textarea class="form-control" id="analysisQuestion" rows="4" placeholder="Optional: metric to explain, group to compare, concern to investigate, or audience for the readout."></textarea>
+                            </div>
+
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="addToKnowledgeBase" checked>
+                                <label class="form-check-label" for="addToKnowledgeBase">
+                                    Save analysis to chat knowledge base
+                                </label>
+                            </div>
+
+                            <button id="analyzeButton" class="btn btn-primary w-100" type="button">
+                                <i class="bi bi-activity"></i> Analyze
+                            </button>
+                            <button id="downloadButton" class="btn btn-outline-secondary w-100 mt-2" type="button" disabled>
+                                <i class="bi bi-download"></i> Download Report
+                            </button>
+
+                            <div id="statusText" class="metadata mt-3">Ready.</div>
+                        </div>
+                    </section>
+                </div>
+
+                <div class="col-lg-8">
+                    <section class="card output-panel">
+                        <div class="card-body">
+                            <h2 class="h5 d-flex align-items-center justify-content-between">
+                                Analysis
+                                <span id="analysisBadge" class="badge text-bg-secondary">No file</span>
+                            </h2>
+                            <div id="statisticsOutput" class="mt-3">
+                                <p class="text-muted">Upload a dataset to generate a statistical readout.</p>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const dataUpload = document.getElementById('dataUpload');
+        const analysisQuestion = document.getElementById('analysisQuestion');
+        const addToKnowledgeBase = document.getElementById('addToKnowledgeBase');
+        const analyzeButton = document.getElementById('analyzeButton');
+        const downloadButton = document.getElementById('downloadButton');
+        const statusText = document.getElementById('statusText');
+        const statisticsOutput = document.getElementById('statisticsOutput');
+        const analysisBadge = document.getElementById('analysisBadge');
+        let lastReportHtml = '';
+
+        function setBusy(isBusy) {
+            analyzeButton.disabled = isBusy;
+            analyzeButton.innerHTML = isBusy
+                ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Analyzing'
+                : '<i class="bi bi-activity"></i> Analyze';
+        }
+
+        function setStatus(message) {
+            statusText.textContent = message;
+        }
+
+        analyzeButton.addEventListener('click', async () => {
+            if (!dataUpload.files.length) {
+                setStatus('Choose a CSV, TSV, or XLSX file first.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', dataUpload.files[0]);
+            formData.append('question', analysisQuestion.value.trim());
+            formData.append('add_to_knowledge_base', addToKnowledgeBase.checked ? 'true' : 'false');
+
+            setBusy(true);
+            downloadButton.disabled = true;
+            analysisBadge.className = 'badge text-bg-warning';
+            analysisBadge.textContent = 'Working';
+            statisticsOutput.innerHTML = '<p class="text-muted">Analyzing dataset...</p>';
+
+            try {
+                const response = await fetch('/statistics/analyze', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || 'Statistics analysis failed.');
+                }
+
+                lastReportHtml = result.report_html || '';
+                statisticsOutput.innerHTML = lastReportHtml;
+                downloadButton.disabled = !lastReportHtml;
+                analysisBadge.className = result.ai_enabled ? 'badge text-bg-success' : 'badge text-bg-secondary';
+                analysisBadge.textContent = result.ai_enabled ? 'AI + stats' : 'Local stats';
+
+                let kbMessage = '';
+                if (result.knowledge_base && result.knowledge_base.ok) {
+                    kbMessage = ` Saved ${result.knowledge_base.chunk_count} knowledge chunks.`;
+                } else if (result.knowledge_base && !result.knowledge_base.ok) {
+                    kbMessage = ` Knowledge save skipped: ${result.knowledge_base.message}`;
+                }
+                setStatus(`Analyzed ${result.analysis.row_count} rows and ${result.analysis.column_count} columns.${kbMessage}`);
+            } catch (error) {
+                statisticsOutput.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+                analysisBadge.className = 'badge text-bg-danger';
+                analysisBadge.textContent = 'Error';
+                setStatus(error.message);
+            } finally {
+                setBusy(false);
+            }
+        });
+
+        downloadButton.addEventListener('click', () => {
+            if (!lastReportHtml) {
+                return;
+            }
+            const fullHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Statistics Report</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"></head><body class="p-4">${lastReportHtml}</body></html>`;
+            const blob = new Blob([fullHtml], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'statistics-report.html';
+            link.click();
+            URL.revokeObjectURL(url);
+        });
+    </script>
+</body>
+</html>

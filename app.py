@@ -1,12 +1,19 @@
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context, g
-from langchain_config import retriever, memory, agent # Assuming these are correctly configured
+from langchain_config import (
+    retriever,
+    memory,
+    agent,
+    ingest_text_to_vector_store,
+    get_knowledge_base_status,
+    clear_knowledge_base,
+) # Assuming these are correctly configured
 import time # Needed for a brief pause
 import logging
 import sqlite3
 import json
 import queue
 import re # Added for cleaning output
-from langchain.callbacks.base import BaseCallbackHandler
+from langchain_core.callbacks import BaseCallbackHandler
 import os
 import sys
 from werkzeug.utils import secure_filename
@@ -34,6 +41,14 @@ except ModuleNotFoundError:
 # This might require adjustments if langchain_config doesn't expose llm directly
 from llm_prompt import prompt as main_chat_prompt_template
 from langchain_config import llm # TRYING TO IMPORT LLM DIRECTLY
+from statistics_analysis import (
+    ALLOWED_STATISTICS_EXTENSIONS,
+    analyze_dataframe,
+    build_ai_statistics_prompt,
+    build_statistics_knowledge_text,
+    load_table,
+    render_statistics_html,
+)
 
 # Disable Flask's default request logging for cleaner output if not needed
 log = logging.getLogger('werkzeug')
@@ -41,7 +56,10 @@ log.setLevel(logging.ERROR) # or logging.INFO for more details
 
 app = Flask(__name__)
 
-DB_FILE = "sqlite_db/app_state.db" # Define DB_FILE before use
+DB_FILE = os.getenv("APP_STATE_DB", "sqlite_db/app_state.db") # Define DB_FILE before use
+db_dir = os.path.dirname(DB_FILE)
+if db_dir:
+    os.makedirs(db_dir, exist_ok=True)
 
 # Ensure DB is initialized when app module is loaded
 # This is a simple way for development; for production, a CLI command or more sophisticated setup might be used.
@@ -188,6 +206,55 @@ def clean_agent_output(text_content):
             
     return cleaned_text.strip()
 
+def parse_agent_output_sections(text_content):
+    """Split model output into user-facing chat and writing/report suggestions."""
+    section_names = [
+        "CHAT",
+        "STATEMENT_SUGGESTION",
+        "JOB_STATEMENT_SUGGESTION",
+        "REPORT_SUGGESTION",
+    ]
+    parsed = {name: "" for name in section_names}
+    if not text_content:
+        return {
+            "chat_response": "",
+            "statement_suggestion": "",
+            "job_statement_suggestion": "",
+            "report_suggestion": "",
+        }
+
+    section_pattern = re.compile(
+        r"\[(CHAT|STATEMENT_SUGGESTION|JOB_STATEMENT_SUGGESTION|REPORT_SUGGESTION)\]",
+        re.IGNORECASE,
+    )
+    matches = list(section_pattern.finditer(text_content))
+    if not matches:
+        return {
+            "chat_response": text_content.strip(),
+            "statement_suggestion": "",
+            "job_statement_suggestion": "",
+            "report_suggestion": "",
+        }
+
+    for index, match in enumerate(matches):
+        name = match.group(1).upper()
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text_content)
+        parsed[name] = text_content[start:end].strip()
+
+    chat_response = parsed["CHAT"].strip()
+    if not chat_response:
+        chat_response = text_content[:matches[0].start()].strip()
+    if not chat_response:
+        chat_response = "I prepared suggestions for your document."
+
+    return {
+        "chat_response": chat_response,
+        "statement_suggestion": parsed["STATEMENT_SUGGESTION"].strip(),
+        "job_statement_suggestion": parsed["JOB_STATEMENT_SUGGESTION"].strip(),
+        "report_suggestion": parsed["REPORT_SUGGESTION"].strip(),
+    }
+
 # --- Langchain Callback Handler ---
 class StreamingCallbackHandler(BaseCallbackHandler):
     def __init__(self, queue):
@@ -262,6 +329,10 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
     """
     full_streamed_llm_output = ""
     try:
+        if agent is None:
+            yield f"data: {json.dumps({'type': 'error', 'content': 'AI chat is not configured. Set GOOGLE_API_KEY in .env and restart the app.'})}\n\n"
+            return
+
         q = queue.Queue()
         streaming_handler = StreamingCallbackHandler(q)
 
@@ -314,14 +385,13 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
         # Clean the final agent output string
         cleaned_agent_output_string = clean_agent_output(agent_output_string)
         
-        parsed_chat_response = cleaned_agent_output_string if cleaned_agent_output_string else "Sorry, I couldn't generate a response."
+        parsed_sections = parse_agent_output_sections(cleaned_agent_output_string)
+        parsed_chat_response = parsed_sections["chat_response"] if parsed_sections["chat_response"] else "Sorry, I couldn't generate a response."
         if not agent_output_string: # Log warning based on original output
              print(f"Warning: Agent returned an empty 'output'. Full response object: {agent_response_obj}")
         elif not cleaned_agent_output_string and agent_output_string: # Log if cleaning resulted in empty
              print(f"Warning: Agent output became empty after cleaning. Original: '{agent_output_string}'")
 
-
-        parsed_statement_suggestion = "" # Assuming agent doesn't produce this by default. If it did, it should also be cleaned.
 
         # Save assistant message and update Langchain memory
         # This needs to be done carefully. If called from GET, user_input might not be in DB yet
@@ -337,7 +407,9 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
         final_data = {
             "type": "final_response",
             "chat_response": parsed_chat_response,
-            "statement_suggestion": parsed_statement_suggestion,
+            "statement_suggestion": parsed_sections["statement_suggestion"],
+            "job_statement_suggestion": parsed_sections["job_statement_suggestion"],
+            "report_suggestion": parsed_sections["report_suggestion"],
             "current_draft_processed": current_personal_statement_draft
         }
         yield f"data: {json.dumps(final_data)}\n\n"
@@ -368,6 +440,20 @@ def document_page():
 @app.route('/audio.html')
 def audio_page():
     return render_template('audio.html')
+
+@app.route('/statistics.html')
+def statistics_page():
+    return render_template('statistics.html')
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        "status": "ok",
+        "llm_configured": llm is not None,
+        "agent_configured": agent is not None,
+        "search_configured": bool(os.getenv("SERPAPI_API_KEY")),
+        "naver_stt_configured": bool(os.getenv("client_id")) and bool(os.getenv("client_secret")),
+    })
 
 @app.route('/chat', methods=['GET', 'POST'])
 def chat():
@@ -459,6 +545,15 @@ def clear_chat_history_endpoint():
         logging.error(f"Error clearing chat history: {e}")
         return jsonify({"error": "Failed to clear chat history."}), 500
 
+@app.route('/knowledge_base/status', methods=['GET'])
+def knowledge_base_status_route():
+    return jsonify(get_knowledge_base_status())
+
+@app.route('/knowledge_base/clear', methods=['POST'])
+def clear_knowledge_base_route():
+    result = clear_knowledge_base()
+    return jsonify(result), 200 if result.get("ok") else 500
+
 
 def application_setup():
     """Encapsulates setup that should happen in the worker process."""
@@ -484,6 +579,80 @@ def allowed_file(filename, allowed_extensions):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
+
+@app.route('/statistics/analyze', methods=['POST'])
+def analyze_statistics_route():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+
+    if not allowed_file(file.filename, ALLOWED_STATISTICS_EXTENSIONS):
+        return jsonify({"error": "File type not allowed. Upload CSV, TSV, or XLSX."}), 400
+
+    filename = secure_filename(file.filename)
+    file_extension = filename.rsplit('.', 1)[1].lower()
+    user_question = request.form.get('question', '')
+    add_to_knowledge_base = request.form.get('add_to_knowledge_base', '').lower() in {'1', 'true', 'yes', 'on'}
+    temp_file_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            dir=app.config['UPLOAD_FOLDER'],
+            suffix=os.path.splitext(filename)[1],
+        ) as temp_file_obj:
+            temp_file_path = temp_file_obj.name
+            file.save(temp_file_obj)
+
+        dataframe = load_table(temp_file_path, file_extension)
+        analysis = analyze_dataframe(dataframe)
+
+        ai_insight = None
+        if llm is not None:
+            prompt_text = build_ai_statistics_prompt(filename, analysis, user_question)
+            ai_response = llm.invoke(prompt_text)
+            ai_insight = getattr(ai_response, "content", str(ai_response))
+
+        report_html = render_statistics_html(
+            filename=filename,
+            analysis=analysis,
+            ai_insight=ai_insight,
+            ai_enabled=llm is not None,
+        )
+
+        response_payload = {
+            "report_html": report_html,
+            "analysis": analysis,
+            "ai_enabled": llm is not None,
+            "filename": filename,
+        }
+
+        if add_to_knowledge_base:
+            response_payload["knowledge_base"] = ingest_text_to_vector_store(
+                text=build_statistics_knowledge_text(filename, analysis, ai_insight),
+                source_name=filename,
+                metadata={
+                    "analysis_type": "statistics",
+                    "uploaded_via": "statistics_workspace",
+                },
+            )
+
+        return jsonify(response_payload), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        app.logger.error(f"Unhandled error in analyze_statistics_route for {filename}: {str(e)}", exc_info=True)
+        return jsonify({"error": f"An unexpected server error occurred during statistics analysis: {str(e)}"}), 500
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except Exception as e_clean:
+                app.logger.error(f"Error cleaning up temp file {temp_file_path}: {e_clean}")
+
 # --- OCR Processing Route (Existing) ---
 @app.route('/process_document_ocr', methods=['POST'])
 def process_document_ocr():
@@ -491,11 +660,18 @@ def process_document_ocr():
         return jsonify({
             "error": "OCR processing requires optional OCR dependencies such as pytesseract."
         }), 503
+    if llm is None:
+        return jsonify({
+            "error": "Document analysis requires GOOGLE_API_KEY to be configured in .env."
+        }), 503
 
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
     file = request.files['file']
     user_instructions = request.form.get('user_instructions', '')
+    analysis_mode = request.form.get('analysis_mode', 'report')
+    question = request.form.get('question', '')
+    add_to_knowledge_base = request.form.get('add_to_knowledge_base', '').lower() in {'1', 'true', 'yes', 'on'}
 
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
@@ -517,15 +693,29 @@ def process_document_ocr():
         # At this point, temp_file_obj is closed, and the file is saved at temp_file_path
         file_extension = filename.rsplit('.', 1)[1].lower()
 
-        # Call the refactored function in llm_ocr.py
-        result_dict, status_code = llm_ocr.generate_report_from_document(
+        result_dict, status_code = llm_ocr.analyze_document(
             file_path=temp_file_path,
             file_extension=file_extension,
             user_instructions=user_instructions,
             llm=llm, # Passed from app.py's imports
             prompt_template=main_chat_prompt_template, # Passed from app.py's imports
-            logger=app.logger # Pass Flask app's logger
+            logger=app.logger, # Pass Flask app's logger
+            analysis_mode=analysis_mode,
+            question=question,
+            include_extracted_text=add_to_knowledge_base
         )
+
+        if status_code == 200 and add_to_knowledge_base:
+            extracted_text = result_dict.pop("extracted_text", "")
+            ingestion_result = ingest_text_to_vector_store(
+                text=extracted_text,
+                source_name=filename,
+                metadata={
+                    "analysis_mode": analysis_mode,
+                    "uploaded_via": "document_workspace",
+                }
+            )
+            result_dict["knowledge_base"] = ingestion_result
         
         return jsonify(result_dict), status_code
 
@@ -615,6 +805,9 @@ def process_audio_common(audio_file_path):
         return {"summary": "Audio appears to be silent or could not be transcribed.", "transcript": transcript}
 
     # 2. Summarize transcript using LLM
+    if llm is None:
+        return {"error": "Audio summarization requires GOOGLE_API_KEY to be configured on server.", "transcript": transcript, "summary": ""}
+
     try:
         summarization_input_text = f"""Please summarize the following audio transcript concisely:
         --- TRANSCRIPT START ---

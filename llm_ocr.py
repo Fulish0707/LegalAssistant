@@ -5,6 +5,43 @@ import PyPDF2 # Added for PDF processing
 import re # Added for improved post-processing
 import docx # Added for DOCX processing
 
+DOCUMENT_ANALYSIS_MODES = {
+    "summary": {
+        "label": "Document Summary",
+        "instruction": """Create a concise but useful document summary.
+Include:
+- Executive summary
+- Key points
+- Important details, numbers, dates, or claims
+- Suggested follow-up questions""",
+    },
+    "report": {
+        "label": "Professional Report",
+        "instruction": """Create a polished professional report for a boss or business client.
+Include:
+- Clear title
+- Executive summary
+- Main findings
+- Supporting evidence
+- Recommendations or next steps""",
+    },
+    "actions": {
+        "label": "Action Items",
+        "instruction": """Extract operationally useful action items from the document.
+Include:
+- Tasks
+- Owners if mentioned
+- Deadlines if mentioned
+- Risks or dependencies
+- Open questions""",
+    },
+    "qa": {
+        "label": "Document Q&A",
+        "instruction": """Answer the user's question using only the document content.
+If the document does not contain enough evidence, say what is missing and avoid guessing.""",
+    },
+}
+
 def detect_text(image_path):
     """
     Extracts text from an image file using Tesseract OCR.
@@ -34,87 +71,123 @@ def detect_text(image_path):
         # General error during OCR.
         return f"Error during Tesseract OCR processing: {str(e)}"
 
-def generate_report_from_document(file_path, file_extension, user_instructions, llm, prompt_template, logger):
-    """
-    Processes a document file (image, txt, pdf, docx), extracts text,
-    and generates an HTML report using an LLM.
+def extract_text_from_document(file_path, file_extension, logger):
+    if file_extension in {'png', 'jpg', 'jpeg'}:
+        extracted_text = detect_text(file_path)
+        if extracted_text.startswith("Error:"):
+            logger.error(f"OCR error for image {file_path}: {extracted_text}")
+            return ({"error": extracted_text}, 400 if "not found at path" in extracted_text else 500)
+        return ({"text": extracted_text}, 200)
 
-    Args:
-        file_path (str): Path to the temporary document file.
-        file_extension (str): Lowercase extension of the file (e.g., 'pdf', 'png').
-        user_instructions (str): Custom instructions from the user for the report.
-        llm: The initialized language model instance.
-        prompt_template: The Langchain prompt template for formatting LLM input.
-        logger: The Flask app's logger instance for logging.
-
-    Returns:
-        tuple: (result_dict, status_code)
-               result_dict can be {"report_html": "..."} on success or {"error": "..."} on failure.
-    """
-    extracted_text = ""
-    
-    try:
-        if file_extension in {'png', 'jpg', 'jpeg'}:
-            extracted_text = detect_text(file_path)
-            if extracted_text.startswith("Error:"): # Check if detect_text returned an error string
-                logger.error(f"OCR error for image {file_path}: {extracted_text}")
-                return ({"error": extracted_text}, 400 if "not found at path" in extracted_text else 500)
-        elif file_extension == 'txt':
+    if file_extension == 'txt':
+        try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                extracted_text = f.read()
-        elif file_extension == 'pdf':
-            try:
-                with open(file_path, 'rb') as pdf_file_obj:
-                    reader = PyPDF2.PdfReader(pdf_file_obj)
-                    text_parts = []
-                    if not reader.pages:
-                        logger.warning(f"PDF file {file_path} has no pages.")
-                    for page in reader.pages:
-                        page_text = page.extract_text()
-                        if page_text:
-                            text_parts.append(page_text)
-                    extracted_text = "\n".join(text_parts)
-                if not extracted_text.strip() and reader.pages:
-                     logger.warning(f"No text extracted from PDF {file_path}. It might be image-based or protected.")
-            except PyPDF2.errors.PdfReadError as e_pdf_read:
-                logger.error(f"PyPDF2 could not read PDF {file_path}: {e_pdf_read}")
-                return ({"error": f"Invalid or corrupted PDF file. Error: {str(e_pdf_read)}"}, 400)
-            except ImportError: 
-                logger.error("PyPDF2 library is not installed for PDF processing.")
-                return ({"error": "PDF processing library (PyPDF2) not available on server."}, 501)
-            except Exception as e_pdf:
-                logger.error(f"Error processing PDF {file_path}: {e_pdf}", exc_info=True)
-                return ({"error": f"Failed to extract text from PDF: {str(e_pdf)}"}, 500)
-        elif file_extension == 'docx':
-            try:
-                doc_obj = docx.Document(file_path)
-                text_parts = [para.text for para in doc_obj.paragraphs if para.text]
-                extracted_text = "\n".join(text_parts)
-                if not extracted_text.strip() and doc_obj.paragraphs:
-                    logger.warning(f"No text extracted from DOCX {file_path}, though it has paragraphs.")
-            except ImportError: 
-                logger.error("python-docx library is not installed for DOCX processing.")
-                return ({"error": "DOCX processing library (python-docx) not available on server."}, 501)
-            except Exception as e_docx: 
-                logger.error(f"Error processing DOCX {file_path}: {e_docx}", exc_info=True)
-                return ({"error": f"Failed to extract text from DOCX: {str(e_docx)}"}, 500)
-        
-        if not extracted_text.strip():
-            logger.warning(f"Could not extract text from '{file_path}' or the document is empty/non-textual after processing.")
-            return ({"error": "Could not extract text from the document, or the document is empty/non-textual."}, 400)
+                return ({"text": f.read()}, 200)
+        except UnicodeDecodeError:
+            with open(file_path, 'r', encoding='cp949') as f:
+                return ({"text": f.read()}, 200)
 
-        # --- LLM Processing ---
-        report_generation_input = f"""Please generate a report based on the following document content and instructions.
+    if file_extension == 'pdf':
+        try:
+            with open(file_path, 'rb') as pdf_file_obj:
+                reader = PyPDF2.PdfReader(pdf_file_obj)
+                text_parts = []
+                if not reader.pages:
+                    logger.warning(f"PDF file {file_path} has no pages.")
+                for page in reader.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text_parts.append(page_text)
+                extracted_text = "\n".join(text_parts)
+            if not extracted_text.strip() and reader.pages:
+                logger.warning(f"No text extracted from PDF {file_path}. It might be image-based or protected.")
+            return ({"text": extracted_text}, 200)
+        except PyPDF2.errors.PdfReadError as e_pdf_read:
+            logger.error(f"PyPDF2 could not read PDF {file_path}: {e_pdf_read}")
+            return ({"error": f"Invalid or corrupted PDF file. Error: {str(e_pdf_read)}"}, 400)
+        except ImportError:
+            logger.error("PyPDF2 library is not installed for PDF processing.")
+            return ({"error": "PDF processing library (PyPDF2) not available on server."}, 501)
+        except Exception as e_pdf:
+            logger.error(f"Error processing PDF {file_path}: {e_pdf}", exc_info=True)
+            return ({"error": f"Failed to extract text from PDF: {str(e_pdf)}"}, 500)
+
+    if file_extension == 'docx':
+        try:
+            doc_obj = docx.Document(file_path)
+            text_parts = [para.text for para in doc_obj.paragraphs if para.text]
+            return ({"text": "\n".join(text_parts)}, 200)
+        except ImportError:
+            logger.error("python-docx library is not installed for DOCX processing.")
+            return ({"error": "DOCX processing library (python-docx) not available on server."}, 501)
+        except Exception as e_docx:
+            logger.error(f"Error processing DOCX {file_path}: {e_docx}", exc_info=True)
+            return ({"error": f"Failed to extract text from DOCX: {str(e_docx)}"}, 500)
+
+    return ({"error": "Unsupported document type."}, 400)
+
+def clean_html_response(report_html):
+    report_html = report_html.replace("Thought:", "").strip()
+    report_html = report_html.replace("[CHAT]", "").strip()
+
+    text_prefixes_to_remove = [
+        "Thought:", "[CHAT]", "Okay, here is the HTML report:", "Okay, here's the HTML report:",
+        "Here is the HTML report:", "Here's the HTML report:", "Here is your HTML report:",
+        "Here's your HTML report:", "Sure, here is the HTML content:", "Sure, here's the HTML content:",
+        "The HTML report is as follows:", "The report is as follows:", "Here is the report:", "Here's the report:",
+        "Final Answer:", "Action Input:", "Observation:"
+    ]
+
+    current_html_processing = report_html.strip()
+    for _ in range(len(text_prefixes_to_remove) + 2):
+        made_change_in_pass = False
+        for prefix_str_template in text_prefixes_to_remove:
+            escaped_parts = [re.escape(part) for part in prefix_str_template.split(' ') if part]
+            if not escaped_parts:
+                continue
+            prefix_regex_core = r"\s+".join(escaped_parts)
+            full_pattern_for_match = rf"^\s*{prefix_regex_core}\s*"
+            match = re.match(full_pattern_for_match, current_html_processing, re.IGNORECASE)
+            if match:
+                current_html_processing = current_html_processing[match.end():].strip()
+                made_change_in_pass = True
+                break
+        if not made_change_in_pass:
+            break
+
+    report_html = current_html_processing
+    match_wrapper = re.match(r"^\s*(?:```|''')(?:[a-zA-Z0-9]*)?\s*(.*?)\s*(?:```|''')\s*$", report_html, re.DOTALL | re.IGNORECASE)
+    if match_wrapper:
+        report_html = match_wrapper.group(1).strip()
+
+    if not ("<html" in report_html.lower() or "<body" in report_html.lower() or "<div" in report_html.lower()):
+        report_html = f"<html><head><title>Generated Document Analysis</title></head><body><pre>{report_html}</pre></body></html>"
+
+    return report_html
+
+def build_document_analysis_prompt(extracted_text, user_instructions, analysis_mode, question):
+    mode_config = DOCUMENT_ANALYSIS_MODES.get(analysis_mode, DOCUMENT_ANALYSIS_MODES["report"])
+    prompt_user_instructions = user_instructions if user_instructions else "No extra instructions provided."
+    prompt_question = question if question else "No specific question provided."
+    return f"""Analyze the following document as a work companion.
+
+Mode: {mode_config["label"]}
+Mode instructions:
+{mode_config["instruction"]}
+
 The document content is:
 --- DOCUMENT CONTENT START ---
 {extracted_text}
 --- DOCUMENT CONTENT END ---
 
-User instructions for the report:
-{user_instructions if user_instructions else "No specific instructions provided. Please generate a comprehensive summary and analysis."}
+User instructions:
+{prompt_user_instructions}
 
-The report should be in HTML format.
-Focus on clarity, logical structure, and engagement, suitable for bosses or business clients as per the system prompt's [REPORT_SUGGESTION] guidelines.
+User question for Q&A mode:
+{prompt_question}
+
+The final answer must be in clean HTML format only.
+Write in Korean unless the user instructions explicitly request another language.
 
 Please adhere to the following HTML styling for the report:
 - Heading elements (e.g., <h1>, <h2>).
@@ -144,6 +217,28 @@ The final output must be *only* the HTML content itself.
 - Do NOT include any LLM-specific logging, thoughts, or chat-like prefixes (e.g., "Thought:", "[chat]", "Okay, here is the HTML report:").
 The response should begin directly with <html> or a similar top-level HTML tag.
 """
+
+def analyze_document(file_path, file_extension, user_instructions, llm, prompt_template, logger, analysis_mode="report", question="", include_extracted_text=False):
+    """
+    Extracts text from a document and analyzes it as a summary, report, action list, or Q&A answer.
+    """
+    try:
+        extraction_result, extraction_status = extract_text_from_document(file_path, file_extension, logger)
+        if extraction_status != 200:
+            return extraction_result, extraction_status
+
+        extracted_text = extraction_result.get("text", "")
+        if not extracted_text.strip():
+            logger.warning(f"Could not extract text from '{file_path}' or the document is empty/non-textual after processing.")
+            return ({"error": "Could not extract text from the document, or the document is empty/non-textual."}, 400)
+
+        analysis_mode = analysis_mode if analysis_mode in DOCUMENT_ANALYSIS_MODES else "report"
+        report_generation_input = build_document_analysis_prompt(
+            extracted_text=extracted_text,
+            user_instructions=user_instructions,
+            analysis_mode=analysis_mode,
+            question=question,
+        )
         
         formatted_prompt_messages = prompt_template.format_messages(
             current_document_draft="", 
@@ -154,64 +249,33 @@ The response should begin directly with <html> or a similar top-level HTML tag.
         
         ai_response = llm.invoke(formatted_prompt_messages)
         report_html = ai_response.content if hasattr(ai_response, 'content') else str(ai_response)
-
-        # Post-process to remove unwanted markers
-        report_html = report_html.replace("Thought:", "").strip()
-        report_html = report_html.replace("[CHAT]", "").strip() # Also handle uppercase
-
-        # More robust post-processing to remove common textual prefixes and markdown wrappers
+        report_html = clean_html_response(report_html)
         
-        # 1. Remove known textual prefixes (case-insensitive, strips leading/trailing space around prefix)
-        text_prefixes_to_remove = [
-            "Thought:", "[CHAT]", "Okay, here is the HTML report:", "Okay, here's the HTML report:",
-            "Here is the HTML report:", "Here's the HTML report:", "Here is your HTML report:",
-            "Here's your HTML report:", "Sure, here is the HTML content:", "Sure, here's the HTML content:",
-            "The HTML report is as follows:", "The report is as follows:", "Here is the report:", "Here's the report:",
-            "Final Answer:", "Action Input:", "Observation:" # Other common agent outputs
-        ]
-        
-        current_html_processing = report_html.strip()
-        for _ in range(len(text_prefixes_to_remove) + 2): # Loop a few times for multiple/nested prefixes
-            made_change_in_pass = False
-            for prefix_str_template in text_prefixes_to_remove:
-                # Normalize the prefix_str_template to a regex pattern
-                # where spaces in the template can match one or more whitespace chars (incl. newlines).
-                # Special regex characters in the template are escaped.
-                
-                # Split the template by space, escape each part, then join with \s+
-                # This makes "Okay, here" match "Okay,\n here" or "Okay,  here" etc.
-                escaped_parts = [re.escape(part) for part in prefix_str_template.split(' ') if part]
-                if not escaped_parts: # If prefix_str_template was empty or only spaces
-                    continue
-                
-                # Construct regex: leading optional whitespace, then escaped parts joined by \s+, then trailing optional whitespace
-                # Example: "Okay, here" -> r"^\s*Okay,\s+here\s*"
-                # Example: "Thought:"   -> r"^\s*Thought:\s*" (no internal spaces to turn into \s+)
-                prefix_regex_core = r"\s+".join(escaped_parts)
-                full_pattern_for_match = rf"^\s*{prefix_regex_core}\s*"
+        result = {
+            "report_html": report_html,
+            "analysis_mode": analysis_mode,
+            "extracted_text_preview": extracted_text[:1000],
+            "extracted_text_length": len(extracted_text),
+        }
+        if include_extracted_text:
+            result["extracted_text"] = extracted_text
 
-                match = re.match(full_pattern_for_match, current_html_processing, re.IGNORECASE) # \s includes newlines, so DOTALL often not needed here for \s
-                if match:
-                    current_html_processing = current_html_processing[match.end():].strip()
-                    made_change_in_pass = True
-                    break # Restart checking prefixes with the modified string as it has changed
-            if not made_change_in_pass:
-                break # No prefixes were removed in a full pass
-        report_html = current_html_processing
-
-        # 2. Remove markdown-style code block wrappers (``` or ''') if they enclose the entire content
-        match_wrapper = re.match(r"^\s*(?:```|''')(?:[a-zA-Z0-9]*)?\s*(.*?)\s*(?:```|''')\s*$", report_html, re.DOTALL | re.IGNORECASE)
-        if match_wrapper:
-            report_html = match_wrapper.group(1).strip()
-            
-        if not ("<html" in report_html.lower() or "<body" in report_html.lower() or "<div" in report_html.lower()):
-             report_html = f"<html><head><title>Generated Report</title></head><body><pre>{report_html}</pre></body></html>"
-        
-        return ({"report_html": report_html}, 200)
+        return (result, 200)
 
     except Exception as e:
-        logger.error(f"Unhandled error in generate_report_from_document for {file_path}: {str(e)}", exc_info=True)
+        logger.error(f"Unhandled error in analyze_document for {file_path}: {str(e)}", exc_info=True)
         return ({"error": f"An unexpected server error occurred during report generation: {str(e)}"}, 500)
+
+def generate_report_from_document(file_path, file_extension, user_instructions, llm, prompt_template, logger):
+    return analyze_document(
+        file_path=file_path,
+        file_extension=file_extension,
+        user_instructions=user_instructions,
+        llm=llm,
+        prompt_template=prompt_template,
+        logger=logger,
+        analysis_mode="report",
+    )
 
 
 if __name__ == '__main__':
