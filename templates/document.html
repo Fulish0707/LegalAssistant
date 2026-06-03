@@ -3,192 +3,268 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 도우미 - 문서</title>
-    <!-- Bootstrap 5 CSS -->
+    <title>PS_Agent - Documents</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
     <style>
         body {
-            background-color: #f8f9fa;
+            background: #f6f7f9;
             min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        .chat-container {
-            display: flex;
-            flex-direction: column;
-            height: calc(100vh - 150px);
-            flex-grow: 1;
-        }
-        .chat-messages {
-            flex-grow: 1;
-            overflow-y: auto;
-            scroll-behavior: smooth;
-            padding: 1rem;
-            background-color: #fff;
-            border: 1px solid #dee2e6;
-            border-radius: 0.25rem;
-            min-height: 0;
-        }
-        .chat-input {
-            position: sticky;
-            bottom: 0;
-            background: #fff;
-            padding: 0.5rem;
-            border-top: 1px solid #dee2e6;
-        }
-        .message {
-            max-width: 85%;
-            margin-bottom: 0.75rem;
-            padding: 0.75rem;
-            border-radius: 0.5rem;
-            animation: fadeIn 0.3s ease-in;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .thoughts-log {
-            max-height: 150px;
-            overflow-y: auto;
-            padding: 0.75rem;
-            background-color: #f8f9fa;
-            border: 1px solid #dee2e6;
-            border-radius: 0.25rem;
-        }
-        .saving-indicator.saving {
-            opacity: 1;
         }
         .function-bar .btn {
             margin-right: 0.5rem;
         }
-        .draft-container {
-            display: flex;
-            flex-direction: column;
-            height: calc(100vh - 300px);
-            flex-grow: 1;
+        .workspace {
+            min-height: calc(100vh - 150px);
         }
-        .draft-container textarea {
-            flex-grow: 1;
-            min-height: 0;
+        .tool-panel,
+        .output-panel {
+            height: 100%;
+        }
+        .mode-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.5rem;
+        }
+        .mode-button {
+            min-height: 76px;
+            text-align: left;
+        }
+        .mode-button .bi {
+            font-size: 1.15rem;
+            margin-right: 0.35rem;
+        }
+        .mode-button.active {
+            border-color: #0d6efd;
+            background: #e8f1ff;
+            color: #084298;
+        }
+        #reportOutput {
+            min-height: 430px;
+            overflow-y: auto;
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 0.375rem;
+        }
+        #reportOutput table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        #reportOutput th,
+        #reportOutput td {
+            border: 1px solid #dee2e6;
+            padding: 0.45rem;
+        }
+        .metadata {
+            font-size: 0.85rem;
+            color: #6c757d;
+        }
+        @media (max-width: 767.98px) {
+            .mode-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
 <body>
-    <!-- 헤더 -->
     <header class="bg-light border-bottom py-3">
         <div class="container">
-            <h1 class="h2 mb-3">무엇을 도와드릴까요?</h1>
+            <h1 class="h2 mb-3">PS_Agent Work Companion</h1>
             <div class="function-bar">
-                <a href="chatbot.html" class="btn btn-outline-primary"><i class="bi bi-chat"></i> 작성</a>
-                <button class="btn btn-primary active"><i class="bi bi-file-text"></i> 문서</button>
-                <a href="audio.html" class="btn btn-outline-primary"><i class="bi bi-mic"></i> 음성</a>
-                <!-- <a href="video.html" class="btn btn-outline-primary"><i class="bi bi-camera-reels"></i> 영상</a> -->
+                <a href="chatbot.html" class="btn btn-outline-primary"><i class="bi bi-chat"></i> Chat</a>
+                <button class="btn btn-primary active"><i class="bi bi-file-text"></i> Documents</button>
+                <a href="audio.html" class="btn btn-outline-primary"><i class="bi bi-mic"></i> Audio</a>
+                <a href="statistics.html" class="btn btn-outline-primary"><i class="bi bi-bar-chart"></i> Statistics</a>
             </div>
         </div>
     </header>
 
-    <!-- 메인 콘텐츠 -->
-    <main class="flex-grow-1 py-4">
-        <div class="container h-100 d-flex flex-column">
-            <div class="row flex-grow-1">
-                <div class="col-md-12 mb-4 d-flex flex-column">
-                    <div class="card flex-grow-1" id="document-content-area">
-                        <div class="card-body d-flex flex-column">
-                            <h2 class="card-title h5">문서 분석 및 보고서 생성</h2>
-                            
+    <main class="py-4">
+        <div class="container workspace">
+            <div class="row g-3 h-100">
+                <div class="col-lg-4">
+                    <section class="card tool-panel">
+                        <div class="card-body">
+                            <h2 class="h5 mb-3">Document Workspace</h2>
+
                             <div class="mb-3">
-                                <label for="fileUpload" class="form-label">분석할 파일 선택:</label>
+                                <label for="fileUpload" class="form-label">Upload file</label>
                                 <input class="form-control" type="file" id="fileUpload" accept=".pdf,.png,.jpg,.jpeg,.docx,.txt">
+                                <div class="form-text">PDF, TXT, DOCX, PNG, JPG, JPEG</div>
+                            </div>
+
+                            <label class="form-label">Mode</label>
+                            <div class="mode-grid mb-3" role="group" aria-label="Document analysis mode">
+                                <button class="btn btn-outline-secondary mode-button active" type="button" data-mode="summary">
+                                    <i class="bi bi-card-text"></i><strong>Summarize</strong>
+                                    <div class="small">Key points and takeaways</div>
+                                </button>
+                                <button class="btn btn-outline-secondary mode-button" type="button" data-mode="report">
+                                    <i class="bi bi-file-earmark-richtext"></i><strong>Write Report</strong>
+                                    <div class="small">Business-ready structure</div>
+                                </button>
+                                <button class="btn btn-outline-secondary mode-button" type="button" data-mode="actions">
+                                    <i class="bi bi-check2-square"></i><strong>Action Items</strong>
+                                    <div class="small">Tasks, risks, next steps</div>
+                                </button>
+                                <button class="btn btn-outline-secondary mode-button" type="button" data-mode="qa">
+                                    <i class="bi bi-question-circle"></i><strong>Ask Document</strong>
+                                    <div class="small">Answer from file content</div>
+                                </button>
+                            </div>
+
+                            <div class="mb-3 d-none" id="questionGroup">
+                                <label for="documentQuestion" class="form-label">Question</label>
+                                <textarea class="form-control" id="documentQuestion" rows="3" placeholder="Ask a question that should be answered from the uploaded document."></textarea>
                             </div>
 
                             <div class="mb-3">
-                                <label for="userInstructions" class="form-label">보고서 세부 지시사항 (선택 사항):</label>
-                                <textarea class="form-control" id="userInstructions" rows="3" placeholder="예: 이 문서에서 주요 재무 수치를 요약하고 표 형태로 제시해주세요. 또는 특정 주제에 대한 분석을 요청할 수 있습니다. 이 지시사항은 기본 프롬프트와 함께 사용됩니다."></textarea>
+                                <label for="userInstructions" class="form-label">Extra instructions</label>
+                                <textarea class="form-control" id="userInstructions" rows="4" placeholder="Optional: target audience, tone, output language, areas to focus on, or report format."></textarea>
                             </div>
-                            
-                            <button class="btn btn-primary mb-3" id="generateReportButton"><i class="bi bi-gear-fill"></i> 보고서 생성 시작</button>
-                            
-                            <hr>
-                            
-                            <h3 class="h5 mt-2 d-flex justify-content-between align-items-center">
-                                생성된 보고서
-                                <button class="btn btn-success btn-sm d-none" id="downloadReportButton"><i class="bi bi-download"></i> 다운로드</button>
-                            </h3>
-                            <div id="reportOutput" class="flex-grow-1 p-3" style="background-color: #e9ecef; border: 1px solid #ced4da; border-radius: 0.25rem; min-height: 364px; overflow-y: auto;">
-                                <p class="text-muted">보고서가 여기에 표시됩니다...</p>
-                                <!-- Images and diagrams will be rendered here as HTML -->
+
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="addToKnowledgeBase" checked>
+                                <label class="form-check-label" for="addToKnowledgeBase">
+                                    Save to chat knowledge base
+                                </label>
+                                <div class="form-text">Lets the main chat answer follow-up questions from this document.</div>
+                            </div>
+
+                            <button class="btn btn-primary w-100" id="generateReportButton">
+                                <i class="bi bi-stars"></i> Analyze Document
+                            </button>
+                        </div>
+                    </section>
+                </div>
+
+                <div class="col-lg-8">
+                    <section class="card output-panel">
+                        <div class="card-body d-flex flex-column">
+                            <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                                <div>
+                                    <h2 class="h5 mb-1" id="outputTitle">Document output</h2>
+                                    <div class="metadata" id="outputMeta">Upload a document and choose a mode.</div>
+                                </div>
+                                <button class="btn btn-success btn-sm d-none" id="downloadReportButton">
+                                    <i class="bi bi-download"></i> Download HTML
+                                </button>
+                            </div>
+                            <div id="reportOutput" class="flex-grow-1 p-3">
+                                <p class="text-muted mb-0">Your summary, report, action list, or document answer will appear here.</p>
                             </div>
                         </div>
-                    </div>
+                    </section>
                 </div>
             </div>
         </div>
     </main>
 
-    <!-- Bootstrap 5 JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            console.log("Document page loaded with OCR features.");
-
             const fileUpload = document.getElementById('fileUpload');
             const userInstructionsInput = document.getElementById('userInstructions');
+            const documentQuestion = document.getElementById('documentQuestion');
+            const questionGroup = document.getElementById('questionGroup');
+            const addToKnowledgeBase = document.getElementById('addToKnowledgeBase');
             const generateReportButton = document.getElementById('generateReportButton');
             const reportOutput = document.getElementById('reportOutput');
+            const outputTitle = document.getElementById('outputTitle');
+            const outputMeta = document.getElementById('outputMeta');
             const downloadReportButton = document.getElementById('downloadReportButton');
-            let generatedReportHtmlContent = null; // To store the HTML report content for display and download
+            const modeButtons = Array.from(document.querySelectorAll('.mode-button'));
+
+            const modeLabels = {
+                summary: 'Document Summary',
+                report: 'Professional Report',
+                actions: 'Action Items',
+                qa: 'Document Answer',
+            };
+
+            let selectedMode = 'summary';
+            let generatedReportHtmlContent = null;
+
+            function setMode(mode) {
+                selectedMode = mode;
+                modeButtons.forEach(button => {
+                    button.classList.toggle('active', button.dataset.mode === mode);
+                });
+                questionGroup.classList.toggle('d-none', mode !== 'qa');
+                outputTitle.textContent = modeLabels[mode] || 'Document output';
+            }
+
+            modeButtons.forEach(button => {
+                button.addEventListener('click', () => setMode(button.dataset.mode));
+            });
+
+            fileUpload.addEventListener('change', () => {
+                generatedReportHtmlContent = null;
+                downloadReportButton.classList.add('d-none');
+                const fileName = fileUpload.files[0] ? fileUpload.files[0].name : 'No file selected';
+                outputMeta.textContent = fileName;
+                reportOutput.innerHTML = '<p class="text-muted mb-0">Ready to analyze the selected document.</p>';
+            });
 
             generateReportButton.addEventListener('click', async () => {
                 const file = fileUpload.files[0];
-                const userInstructions = userInstructionsInput.value.trim(); // This is the user's specific request for this report
+                const userInstructions = userInstructionsInput.value.trim();
+                const question = documentQuestion.value.trim();
 
                 if (!file) {
-                    alert('분석할 파일을 선택해주세요.');
+                    alert('Please choose a document first.');
                     return;
                 }
-                // User instructions are optional, so no check for emptiness.
+                if (selectedMode === 'qa' && !question) {
+                    alert('Please enter a question for Ask Document mode.');
+                    return;
+                }
 
-                reportOutput.innerHTML = '<div class="d-flex align-items-center"><strong role="status">보고서 생성 중...</strong><div class="spinner-border ms-auto" aria-hidden="true"></div></div>';
+                reportOutput.innerHTML = '<div class="d-flex align-items-center"><strong role="status">Analyzing document...</strong><div class="spinner-border ms-auto" aria-hidden="true"></div></div>';
+                outputTitle.textContent = modeLabels[selectedMode] || 'Document output';
+                outputMeta.textContent = `${file.name} · ${modeLabels[selectedMode]}`;
                 generateReportButton.disabled = true;
                 downloadReportButton.classList.add('d-none');
 
                 const formData = new FormData();
                 formData.append('file', file);
-                formData.append('user_instructions', userInstructions); // Pass user instructions to backend
+                formData.append('analysis_mode', selectedMode);
+                formData.append('user_instructions', userInstructions);
+                formData.append('question', question);
+                formData.append('add_to_knowledge_base', addToKnowledgeBase.checked ? 'true' : 'false');
 
                 try {
-                    // Endpoint to be implemented in app.py
-                    // This endpoint will use llm_ocr.py, which internally uses the prompt from llm_prompt.py
-                    // and incorporates the 'user_instructions'.
                     const response = await fetch('/process_document_ocr', {
                         method: 'POST',
-                        body: formData, 
+                        body: formData,
                     });
 
+                    const result = await response.json().catch(() => ({}));
                     if (!response.ok) {
-                        const errorData = await response.json().catch(() => ({ detail: '서버 응답 처리 중 오류 발생' }));
-                        throw new Error(`보고서 생성 실패 (HTTP ${response.status}): ${errorData.detail || response.statusText}`);
+                        throw new Error(result.error || response.statusText);
                     }
 
-                    const result = await response.json(); // Expecting { report_html: "...", ... } or { error: "..." }
-                    
                     if (result.error) {
-                        reportOutput.innerHTML = `<p class="text-danger"><strong>오류:</strong> ${result.error}</p>`;
-                        generatedReportHtmlContent = null;
-                    } else if (result.report_html) {
-                        reportOutput.innerHTML = result.report_html; 
-                        generatedReportHtmlContent = result.report_html; 
-                        downloadReportButton.classList.remove('d-none');
-                    } else {
-                        reportOutput.innerHTML = `<p class="text-warning">보고서 내용을 받지 못했습니다. 서버 응답을 확인해주세요.</p>`;
-                        generatedReportHtmlContent = null;
+                        throw new Error(result.error);
+                    }
+                    if (!result.report_html) {
+                        throw new Error('The server did not return document analysis content.');
                     }
 
+                    reportOutput.innerHTML = result.report_html;
+                    generatedReportHtmlContent = result.report_html;
+                    const textLength = result.extracted_text_length ? `${result.extracted_text_length.toLocaleString()} characters extracted` : 'Document processed';
+                    let knowledgeBaseStatus = '';
+                    if (result.knowledge_base && result.knowledge_base.ok) {
+                        knowledgeBaseStatus = ` · ${result.knowledge_base.chunk_count} chunks saved for chat`;
+                    } else if (result.knowledge_base && !result.knowledge_base.ok) {
+                        knowledgeBaseStatus = ' · knowledge base save skipped';
+                    }
+                    outputMeta.textContent = `${file.name} · ${modeLabels[result.analysis_mode] || modeLabels[selectedMode]} · ${textLength}${knowledgeBaseStatus}`;
+                    downloadReportButton.classList.remove('d-none');
                 } catch (error) {
-                    console.error('Error generating report:', error);
-                    reportOutput.innerHTML = `<p class="text-danger"><strong>보고서 생성 중 클라이언트 측 오류:</strong> ${error.message}</p>`;
+                    console.error('Error analyzing document:', error);
+                    reportOutput.innerHTML = `<p class="text-danger"><strong>Error:</strong> ${error.message}</p>`;
                     generatedReportHtmlContent = null;
                 } finally {
                     generateReportButton.disabled = false;
@@ -196,33 +272,20 @@
             });
 
             downloadReportButton.addEventListener('click', () => {
-                if (generatedReportHtmlContent) {
-                    // Download as an HTML file. For other formats (PDF, DOCX), server-side conversion would be needed.
-                    const blob = new Blob([generatedReportHtmlContent], { type: 'text/html;charset=utf-8' });
-                    const link = document.createElement('a');
-                    link.href = URL.createObjectURL(blob);
-                    const fileName = (fileUpload.files[0] ? fileUpload.files[0].name.split('.')[0] : 'generated') + '_report.html';
-                    link.download = fileName;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(link.href);
-                } else {
-                    alert('다운로드할 보고서 내용이 없습니다.');
+                if (!generatedReportHtmlContent) {
+                    alert('There is no generated content to download.');
+                    return;
                 }
+                const blob = new Blob([generatedReportHtmlContent], { type: 'text/html;charset=utf-8' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                const baseName = fileUpload.files[0] ? fileUpload.files[0].name.split('.')[0] : 'document';
+                link.download = `${baseName}_${selectedMode}.html`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(link.href);
             });
-
-            fileUpload.addEventListener('change', () => {
-                // Reset report output and download button when a new file is selected
-                reportOutput.innerHTML = '<p class="text-muted">보고서가 여기에 표시됩니다...</p>';
-                downloadReportButton.classList.add('d-none');
-                generatedReportHtmlContent = null;
-                if (fileUpload.files[0]) {
-                    console.log(`File selected: ${fileUpload.files[0].name}`);
-                }
-            });
-            
-            console.log("Event listeners for OCR page set up.");
         });
     </script>
 </body>

@@ -1,157 +1,103 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 도우미 - 음성</title>
-    <!-- Bootstrap 5 CSS -->
+    <title>PS_Agent - Audio</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
     <style>
         body {
-            background-color: #f8f9fa;
+            background: #f6f7f9;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
         }
-        .chat-container {
-            display: flex;
-            flex-direction: column;
-            height: calc(100vh - 150px);
-            flex-grow: 1;
-        }
-        .chat-messages {
-            flex-grow: 1;
-            overflow-y: auto;
-            scroll-behavior: smooth;
-            padding: 1rem;
-            background-color: #fff;
-            border: 1px solid #dee2e6;
-            border-radius: 0.25rem;
-            min-height: 0;
-        }
-        .chat-input {
-            position: sticky;
-            bottom: 0;
-            background: #fff;
-            padding: 0.5rem;
-            border-top: 1px solid #dee2e6;
-        }
-        .message {
-            max-width: 85%;
-            margin-bottom: 0.75rem;
-            padding: 0.75rem;
-            border-radius: 0.5rem;
-            animation: fadeIn 0.3s ease-in;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .thoughts-log {
-            max-height: 150px;
-            overflow-y: auto;
-            padding: 0.75rem;
-            background-color: #f8f9fa;
-            border: 1px solid #dee2e6;
-            border-radius: 0.25rem;
-        }
-        .saving-indicator.saving {
-            opacity: 1;
-        }
         .function-bar .btn {
             margin-right: 0.5rem;
         }
-        .draft-container {
-            display: flex;
-            flex-direction: column;
-            height: calc(100vh - 300px);
-            flex-grow: 1;
+        .audio-workspace {
+            min-height: calc(100vh - 150px);
         }
-        .draft-container textarea {
-            flex-grow: 1;
-            min-height: 0;
+        .output-box {
+            resize: vertical;
         }
     </style>
 </head>
 <body>
-    <!-- 헤더 -->
     <header class="bg-light border-bottom py-3">
         <div class="container">
-            <h1 class="h2 mb-3">무엇을 도와드릴까요?</h1>
+            <h1 class="h2 mb-3">PS_Agent Work Companion</h1>
             <div class="function-bar">
-                <a href="chatbot.html" class="btn btn-outline-primary"><i class="bi bi-chat"></i> 작성</a>
-                <a href="document.html" class="btn btn-outline-primary"><i class="bi bi-file-text"></i> 문서</a>
-                <button class="btn btn-primary active"><i class="bi bi-mic"></i> 음성</button>
-                <!-- <a href="video.html" class="btn btn-outline-primary"><i class="bi bi-camera-reels"></i> 영상</a> -->
+                <a href="chatbot.html" class="btn btn-outline-primary"><i class="bi bi-chat"></i> Chat</a>
+                <a href="document.html" class="btn btn-outline-primary"><i class="bi bi-file-text"></i> Documents</a>
+                <button class="btn btn-primary active"><i class="bi bi-mic"></i> Audio</button>
+                <a href="statistics.html" class="btn btn-outline-primary"><i class="bi bi-bar-chart"></i> Statistics</a>
             </div>
         </div>
     </header>
 
-    <!-- 메인 콘텐츠 -->
     <main class="flex-grow-1 py-4">
-        <div class="container h-100 d-flex flex-column">
-            <div class="row flex-grow-1">
-                <div class="col-md-12 mb-4 d-flex flex-column">
-                    <div class="card flex-grow-1" id="audio-content-area">
-                        <div class="card-body d-flex flex-column">
-                            <h2 class="card-title h5">음성 분석 및 요약</h2>
-                            
-                            <div class="row">
-                                <div class="col-md-6 mb-3 mb-md-0"> <!-- Left column for Upload -->
-                                    <h6>오디오 파일 선택:</h5>
-                                    <div class="input-group">
-                                        <input class="form-control" type="file" id="audioFileUpload" accept="audio/*">
-                                        <button class="btn btn-outline-secondary" type="button" id="summarizeUploadedAudioButton" disabled title="업로드된 오디오 파일 요약 시작"><i class="bi bi-file-earmark-play"></i> 파일 요약</button>
-                                    </div>
-                                </div>
-                                <div class="col-md-6"> <!-- Right column for Record -->
-                                    <h6>실시간 녹음:</h5>
-                                    <div class="mb-2"> <!-- Group for all recording related action buttons -->
-                                        <button class="btn btn-success" id="startRecordButton" title="마이크 녹음 시작"><i class="bi bi-mic-fill"></i> 녹음 시작</button>
-                                        <button class="btn btn-danger ms-1" id="stopRecordButton" disabled title="녹음 중지"><i class="bi bi-stop-fill"></i> 녹음 중지</button>
-                                        <button class="btn btn-info ms-1" type="button" id="summarizeRecordedAudioButton" disabled title="녹음된 오디오 요약 시작"><i class="bi bi-soundwave"></i> 녹음 요약</button>
-                                    </div>
-                                    <p id="recordingStatus" class="form-text">마이크 권한을 허용해주세요.</p>
-                                </div>
+        <div class="container audio-workspace">
+            <section class="card">
+                <div class="card-body">
+                    <h2 class="h5 mb-3">Audio Notes</h2>
+                    <div class="row g-3">
+                        <div class="col-lg-6">
+                            <label for="audioFileUpload" class="form-label">Upload audio</label>
+                            <div class="input-group">
+                                <input class="form-control" type="file" id="audioFileUpload" accept="audio/*">
+                                <button class="btn btn-outline-secondary" type="button" id="summarizeUploadedAudioButton" disabled title="Summarize uploaded audio">
+                                    <i class="bi bi-file-earmark-play"></i> Summarize File
+                                </button>
                             </div>
-                            
-                            <hr>
-                            
-                            <h3 class="h5 mt-1">요약 결과</h3>
-                            <div id="summaryOutputLoading" class="text-center my-3 d-none">
-                                <div class="spinner-border text-primary" role="status">
-                                    <span class="visually-hidden">Loading...</span>
-                                </div>
-                                <p>요약 중입니다...</p>
+                        </div>
+                        <div class="col-lg-6">
+                            <label class="form-label">Record audio</label>
+                            <div>
+                                <button class="btn btn-success" id="startRecordButton" title="Start recording"><i class="bi bi-mic-fill"></i> Start</button>
+                                <button class="btn btn-danger ms-1" id="stopRecordButton" disabled title="Stop recording"><i class="bi bi-stop-fill"></i> Stop</button>
+                                <button class="btn btn-info ms-1" type="button" id="summarizeRecordedAudioButton" disabled title="Summarize recorded audio">
+                                    <i class="bi bi-soundwave"></i> Summarize Recording
+                                </button>
                             </div>
-                            <textarea id="audioSummaryOutput" class="form-control flex-grow-1" rows="9" readonly placeholder="오디오 요약이 여기에 표시됩니다..."></textarea>
-                            
-                            <h4 class="h5 mt-3">전체 스크립트 (참고용)</h4>
-                            <textarea id="audioTranscriptOutput" class="form-control" rows="10" readonly placeholder="전체 스크립트가 여기에 표시됩니다..."></textarea>
+                            <p id="recordingStatus" class="form-text mb-0">Allow microphone access to record audio.</p>
+                        </div>
+                    </div>
 
+                    <hr>
+
+                    <div id="summaryOutputLoading" class="text-center my-3 d-none">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mb-0">Summarizing...</p>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-lg-6">
+                            <label for="audioSummaryOutput" class="form-label">Summary</label>
+                            <textarea id="audioSummaryOutput" class="form-control output-box" rows="14" readonly placeholder="Audio summary will appear here."></textarea>
+                        </div>
+                        <div class="col-lg-6">
+                            <label for="audioTranscriptOutput" class="form-label">Transcript</label>
+                            <textarea id="audioTranscriptOutput" class="form-control output-box" rows="14" readonly placeholder="Transcript will appear here."></textarea>
                         </div>
                     </div>
                 </div>
-            </div>
+            </section>
         </div>
     </main>
 
-    <!-- Bootstrap 5 JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            console.log("Audio page loaded with new features. Layout updated.");
-
             const audioFileUpload = document.getElementById('audioFileUpload');
             const summarizeUploadedAudioButton = document.getElementById('summarizeUploadedAudioButton');
-            
             const startRecordButton = document.getElementById('startRecordButton');
             const stopRecordButton = document.getElementById('stopRecordButton');
             const recordingStatus = document.getElementById('recordingStatus');
             const summarizeRecordedAudioButton = document.getElementById('summarizeRecordedAudioButton');
-
             const audioSummaryOutput = document.getElementById('audioSummaryOutput');
             const audioTranscriptOutput = document.getElementById('audioTranscriptOutput');
             const summaryOutputLoading = document.getElementById('summaryOutputLoading');
@@ -160,35 +106,28 @@
             let audioChunks = [];
             let recordedAudioBlob = null;
 
-            // File Upload Logic
             audioFileUpload.addEventListener('change', () => {
-                if (audioFileUpload.files.length > 0) {
-                    summarizeUploadedAudioButton.disabled = false;
-                    audioSummaryOutput.value = ''; 
-                    audioTranscriptOutput.value = '';
-                    recordedAudioBlob = null; // Clear any previous recording
-                    summarizeRecordedAudioButton.disabled = true;
-                } else {
-                    summarizeUploadedAudioButton.disabled = true;
-                }
+                summarizeUploadedAudioButton.disabled = audioFileUpload.files.length === 0;
+                audioSummaryOutput.value = '';
+                audioTranscriptOutput.value = '';
+                recordedAudioBlob = null;
+                summarizeRecordedAudioButton.disabled = true;
             });
 
             summarizeUploadedAudioButton.addEventListener('click', async () => {
                 const file = audioFileUpload.files[0];
                 if (!file) {
-                    alert('요약할 오디오 파일을 선택해주세요.');
+                    alert('Choose an audio file first.');
                     return;
                 }
                 await processAndSummarizeAudio(file, 'file');
             });
 
-            // Recording Logic
             if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                console.log('getUserMedia supported.');
                 startRecordButton.addEventListener('click', async () => {
                     try {
                         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' }); // Explicitly try webm, server can convert
+                        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
                         audioChunks = [];
                         recordedAudioBlob = null;
 
@@ -200,30 +139,27 @@
                             recordedAudioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
                             audioChunks = [];
                             summarizeRecordedAudioButton.disabled = false;
-                            recordingStatus.textContent = '녹음 완료. "녹음 요약" 버튼을 클릭하세요.';
-                            stream.getTracks().forEach(track => track.stop()); // Clean up stream tracks
+                            recordingStatus.textContent = 'Recording complete. Summarize when ready.';
+                            stream.getTracks().forEach(track => track.stop());
                         };
-                        
+
                         mediaRecorder.start();
                         startRecordButton.disabled = true;
                         stopRecordButton.disabled = false;
                         summarizeRecordedAudioButton.disabled = true;
-                        audioFileUpload.disabled = true; 
+                        audioFileUpload.disabled = true;
                         summarizeUploadedAudioButton.disabled = true;
-                        recordingStatus.textContent = '녹음 중...';
-                        audioSummaryOutput.value = ''; 
+                        recordingStatus.textContent = 'Recording...';
+                        audioSummaryOutput.value = '';
                         audioTranscriptOutput.value = '';
-                        audioFileUpload.value = ''; // Clear file input
-
+                        audioFileUpload.value = '';
                     } catch (err) {
-                        console.error('Error accessing microphone:', err);
-                        recordingStatus.textContent = '마이크 접근 오류: ' + err.message;
-                        alert('마이크에 접근할 수 없습니다. 권한을 확인해주세요.');
+                        recordingStatus.textContent = `Microphone error: ${err.message}`;
                     }
                 });
 
                 stopRecordButton.addEventListener('click', () => {
-                    if (mediaRecorder && mediaRecorder.state === "recording") {
+                    if (mediaRecorder && mediaRecorder.state === 'recording') {
                         mediaRecorder.stop();
                         startRecordButton.disabled = false;
                         stopRecordButton.disabled = true;
@@ -233,19 +169,17 @@
 
                 summarizeRecordedAudioButton.addEventListener('click', async () => {
                     if (!recordedAudioBlob) {
-                        alert('요약할 녹음된 오디오가 없습니다.');
+                        alert('Record audio before summarizing.');
                         return;
                     }
                     await processAndSummarizeAudio(recordedAudioBlob, 'blob');
                 });
-
             } else {
-                console.error('getUserMedia not supported on your browser!');
                 startRecordButton.disabled = true;
                 stopRecordButton.disabled = true;
-                recordingStatus.textContent = '브라우저가 오디오 녹음을 지원하지 않습니다.';
+                recordingStatus.textContent = 'This browser does not support audio recording.';
             }
-            
+
             async function processAndSummarizeAudio(audioData, type) {
                 audioSummaryOutput.value = '';
                 audioTranscriptOutput.value = '';
@@ -255,21 +189,17 @@
 
                 const formData = new FormData();
                 let endpoint = '';
-                let fileNameForBlob = 'recorded_audio.webm'; // Default to webm
+                let fileNameForBlob = 'recorded_audio.webm';
 
                 if (type === 'file') {
                     formData.append('audio_file', audioData, audioData.name);
                     endpoint = '/transcribe_and_summarize_audio_file';
-                } else if (type === 'blob') {
-                    if (audioData.type && audioData.type.includes('wav')){ // Check if blob is already wav
+                } else {
+                    if (audioData.type && audioData.type.includes('wav')) {
                         fileNameForBlob = 'recorded_audio.wav';
                     }
                     formData.append('audio_blob', audioData, fileNameForBlob);
                     endpoint = '/transcribe_and_summarize_audio_blob';
-                } else {
-                    alert('Unknown audio data type.');
-                    summaryOutputLoading.classList.add('d-none');
-                    return;
                 }
 
                 try {
@@ -277,30 +207,29 @@
                         method: 'POST',
                         body: formData,
                     });
-
-                    if (!response.ok) {
-                        const errorData = await response.json().catch(() => ({ detail: '서버 응답 처리 중 오류 발생' }));
-                        throw new Error(`오디오 처리 실패 (HTTP ${response.status}): ${errorData.detail || response.statusText}`);
-                    }
-
                     const result = await response.json();
 
-                    if (result.error) {
-                        audioSummaryOutput.value = `오류: ${result.error}`;
-                        audioTranscriptOutput.value = result.transcript || '스크립트 생성 중 오류 발생';
-                    } else {
-                        audioSummaryOutput.value = result.summary || '요약 내용을 받지 못했습니다.';
-                        audioTranscriptOutput.value = result.transcript || '스크립트 내용을 받지 못했습니다.';
+                    if (!response.ok) {
+                        throw new Error(result.error || result.detail || response.statusText);
                     }
 
+                    if (result.error) {
+                        audioSummaryOutput.value = `Error: ${result.error}`;
+                        audioTranscriptOutput.value = result.transcript || 'Transcript unavailable.';
+                    } else {
+                        audioSummaryOutput.value = result.summary || 'Summary unavailable.';
+                        audioTranscriptOutput.value = result.transcript || 'Transcript unavailable.';
+                    }
                 } catch (error) {
-                    console.error('Error processing audio:', error);
-                    audioSummaryOutput.value = `클라이언트 측 오류: ${error.message}`;
+                    audioSummaryOutput.value = `Audio processing failed: ${error.message}`;
                 } finally {
                     summaryOutputLoading.classList.add('d-none');
-                    if (type === 'file' && audioFileUpload.files.length > 0) summarizeUploadedAudioButton.disabled = false;
-                    // Keep summarizeRecordedAudioButton disabled after summarization until a new recording is made
-                    if (type === 'blob') summarizeRecordedAudioButton.disabled = true; 
+                    if (type === 'file' && audioFileUpload.files.length > 0) {
+                        summarizeUploadedAudioButton.disabled = false;
+                    }
+                    if (type === 'blob') {
+                        summarizeRecordedAudioButton.disabled = true;
+                    }
                 }
             }
         });
