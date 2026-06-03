@@ -13,12 +13,22 @@ from werkzeug.utils import secure_filename
 import tempfile
 from dotenv import load_dotenv
 import requests
-import sounddevice as sd
-import soundfile as sf
+try:
+    import sounddevice as sd
+    import soundfile as sf
+except ModuleNotFoundError:
+    sd = None
+    sf = None
 
 # Assuming llm_ocr.py is in the same directory or accessible via PYTHONPATH
-import llm_ocr
-import llm_stt # Added for audio processing
+try:
+    import llm_ocr
+except ModuleNotFoundError:
+    llm_ocr = None
+try:
+    import llm_stt # Added for audio processing
+except ModuleNotFoundError:
+    llm_stt = None
 
 # Assuming the main prompt template and llm model can be accessed
 # This might require adjustments if langchain_config doesn't expose llm directly
@@ -362,8 +372,9 @@ def audio_page():
 @app.route('/chat', methods=['GET', 'POST'])
 def chat():
     if request.method == 'POST':
-        user_input = request.json.get('message')
-        current_personal_statement_draft = request.json.get('personal_statement_draft', '')
+        data = request.get_json(silent=True) or {}
+        user_input = data.get('message')
+        current_personal_statement_draft = data.get('personal_statement_draft', '')
 
         if not user_input:
             return jsonify({"error": "No message provided"}), 400
@@ -392,6 +403,9 @@ def chat():
 
         return Response(stream_with_context(_generate_agent_response_stream(user_input, current_personal_statement_draft)), mimetype='text/event-stream')
 
+    # Fallback to satisfy type checkers: ensure the route always returns a valid response
+    return jsonify({"error": "Invalid request method."}), 405
+
 @app.route('/get_initial_state', methods=['GET'])
 def get_initial_state():
     # Fetches from DB, so no change needed due to global var removal
@@ -415,7 +429,8 @@ def update_statement():
 
 @app.route('/get_similar_chats', methods=['POST']) # This seems more like a debug/utility endpoint
 def get_similar_chats_route(): # Renamed to avoid conflict with internal var
-    query = request.json.get('query', '')
+    data = request.get_json(silent=True) or {}
+    query = data.get('query', '')
     if not query:
         return jsonify({"error": "No query provided"}), 400
 
@@ -472,6 +487,11 @@ def allowed_file(filename, allowed_extensions):
 # --- OCR Processing Route (Existing) ---
 @app.route('/process_document_ocr', methods=['POST'])
 def process_document_ocr():
+    if llm_ocr is None:
+        return jsonify({
+            "error": "OCR processing requires optional OCR dependencies such as pytesseract."
+        }), 503
+
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
     file = request.files['file']
@@ -531,6 +551,10 @@ def record_audio_to_file(filename="recorded_audio.wav", duration=5, samplerate=1
     """
     Records audio from the microphone and saves it to a WAV file.
     """
+    if sd is None or sf is None:
+        print("Audio recording requires the optional packages 'sounddevice' and 'soundfile'.")
+        return None
+
     print(f"Recording for {duration} seconds... Speak now!")
     try:
         recording = sd.rec(int(duration * samplerate), samplerate=samplerate, channels=1, dtype='float32')

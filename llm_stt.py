@@ -1,8 +1,12 @@
 import requests
 import json
 import time
-import sounddevice as sd
-import soundfile as sf
+try:
+    import sounddevice as sd
+    import soundfile as sf
+except ModuleNotFoundError:
+    sd = None
+    sf = None
 import os
 import hmac
 import hashlib
@@ -29,6 +33,11 @@ def record_audio_to_file(filename="recorded_audio.wav", duration=5, samplerate=1
         str or None: The path to the saved audio file if successful, None otherwise.
     """
     print(f"Recording for {duration} seconds... Speak now!")
+    if sd is None or sf is None:
+        print("Audio recording requires the optional packages 'sounddevice' and 'soundfile'.")
+        print("Install them with: python -m pip install sounddevice soundfile")
+        return None
+
     try:
         # Ensure the samplerate is supported by your microphone
         # You might need to check sd.query_devices() for available rates
