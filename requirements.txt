@@ -2,6 +2,7 @@ flask
 python-dotenv
 requests
 werkzeug
+bleach
 
 langchain
 langchain-community
