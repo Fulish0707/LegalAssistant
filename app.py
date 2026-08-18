@@ -50,6 +50,7 @@ from statistics_analysis import (
     load_table,
     render_statistics_html,
 )
+from html_sanitizer import sanitize_report_html
 
 # Disable Flask's default request logging for cleaner output if not needed
 log = logging.getLogger('werkzeug')
@@ -593,14 +594,14 @@ def analyze_statistics_route():
         if llm is not None:
             prompt_text = build_ai_statistics_prompt(filename, analysis, user_question)
             ai_response = llm.invoke(prompt_text)
-            ai_insight = getattr(ai_response, "content", str(ai_response))
+            ai_insight = sanitize_report_html(getattr(ai_response, "content", str(ai_response)))
 
-        report_html = render_statistics_html(
+        report_html = sanitize_report_html(render_statistics_html(
             filename=filename,
             analysis=analysis,
             ai_insight=ai_insight,
             ai_enabled=llm is not None,
-        )
+        ))
 
         response_payload = {
             "report_html": report_html,
