@@ -13,3 +13,4 @@ chroma_db/
 
 .ipynb_checkpoints/
 .vscode/
+.worktrees/
