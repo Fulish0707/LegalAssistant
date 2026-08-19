@@ -200,6 +200,16 @@ class AuthFoundationTests(unittest.TestCase):
         self.assertEqual(fake_oauth.google.redirect_calls[0][0], "http://localhost:5005/auth/callback")
         self.assertIsNone(next_path)
 
+    def test_safe_next_path_rejects_browser_normalized_external_paths(self):
+        for candidate in ("//attacker.example", "/\\attacker.example", "/\x00attacker.example"):
+            with self.subTest(candidate=repr(candidate)):
+                self.assertIsNone(self.app_module.auth._safe_next_path(candidate))
+
+        self.assertEqual(
+            self.app_module.auth._safe_next_path("/chatbot.html?view=compact"),
+            "/chatbot.html?view=compact",
+        )
+
     def test_callback_creates_internal_user_and_sets_only_account_identity(self):
         with self.imported_app_with_environment({
             "GOOGLE_OIDC_CLIENT_ID": "client-id",
