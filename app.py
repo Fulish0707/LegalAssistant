@@ -21,6 +21,7 @@ from werkzeug.utils import secure_filename
 import tempfile
 from dotenv import load_dotenv
 import requests
+import auth
 
 # Assuming llm_ocr.py is in the same directory or accessible via PYTHONPATH
 try:
@@ -78,6 +79,7 @@ app.config["GOOGLE_OIDC_CONFIGURED"] = all(
         "GOOGLE_OIDC_REDIRECT_URI",
     )
 )
+auth.init_oauth(app)
 
 
 @app.before_request
@@ -135,12 +137,6 @@ with app.app_context():
     conn.close()
 
 
-@app.route('/auth/login')
-def auth_login():
-    if not app.config["GOOGLE_OIDC_CONFIGURED"]:
-        return jsonify({"error": "google_oidc_not_configured"}), 503
-    return jsonify({"error": "google_oidc_login_not_implemented"}), 501
-
 # NO MORE GLOBAL DRAFT OR CHAT HISTORY LIST
 # personal_statement_draft = "" # REMOVED
 # chat_history_list = [] # REMOVED
@@ -168,6 +164,15 @@ def init_db():
         # No need to close here, teardown_appcontext will handle it if get_db was called
         # For standalone init, explicitly closing is safer if not within app context management
         # but since we used `with app.app_context()`, `close_connection` will be triggered.
+
+
+auth.register_auth_routes(app)
+app.auth = auth
+
+
+@app.context_processor
+def inject_authenticated_account():
+    return {"authenticated_account_email": auth.get_current_user_email()}
 
 def get_personal_statement_from_db(user_id):
     conn = get_db()
@@ -571,6 +576,7 @@ def clear_chat_history_endpoint():
         return jsonify({"error": "Failed to clear chat history."}), 500
 
 @app.route('/knowledge_base/status', methods=['GET'])
+@auth.login_required
 def knowledge_base_status_route():
     return jsonify(get_knowledge_base_status(session["user_id"]))
 

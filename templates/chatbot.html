@@ -104,6 +104,16 @@
     <header class="bg-light border-bottom py-3">
         <div class="container">
             <h1 class="h2 mb-3">PS_Agent Work Companion</h1>
+            <div class="d-flex justify-content-end align-items-center mb-2">
+                {% if authenticated_account_email %}
+                    <span class="text-muted small me-2">{{ authenticated_account_email }}</span>
+                    <form action="{{ url_for('auth_logout') }}" method="post" class="d-inline">
+                        <button type="submit" class="btn btn-outline-secondary btn-sm">Sign out</button>
+                    </form>
+                {% else %}
+                    <a href="{{ url_for('auth_login', next=request.path) }}" class="btn btn-outline-primary btn-sm">Sign in with Google</a>
+                {% endif %}
+            </div>
             <div class="function-bar">
                 <button class="btn btn-primary active"><i class="bi bi-chat"></i> Chat</button>
                 <a href="document.html" class="btn btn-outline-primary"><i class="bi bi-file-text"></i> Documents</a>
