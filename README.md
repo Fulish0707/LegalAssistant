@@ -136,6 +136,7 @@ graph TD
 
 ## 7. 향후 개선 방향 (Potential Future Improvements)
 
+-   현재 통합 우선순위와 상태는 [`docs/integration-roadmap.md`](docs/integration-roadmap.md)에서 관리합니다.
 -   더 다양한 문서 포맷 지원 (e.g., .pptx, .xls).
 -   사용자별 문서 관리 및 인증 기능 추가.
 -   Langchain Expression Language (LCEL)을 활용한 체인 구성 고도화.
