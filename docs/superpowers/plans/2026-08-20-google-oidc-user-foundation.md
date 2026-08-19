@@ -49,7 +49,7 @@ def test_missing_google_oidc_settings_leave_login_disabled(self):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `python -m unittest tests.test_auth -v`
+Run: `python -m unittest discover -s tests -p 'test_auth.py' -v`
 
 Expected: failures because the tables and `/auth/login` route do not exist.
 
@@ -93,7 +93,7 @@ Use `uuid.uuid4().hex` for internal IDs. Leave `legacy-unassigned` rows untouche
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `python -m unittest tests.test_auth -v`
+Run: `python -m unittest discover -s tests -p 'test_auth.py' -v`
 
 Expected: the schema test passes; the login test may remain failing until Task 2.
 
@@ -133,7 +133,7 @@ def test_account_only_api_returns_401_for_guest(self):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `python -m unittest tests.test_auth.AppAuthTests.test_callback_creates_account_and_records_internal_user_id tests.test_auth.AppAuthTests.test_account_only_api_returns_401_for_guest -v`
+Run: `python -m unittest discover -s tests -p 'test_auth.py' -v`
 
 Expected: import/route failures.
 
@@ -155,7 +155,7 @@ Render current account email or a Google sign-in link in `chatbot.html`; never p
 
 - [ ] **Step 5: Run authentication tests**
 
-Run: `python -m unittest tests.test_auth -v`
+Run: `python -m unittest discover -s tests -p 'test_auth.py' -v`
 
 Expected: mocked sign-in, repeat login/upsert, invalid callback, logout, and guest authorization tests pass.
 
@@ -198,7 +198,7 @@ def test_two_signed_in_users_cannot_read_each_others_drafts_or_chat(self):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `python -m unittest tests.test_auth.AppAuthTests.test_guest_draft_is_session_only tests.test_app_contract.AppContractTests.test_drafts_are_session_scoped -v`
+Run: `python -m unittest discover -s tests -p 'test_auth.py' -v && python -m unittest discover -s tests -p 'test_app_contract.py' -v`
 
 Expected: failure because guests currently write drafts/chat to SQLite.
 
@@ -212,7 +212,7 @@ Decorate document OCR upload, statistics upload, knowledge-base status, knowledg
 
 - [ ] **Step 5: Run persistence and route contracts**
 
-Run: `python -m unittest tests.test_auth tests.test_app_contract -v`
+Run: `python -m unittest discover -s tests -p 'test_auth.py' -v && python -m unittest discover -s tests -p 'test_app_contract.py' -v`
 
 Expected: guests retain only session drafts; accounts retain private logs/drafts; account-only APIs return `401` for guests.
 
@@ -247,7 +247,7 @@ def test_user_and_hashed_guest_ip_have_independent_buckets(self):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m unittest tests.test_quota -v`
+Run: `python -m unittest discover -s tests -p 'test_quota.py' -v`
 
 Expected: module import failure.
 
@@ -263,7 +263,7 @@ Wrap chat generation, OCR `analyze_document`, statistics `llm.invoke`, and AI-ba
 
 - [ ] **Step 5: Run quota tests and app contracts**
 
-Run: `python -m unittest tests.test_quota tests.test_app_contract -v`
+Run: `python -m unittest discover -s tests -p 'test_quota.py' -v && python -m unittest discover -s tests -p 'test_app_contract.py' -v`
 
 Expected: 20 accepted/21st rejected behavior, daily/identity separation, and correct `429` response shape.
 
@@ -300,7 +300,7 @@ def test_ingestion_adds_owner_and_document_id_metadata(self):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `python -m unittest tests.test_rag_isolation -v`
+Run: `python -m unittest discover -s tests -p 'test_rag_isolation.py' -v`
 
 Expected: failure because `retriever` is a mutable module-global value.
 
@@ -327,7 +327,7 @@ Generate `document_id = uuid.uuid4().hex` once per ingestion and add `document_i
 
 - [ ] **Step 5: Run RAG isolation tests**
 
-Run: `python -m unittest tests.test_rag_isolation tests.test_app_contract -v`
+Run: `python -m unittest discover -s tests -p 'test_rag_isolation.py' -v && python -m unittest discover -s tests -p 'test_app_contract.py' -v`
 
 Expected: sequential and concurrent simulated users have independent Chroma filters; metadata contains ownership/document identity.
 
