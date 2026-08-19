@@ -21,12 +21,6 @@ from werkzeug.utils import secure_filename
 import tempfile
 from dotenv import load_dotenv
 import requests
-try:
-    import sounddevice as sd
-    import soundfile as sf
-except ModuleNotFoundError:
-    sd = None
-    sf = None
 
 # Assuming llm_ocr.py is in the same directory or accessible via PYTHONPATH
 try:
@@ -717,10 +711,20 @@ def process_document_ocr():
 # --- New Audio Processing Routes --- #
 #######################################
 
+def _load_audio_recording_dependencies():
+    try:
+        import sounddevice as sd
+        import soundfile as sf
+    except ModuleNotFoundError:
+        return None, None
+    return sd, sf
+
+
 def record_audio_to_file(filename="recorded_audio.wav", duration=5, samplerate=16000):
     """
     Records audio from the microphone and saves it to a WAV file.
     """
+    sd, sf = _load_audio_recording_dependencies()
     if sd is None or sf is None:
         print("Audio recording requires the optional packages 'sounddevice' and 'soundfile'.")
         return None

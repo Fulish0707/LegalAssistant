@@ -1,12 +1,6 @@
 import requests
 import json
 import time
-try:
-    import sounddevice as sd
-    import soundfile as sf
-except ModuleNotFoundError:
-    sd = None
-    sf = None
 import os
 import hmac
 import hashlib
@@ -19,6 +13,14 @@ load_dotenv()
 # Get credentials from .env
 NAVER_CLIENT_ID = os.getenv('client_id')
 NAVER_CLIENT_SECRET = os.getenv('client_secret')
+
+def _load_audio_recording_dependencies():
+    try:
+        import sounddevice as sd
+        import soundfile as sf
+    except ModuleNotFoundError:
+        return None, None
+    return sd, sf
 
 def record_audio_to_file(filename="recorded_audio.wav", duration=5, samplerate=16000):
     """
@@ -33,6 +35,7 @@ def record_audio_to_file(filename="recorded_audio.wav", duration=5, samplerate=1
         str or None: The path to the saved audio file if successful, None otherwise.
     """
     print(f"Recording for {duration} seconds... Speak now!")
+    sd, sf = _load_audio_recording_dependencies()
     if sd is None or sf is None:
         print("Audio recording requires the optional packages 'sounddevice' and 'soundfile'.")
         print("Install them with: python -m pip install sounddevice soundfile")
