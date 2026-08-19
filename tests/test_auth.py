@@ -1,6 +1,7 @@
 import importlib
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,12 +16,18 @@ class AuthFoundationTests(unittest.TestCase):
             name: os.environ.get(name)
             for name in (
                 "APP_STATE_DB",
+                "APP_ENV",
+                "FLASK_ENV",
+                "SECRET_KEY",
                 "GOOGLE_OIDC_CLIENT_ID",
                 "GOOGLE_OIDC_CLIENT_SECRET",
                 "GOOGLE_OIDC_REDIRECT_URI",
             )
         }
         os.environ["APP_STATE_DB"] = cls.db_file
+        os.environ["APP_ENV"] = "testing"
+        os.environ.pop("FLASK_ENV", None)
+        os.environ.pop("SECRET_KEY", None)
         for name in (
             "GOOGLE_OIDC_CLIENT_ID",
             "GOOGLE_OIDC_CLIENT_SECRET",
@@ -60,6 +67,69 @@ class AuthFoundationTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json, {"error": "google_oidc_not_configured"})
+
+    def test_unset_environment_requires_secret_key(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            environment = os.environ.copy()
+            environment["APP_STATE_DB"] = os.path.join(temp_dir, "app_state.db")
+            for name in ("APP_ENV", "FLASK_ENV", "SECRET_KEY"):
+                environment.pop(name, None)
+
+            completed = subprocess.run(
+                [sys.executable, "-c", "import app"],
+                cwd=os.path.dirname(os.path.dirname(__file__)),
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("SECRET_KEY must be configured", completed.stderr)
+
+    def test_unset_environment_uses_secure_session_cookie_with_secret(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            environment = os.environ.copy()
+            environment["APP_STATE_DB"] = os.path.join(temp_dir, "app_state.db")
+            environment["SECRET_KEY"] = "production-secret"
+            for name in ("APP_ENV", "FLASK_ENV"):
+                environment.pop(name, None)
+
+            completed = subprocess.run(
+                [sys.executable, "-c", "import app; print(app.app.config['SESSION_COOKIE_SECURE'])"],
+                cwd=os.path.dirname(os.path.dirname(__file__)),
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("True", completed.stdout)
+
+    def test_explicit_development_and_testing_allow_non_secure_test_sessions(self):
+        for environment_name in ("development", "testing"):
+            with self.subTest(environment=environment_name), tempfile.TemporaryDirectory() as temp_dir:
+                environment = os.environ.copy()
+                environment["APP_STATE_DB"] = os.path.join(temp_dir, "app_state.db")
+                environment["APP_ENV"] = environment_name
+                environment.pop("FLASK_ENV", None)
+                environment.pop("SECRET_KEY", None)
+
+                completed = subprocess.run(
+                    [sys.executable, "-c", "import app; print(app.app.config['SESSION_COOKIE_SECURE'])"],
+                    cwd=os.path.dirname(os.path.dirname(__file__)),
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=False,
+                )
+
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertIn("False", completed.stdout)
 
 
 if __name__ == "__main__":

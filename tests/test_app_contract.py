@@ -10,7 +10,10 @@ class AppContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmpdir = tempfile.TemporaryDirectory()
+        cls.original_app_state_db = os.environ.get("APP_STATE_DB")
+        cls.original_app_env = os.environ.get("APP_ENV")
         os.environ["APP_STATE_DB"] = os.path.join(cls.tmpdir.name, "app_state.db")
+        os.environ["APP_ENV"] = "testing"
         os.environ.pop("GOOGLE_API_KEY", None)
         os.environ.pop("SERPAPI_API_KEY", None)
         os.environ.pop("client_id", None)
@@ -24,6 +27,14 @@ class AppContractTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        if cls.original_app_state_db is None:
+            os.environ.pop("APP_STATE_DB", None)
+        else:
+            os.environ["APP_STATE_DB"] = cls.original_app_state_db
+        if cls.original_app_env is None:
+            os.environ.pop("APP_ENV", None)
+        else:
+            os.environ["APP_ENV"] = cls.original_app_env
         cls.tmpdir.cleanup()
 
     def test_health_reports_unconfigured_services(self):
