@@ -7,11 +7,17 @@ import unittest
 
 
 class AppContractTests(unittest.TestCase):
+    MODULE_NAMES = ("app", "langchain_config", "llm_model", "llm_prompt")
+
     @classmethod
     def setUpClass(cls):
         cls.tmpdir = tempfile.TemporaryDirectory()
         cls.original_app_state_db = os.environ.get("APP_STATE_DB")
         cls.original_app_env = os.environ.get("APP_ENV")
+        cls.original_modules = {
+            name: sys.modules.get(name)
+            for name in cls.MODULE_NAMES
+        }
         os.environ["APP_STATE_DB"] = os.path.join(cls.tmpdir.name, "app_state.db")
         os.environ["APP_ENV"] = "testing"
         os.environ.pop("GOOGLE_API_KEY", None)
@@ -19,7 +25,7 @@ class AppContractTests(unittest.TestCase):
         os.environ.pop("client_id", None)
         os.environ.pop("client_secret", None)
 
-        for module_name in ["app", "langchain_config", "llm_model", "llm_prompt"]:
+        for module_name in cls.MODULE_NAMES:
             sys.modules.pop(module_name, None)
 
         cls.app_module = importlib.import_module("app")
@@ -27,6 +33,11 @@ class AppContractTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        for module_name in cls.MODULE_NAMES:
+            sys.modules.pop(module_name, None)
+            original_module = cls.original_modules[module_name]
+            if original_module is not None:
+                sys.modules[module_name] = original_module
         if cls.original_app_state_db is None:
             os.environ.pop("APP_STATE_DB", None)
         else:
