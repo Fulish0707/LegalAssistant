@@ -51,7 +51,7 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR) # or logging.INFO for more details
 
 app = Flask(__name__)
-app_environment = os.getenv("APP_ENV", os.getenv("FLASK_ENV", "development")).lower()
+app_environment = os.getenv("APP_ENV", os.getenv("FLASK_ENV", "production")).lower()
 is_local_environment = app_environment in {"development", "local", "testing"}
 secret_key = os.getenv("SECRET_KEY")
 if not secret_key:
