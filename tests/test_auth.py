@@ -6,10 +6,29 @@ import sys
 import tempfile
 import unittest
 from contextlib import contextmanager
+from unittest.mock import patch
+
+
+class FakeGoogleClient:
+    def __init__(self, token):
+        self.token = token
+        self.redirect_calls = []
+
+    def authorize_redirect(self, redirect_uri, nonce):
+        self.redirect_calls.append((redirect_uri, nonce))
+        return "redirected"
+
+    def authorize_access_token(self):
+        return self.token
+
+
+class FakeOAuth:
+    def __init__(self, token):
+        self.google = FakeGoogleClient(token)
 
 
 class AuthFoundationTests(unittest.TestCase):
-    MODULE_NAMES = ("app", "langchain_config", "llm_model", "llm_prompt")
+    MODULE_NAMES = ("app", "auth", "langchain_config", "llm_model", "llm_prompt")
     ENVIRONMENT_NAMES = (
         "APP_STATE_DB",
         "APP_ENV",
@@ -114,12 +133,12 @@ class AuthFoundationTests(unittest.TestCase):
 
             conn.execute(
                 "INSERT INTO users (id, google_subject, email) VALUES (?, ?, ?)",
-                ("user-1", "google-subject-1", "first@example.com"),
+                ("schema-user-1", "schema-google-subject-1", "first@example.com"),
             )
             with self.assertRaises(sqlite3.IntegrityError):
                 conn.execute(
                     "INSERT INTO users (id, google_subject) VALUES (?, ?)",
-                    ("user-2", "google-subject-1"),
+                    ("schema-user-2", "schema-google-subject-1"),
                 )
 
             conn.execute(
@@ -161,16 +180,136 @@ class AuthFoundationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json, {"error": "google_oidc_not_configured"})
 
-    def test_login_returns_safe_placeholder_when_google_oidc_is_configured(self):
+    def test_login_starts_google_authorization_with_relative_next_only(self):
         with self.imported_app_with_environment({
             "GOOGLE_OIDC_CLIENT_ID": "client-id",
             "GOOGLE_OIDC_CLIENT_SECRET": "client-secret",
             "GOOGLE_OIDC_REDIRECT_URI": "http://localhost:5005/auth/callback",
         }) as configured_app:
-            response = configured_app.app.test_client().get("/auth/login")
+            fake_oauth = FakeOAuth({"userinfo": {"sub": "unused"}})
+            client = configured_app.app.test_client()
+            with patch.object(configured_app.auth, "oauth", fake_oauth):
+                response = client.get(
+                    "/auth/login?next=https://attacker.example/steal"
+                )
+            with client.session_transaction() as flask_session:
+                next_path = flask_session.get("auth_next")
 
-        self.assertEqual(response.status_code, 501)
-        self.assertEqual(response.json, {"error": "google_oidc_login_not_implemented"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_data(as_text=True), "redirected")
+        self.assertEqual(fake_oauth.google.redirect_calls[0][0], "http://localhost:5005/auth/callback")
+        self.assertIsNone(next_path)
+
+    def test_callback_creates_internal_user_and_sets_only_account_identity(self):
+        with self.imported_app_with_environment({
+            "GOOGLE_OIDC_CLIENT_ID": "client-id",
+            "GOOGLE_OIDC_CLIENT_SECRET": "client-secret",
+            "GOOGLE_OIDC_REDIRECT_URI": "http://localhost:5005/auth/callback",
+        }) as configured_app:
+            client = configured_app.app.test_client()
+            fake_oauth = FakeOAuth({
+                "userinfo": {"sub": "google-subject-1", "email": "person@example.com"}
+            })
+            with client.session_transaction() as flask_session:
+                flask_session["guest_draft"] = "discard me"
+            with patch.object(configured_app.auth, "oauth", fake_oauth):
+                response = client.get("/auth/callback")
+            with client.session_transaction() as flask_session:
+                user_id = flask_session.get("authenticated_user_id")
+                session_values = dict(flask_session)
+
+            with sqlite3.connect(configured_app.DB_FILE) as conn:
+                row = conn.execute(
+                    "SELECT id, google_subject, email FROM users WHERE google_subject=?",
+                    ("google-subject-1",),
+                ).fetchone()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/")
+        self.assertIsNotNone(row)
+        self.assertEqual(row[0], user_id)
+        self.assertEqual(row[1:], ("google-subject-1", "person@example.com"))
+        self.assertNotIn("guest_draft", session_values)
+        self.assertEqual(
+            set(session_values).intersection({"access_token", "id_token", "userinfo", "email", "google_subject"}),
+            set(),
+        )
+
+    def test_repeat_callback_reuses_google_subject_and_updates_email(self):
+        with self.imported_app_with_environment({
+            "GOOGLE_OIDC_CLIENT_ID": "client-id",
+            "GOOGLE_OIDC_CLIENT_SECRET": "client-secret",
+            "GOOGLE_OIDC_REDIRECT_URI": "http://localhost:5005/auth/callback",
+        }) as configured_app:
+            client = configured_app.app.test_client()
+            with patch.object(configured_app.auth, "oauth", FakeOAuth({
+                "userinfo": {"sub": "google-subject-1", "email": "first@example.com"}
+            })):
+                client.get("/auth/callback")
+            with sqlite3.connect(configured_app.DB_FILE) as conn:
+                first_id = conn.execute(
+                    "SELECT id FROM users WHERE google_subject=?", ("google-subject-1",)
+                ).fetchone()[0]
+
+            with patch.object(configured_app.auth, "oauth", FakeOAuth({
+                "userinfo": {"sub": "google-subject-1", "email": "second@example.com"}
+            })):
+                response = client.get("/auth/callback")
+            with sqlite3.connect(configured_app.DB_FILE) as conn:
+                rows = conn.execute(
+                    "SELECT id, email, last_login_at FROM users WHERE google_subject=?",
+                    ("google-subject-1",),
+                ).fetchall()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], first_id)
+        self.assertEqual(rows[0][1], "second@example.com")
+        self.assertTrue(rows[0][2])
+
+    def test_callback_rejects_missing_subject_without_writing_account_identity(self):
+        with self.imported_app_with_environment({
+            "GOOGLE_OIDC_CLIENT_ID": "client-id",
+            "GOOGLE_OIDC_CLIENT_SECRET": "client-secret",
+            "GOOGLE_OIDC_REDIRECT_URI": "http://localhost:5005/auth/callback",
+        }) as configured_app:
+            client = configured_app.app.test_client()
+            with sqlite3.connect(configured_app.DB_FILE) as conn:
+                user_count_before = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            with patch.object(configured_app.auth, "oauth", FakeOAuth({"userinfo": {"email": "person@example.com"}})):
+                response = client.get("/auth/callback")
+            with client.session_transaction() as flask_session:
+                user_id = flask_session.get("authenticated_user_id")
+            with sqlite3.connect(configured_app.DB_FILE) as conn:
+                user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIsNone(user_id)
+        self.assertEqual(user_count, user_count_before)
+
+    def test_knowledge_base_status_requires_an_authenticated_account(self):
+        response = self.client.get("/knowledge_base/status")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json, {"error": "authentication_required"})
+
+    def test_logout_post_clears_account_and_guest_draft(self):
+        with self.client.session_transaction() as flask_session:
+            flask_session["authenticated_user_id"] = "user-1"
+            flask_session["account_email"] = "person@example.com"
+            flask_session["guest_draft"] = "temporary"
+
+        get_response = self.client.get("/auth/logout")
+        response = self.client.post("/auth/logout")
+        with self.client.session_transaction() as flask_session:
+            remaining = dict(flask_session)
+
+        self.assertEqual(get_response.status_code, 405)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/")
+        self.assertNotIn("authenticated_user_id", remaining)
+        self.assertNotIn("account_email", remaining)
+        self.assertNotIn("guest_draft", remaining)
 
     def test_unset_environment_requires_secret_key(self):
         with tempfile.TemporaryDirectory() as temp_dir:
