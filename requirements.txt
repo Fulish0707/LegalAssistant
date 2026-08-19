@@ -1,4 +1,5 @@
 flask
+Authlib
 python-dotenv
 requests
 werkzeug

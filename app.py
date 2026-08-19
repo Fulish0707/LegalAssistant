@@ -51,7 +51,33 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR) # or logging.INFO for more details
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY") or secrets.token_urlsafe(32)
+app_environment = os.getenv("APP_ENV", os.getenv("FLASK_ENV", "development")).lower()
+is_local_environment = app_environment in {"development", "local", "testing"}
+secret_key = os.getenv("SECRET_KEY")
+if not secret_key:
+    if not is_local_environment:
+        raise RuntimeError("SECRET_KEY must be configured outside development, local, or testing environments.")
+    secret_key = "development-only-secret-key"
+
+app.config.update(
+    SECRET_KEY=secret_key,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=not is_local_environment,
+    GOOGLE_OIDC_CLIENT_ID=os.getenv("GOOGLE_OIDC_CLIENT_ID"),
+    GOOGLE_OIDC_CLIENT_SECRET=os.getenv("GOOGLE_OIDC_CLIENT_SECRET"),
+    GOOGLE_OIDC_REDIRECT_URI=os.getenv("GOOGLE_OIDC_REDIRECT_URI"),
+    QUOTA_IP_SALT=os.getenv("QUOTA_IP_SALT"),
+    TRUSTED_PROXY_COUNT=int(os.getenv("TRUSTED_PROXY_COUNT", "0")),
+)
+app.config["GOOGLE_OIDC_CONFIGURED"] = all(
+    app.config[name]
+    for name in (
+        "GOOGLE_OIDC_CLIENT_ID",
+        "GOOGLE_OIDC_CLIENT_SECRET",
+        "GOOGLE_OIDC_REDIRECT_URI",
+    )
+)
 
 
 @app.before_request
@@ -75,6 +101,24 @@ def ensure_database_schema(conn):
     cursor.execute("CREATE TABLE IF NOT EXISTS personal_statement (user_id TEXT PRIMARY KEY, draft TEXT NOT NULL DEFAULT '')")
     cursor.execute("CREATE TABLE IF NOT EXISTS chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_user_id_id ON chat_history(user_id, id)")
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            google_subject TEXT NOT NULL UNIQUE,
+            email TEXT,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_login_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS daily_ai_quota (
+            identity_kind TEXT NOT NULL CHECK(identity_kind IN ('user', 'guest_ip')),
+            identity_value TEXT NOT NULL,
+            quota_day TEXT NOT NULL,
+            request_count INTEGER NOT NULL DEFAULT 0 CHECK(request_count >= 0),
+            PRIMARY KEY (identity_kind, identity_value, quota_day)
+        )
+    """)
     if cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='personal_statement_legacy'").fetchone():
         row = cursor.execute("SELECT draft FROM personal_statement_legacy WHERE id=1").fetchone()
         if row:
@@ -89,6 +133,13 @@ with app.app_context():
     conn = sqlite3.connect(DB_FILE)
     ensure_database_schema(conn)
     conn.close()
+
+
+@app.route('/auth/login')
+def auth_login():
+    if not app.config["GOOGLE_OIDC_CONFIGURED"]:
+        return jsonify({"error": "google_oidc_not_configured"}), 503
+    return jsonify({"error": "google_oidc_login_not_implemented"}), 501
 
 # NO MORE GLOBAL DRAFT OR CHAT HISTORY LIST
 # personal_statement_draft = "" # REMOVED
