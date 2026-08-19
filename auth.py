@@ -36,6 +36,8 @@ def get_current_user_id():
 def _safe_next_path(candidate):
     if not isinstance(candidate, str) or not candidate:
         return None
+    if "\\" in candidate or any(ord(character) < 32 or ord(character) == 127 for character in candidate):
+        return None
     parts = urlsplit(candidate)
     if parts.scheme or parts.netloc or not parts.path.startswith("/") or candidate.startswith("//"):
         return None
