@@ -51,7 +51,10 @@ def client_ip_from_request(request, *, trusted_proxy_count=0):
     if trusted_proxy_count == 0:
         return normalize_client_ip(request.remote_addr)
 
-    route = list(request.access_route)
+    # Flask exposes only X-Forwarded-For values through access_route.  Add the
+    # direct peer so the final ``trusted_proxy_count`` entries are the proxy
+    # hops we explicitly trust.
+    route = list(request.access_route) + [request.remote_addr]
     if len(route) > trusted_proxy_count:
         return normalize_client_ip(route[-(trusted_proxy_count + 1)])
     return normalize_client_ip(request.remote_addr)
