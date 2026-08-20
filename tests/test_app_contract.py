@@ -181,6 +181,55 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json, {"error": "authentication_required"})
 
+    def test_failed_ocr_extraction_does_not_consume_account_quota(self):
+        original_llm = self.app_module.llm
+        original_extract = self.app_module.llm_ocr.extract_text_from_document
+        account_id = "failed-ocr-account"
+        try:
+            self.app_module.llm = object()
+            self.app_module.llm_ocr.extract_text_from_document = lambda *args: ({"error": "unreadable"}, 400)
+            with self.client.session_transaction() as flask_session:
+                flask_session["authenticated_user_id"] = account_id
+
+            response = self.client.post(
+                "/process_document_ocr",
+                data={"file": (io.BytesIO(b"invalid text"), "sample.txt")},
+                content_type="multipart/form-data",
+            )
+            with self.app_module.app.app_context():
+                row = self.app_module.get_db().execute(
+                    "SELECT request_count FROM daily_ai_quota WHERE identity_kind='user' AND identity_value=?",
+                    (account_id,),
+                ).fetchone()
+        finally:
+            self.app_module.llm = original_llm
+            self.app_module.llm_ocr.extract_text_from_document = original_extract
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIsNone(row)
+
+    def test_ocr_returns_json_429_when_account_quota_is_exhausted(self):
+        original_llm = self.app_module.llm
+        account_id = "quota-exhausted-ocr-account"
+        try:
+            with self.app_module.app.app_context():
+                for _ in range(20):
+                    reserve_daily_quota(self.app_module.get_db(), "user", account_id)
+            with self.client.session_transaction() as flask_session:
+                flask_session["authenticated_user_id"] = account_id
+            self.app_module.llm = object()
+
+            response = self.client.post(
+                "/process_document_ocr",
+                data={"file": (io.BytesIO(b"source text"), "sample.txt")},
+                content_type="multipart/form-data",
+            )
+        finally:
+            self.app_module.llm = original_llm
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.json["error"], "daily_ai_quota_exceeded")
+
     def test_statistics_returns_json_429_when_account_quota_is_exhausted(self):
         original_llm = self.app_module.llm
         account_id = "quota-exhausted-account"

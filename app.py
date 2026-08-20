@@ -794,10 +794,6 @@ def process_document_ocr():
         # At this point, temp_file_obj is closed, and the file is saved at temp_file_path
         file_extension = filename.rsplit('.', 1)[1].lower()
 
-        quota_result = reserve_ai_request()
-        if not quota_result.allowed:
-            return quota_exceeded_response(quota_result)
-
         result_dict, status_code = llm_ocr.analyze_document(
             file_path=temp_file_path,
             file_extension=file_extension,
@@ -807,8 +803,12 @@ def process_document_ocr():
             logger=app.logger, # Pass Flask app's logger
             analysis_mode=analysis_mode,
             question=question,
-            include_extracted_text=add_to_knowledge_base
+            include_extracted_text=add_to_knowledge_base,
+            quota_reserver=reserve_ai_request,
         )
+
+        if status_code == 429 and result_dict.get("error") == "daily_ai_quota_exceeded":
+            return quota_exceeded_response(result_dict["quota_result"])
 
         if status_code == 200 and add_to_knowledge_base:
             extracted_text = result_dict.pop("extracted_text", "")
