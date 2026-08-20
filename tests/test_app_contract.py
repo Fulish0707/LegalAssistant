@@ -159,6 +159,22 @@ class AppContractTests(unittest.TestCase):
         self.assertIn("daily_ai_quota_exceeded", response.get_data(as_text=True))
         self.assertIn("stream_end", response.get_data(as_text=True))
 
+    def test_guest_quota_identity_ignores_forwarded_for_headers(self):
+        with self.app_module.app.test_request_context(
+            "/",
+            headers={"X-Forwarded-For": "198.51.100.14"},
+            environ_base={"REMOTE_ADDR": "10.0.0.8"},
+        ):
+            result = self.app_module.reserve_ai_request()
+        expected = guest_ip_identity("10.0.0.8", self.app_module.app.config["QUOTA_IP_SALT"])
+        with self.app_module.app.app_context():
+            row = self.app_module.get_db().execute(
+                "SELECT identity_value FROM daily_ai_quota WHERE identity_kind='guest_ip' AND quota_day=?",
+                (result.quota_day,),
+            ).fetchone()
+
+        self.assertEqual(row["identity_value"], expected)
+
     def test_document_analysis_requires_google_key_when_not_configured(self):
         response = self.client.post("/process_document_ocr", data={})
 

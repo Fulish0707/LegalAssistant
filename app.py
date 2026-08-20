@@ -76,7 +76,6 @@ app.config.update(
     GOOGLE_OIDC_CLIENT_SECRET=os.getenv("GOOGLE_OIDC_CLIENT_SECRET"),
     GOOGLE_OIDC_REDIRECT_URI=os.getenv("GOOGLE_OIDC_REDIRECT_URI"),
     QUOTA_IP_SALT=os.getenv("QUOTA_IP_SALT"),
-    TRUSTED_PROXY_COUNT=int(os.getenv("TRUSTED_PROXY_COUNT", "0")),
     DAILY_AI_REQUEST_LIMIT=int(os.getenv("DAILY_AI_REQUEST_LIMIT", str(DAILY_AI_REQUEST_LIMIT))),
 )
 app.config["QUOTA_IP_SALT"] = app.config["QUOTA_IP_SALT"] or secret_key
@@ -227,10 +226,7 @@ def reserve_ai_request():
     if user_id:
         identity_kind, identity_value = "user", user_id
     else:
-        client_ip = client_ip_from_request(
-            request,
-            trusted_proxy_count=app.config["TRUSTED_PROXY_COUNT"],
-        )
+        client_ip = client_ip_from_request(request)
         identity_kind = "guest_ip"
         identity_value = guest_ip_identity(client_ip, app.config["QUOTA_IP_SALT"])
     return reserve_daily_quota(

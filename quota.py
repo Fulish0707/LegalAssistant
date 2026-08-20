@@ -44,19 +44,8 @@ def guest_ip_identity(client_ip, salt):
     return hashlib.sha256(f"{salt}:{normalized_ip}".encode("utf-8")).hexdigest()
 
 
-def client_ip_from_request(request, *, trusted_proxy_count=0):
-    """Get the client address, trusting forwarded hops only when configured."""
-    if not isinstance(trusted_proxy_count, int) or trusted_proxy_count < 0:
-        raise ValueError("Trusted proxy count must be a non-negative integer")
-    if trusted_proxy_count == 0:
-        return normalize_client_ip(request.remote_addr)
-
-    # Flask exposes only X-Forwarded-For values through access_route.  Add the
-    # direct peer so the final ``trusted_proxy_count`` entries are the proxy
-    # hops we explicitly trust.
-    route = list(request.access_route) + [request.remote_addr]
-    if len(route) > trusted_proxy_count:
-        return normalize_client_ip(route[-(trusted_proxy_count + 1)])
+def client_ip_from_request(request):
+    """Use the direct peer address for a demo's anonymous quota identity."""
     return normalize_client_ip(request.remote_addr)
 
 
