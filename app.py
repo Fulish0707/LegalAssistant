@@ -172,7 +172,10 @@ app.auth = auth
 
 @app.context_processor
 def inject_authenticated_account():
-    return {"authenticated_account_email": auth.get_current_user_email()}
+    return {
+        "authenticated_account_email": auth.get_current_user_email(),
+        "authenticated_user_id": auth.get_current_user_id(),
+    }
 
 def get_personal_statement_from_db(user_id):
     conn = get_db()
@@ -433,7 +436,9 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
         # if POST hasn't completed or if GET is called directly.
         # For now, we assume POST has added the user message.
         # A more robust solution might involve session management or passing a request ID.
-        add_chat_message_to_db(session["user_id"], "assistant", parsed_chat_response)
+        authenticated_user_id = auth.get_current_user_id()
+        if authenticated_user_id:
+            add_chat_message_to_db(authenticated_user_id, "assistant", parsed_chat_response)
 
         final_data = {
             "type": "final_response",
@@ -449,7 +454,9 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
         logging.exception("Error during AI processing stream (_generate_agent_response_stream)")
         error_response_content = "An error occurred while processing your request. Please check server logs."
         # Potentially add error to DB here as well, associated with the user_input from GET
-        add_chat_message_to_db(session["user_id"], "assistant", error_response_content) # Or a more specific error message
+        authenticated_user_id = auth.get_current_user_id()
+        if authenticated_user_id:
+            add_chat_message_to_db(authenticated_user_id, "assistant", error_response_content)
         yield f"data: {json.dumps({'type': 'error', 'content': error_response_content})}\n\n"
     finally:
         yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
@@ -495,7 +502,9 @@ def chat():
         if not user_input:
             return jsonify({"error": "No message provided"}), 400
 
-        add_chat_message_to_db(session["user_id"], "user", user_input)
+        authenticated_user_id = auth.get_current_user_id()
+        if authenticated_user_id:
+            add_chat_message_to_db(authenticated_user_id, "user", user_input)
         # The POST request now just acknowledges receipt.
         # The actual processing and streaming will be triggered by the frontend's GET request.
         return jsonify({"status": "message_received_ok", "message": "Proceed to connect to SSE for response."})
@@ -524,20 +533,30 @@ def chat():
 
 @app.route('/get_initial_state', methods=['GET'])
 def get_initial_state():
-    # Fetches from DB, so no change needed due to global var removal
+    authenticated_user_id = auth.get_current_user_id()
+    if not authenticated_user_id:
+        return jsonify({
+            "personal_statement_draft": session.get("guest_draft", ""),
+            "chat_history": [],
+        })
     return jsonify({
-        "personal_statement_draft": get_personal_statement_from_db(session["user_id"]),
-        "chat_history": get_chat_history_from_db(session["user_id"])
+        "personal_statement_draft": get_personal_statement_from_db(authenticated_user_id),
+        "chat_history": get_chat_history_from_db(authenticated_user_id)
     })
 
 @app.route('/update_statement', methods=['POST'])
 def update_statement():
-    new_draft = request.json.get('personal_statement_draft')
+    data = request.get_json(silent=True) or {}
+    new_draft = data.get('personal_statement_draft')
     if new_draft is None: # Check for None, as empty string is a valid draft
         return jsonify({"error": "No personal_statement_draft provided"}), 400
     
     try:
-        set_personal_statement_in_db(session["user_id"], new_draft)
+        authenticated_user_id = auth.get_current_user_id()
+        if authenticated_user_id:
+            set_personal_statement_in_db(authenticated_user_id, new_draft)
+        else:
+            session["guest_draft"] = new_draft
         return jsonify({"message": "Personal statement updated successfully."}), 200
     except Exception as e:
         logging.exception("Error updating personal statement in DB")
@@ -550,6 +569,10 @@ def get_similar_chats_route(): # Renamed to avoid conflict with internal var
     if not query:
         return jsonify({"error": "No query provided"}), 400
 
+    authenticated_user_id = auth.get_current_user_id()
+    if not authenticated_user_id:
+        return jsonify({"similar_chats": []})
+
     conn = get_db()
     c = conn.cursor()
     # Example: find chats containing the query text, excluding very recent ones to avoid self-match
@@ -559,7 +582,7 @@ def get_similar_chats_route(): # Renamed to avoid conflict with internal var
         WHERE user_id=? AND content LIKE ? AND timestamp < datetime('now', '-5 seconds')
         ORDER BY timestamp DESC
         LIMIT 5
-    ''', (session["user_id"], f'%{query}%'))
+    ''', (authenticated_user_id, f'%{query}%'))
     similar_chats = [{"role": row["role"], "content": row["content"], "timestamp": row["timestamp"]}
                      for row in c.fetchall()]
 
@@ -569,7 +592,9 @@ def get_similar_chats_route(): # Renamed to avoid conflict with internal var
 @app.route('/clear_chat_history_endpoint', methods=['POST']) # Added specific endpoint name
 def clear_chat_history_endpoint():
     try:
-        clear_chat_history_in_db(session["user_id"]) # This now also clears Langchain FakeMemory
+        authenticated_user_id = auth.get_current_user_id()
+        if authenticated_user_id:
+            clear_chat_history_in_db(authenticated_user_id)
         return jsonify({"message": "Chat history cleared successfully."}), 200
     except Exception as e:
         logging.error(f"Error clearing chat history: {e}")
@@ -578,11 +603,12 @@ def clear_chat_history_endpoint():
 @app.route('/knowledge_base/status', methods=['GET'])
 @auth.login_required
 def knowledge_base_status_route():
-    return jsonify(get_knowledge_base_status(session["user_id"]))
+    return jsonify(get_knowledge_base_status(auth.get_current_user_id()))
 
 @app.route('/knowledge_base/clear', methods=['POST'])
+@auth.login_required
 def clear_knowledge_base_route():
-    result = clear_knowledge_base(session["user_id"])
+    result = clear_knowledge_base(auth.get_current_user_id())
     return jsonify(result), 200 if result.get("ok") else 500
 
 
@@ -612,6 +638,7 @@ def allowed_file(filename, allowed_extensions):
 
 
 @app.route('/statistics/analyze', methods=['POST'])
+@auth.login_required
 def analyze_statistics_route():
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
@@ -668,7 +695,7 @@ def analyze_statistics_route():
                 metadata={
                     "analysis_type": "statistics",
                     "uploaded_via": "statistics_workspace",
-                }, user_id=session["user_id"],
+                }, user_id=auth.get_current_user_id(),
             )
 
         return jsonify(response_payload), 200
@@ -686,6 +713,7 @@ def analyze_statistics_route():
 
 # --- OCR Processing Route (Existing) ---
 @app.route('/process_document_ocr', methods=['POST'])
+@auth.login_required
 def process_document_ocr():
     if llm_ocr is None:
         return jsonify({
@@ -744,7 +772,7 @@ def process_document_ocr():
                 metadata={
                     "analysis_mode": analysis_mode,
                     "uploaded_via": "document_workspace",
-                }, user_id=session["user_id"]
+                }, user_id=auth.get_current_user_id()
             )
             result_dict["knowledge_base"] = ingestion_result
         
@@ -874,6 +902,7 @@ def process_audio_common(audio_file_path):
         return {"error": f"Error during summarization: {str(e)}", "transcript": transcript, "summary": ""}
 
 @app.route('/transcribe_and_summarize_audio_file', methods=['POST'])
+@auth.login_required
 def transcribe_and_summarize_audio_file_route():
     app.logger.info("Received request for /transcribe_and_summarize_audio_file")
     if 'audio_file' not in request.files:
@@ -924,6 +953,7 @@ def transcribe_and_summarize_audio_file_route():
 
 
 @app.route('/transcribe_and_summarize_audio_blob', methods=['POST'])
+@auth.login_required
 def transcribe_and_summarize_audio_blob_route():
     app.logger.info(f"Received request for /transcribe_and_summarize_audio_blob. Headers: {request.headers}, Content-Type: {request.content_type}")
     app.logger.info(f"Request.files: {list(request.files.keys())}")

@@ -72,26 +72,64 @@ class AppContractTests(unittest.TestCase):
         self.assertNotEqual(first_id, second_id)
         self.assertGreaterEqual(len(first_id), 32)
 
-    def test_initial_state_and_draft_update_use_configured_db(self):
-        update_response = self.client.post(
+    def test_guest_draft_is_session_only_and_is_not_written_to_sqlite(self):
+        guest = self.app_module.app.test_client()
+        update_response = guest.post(
             "/update_statement",
             json={"personal_statement_draft": "Working draft"},
         )
-        state_response = self.client.get("/get_initial_state")
+        state_response = guest.get("/get_initial_state")
+
+        with self.app_module.app.app_context():
+            row = self.app_module.get_db().execute(
+                "SELECT draft FROM personal_statement WHERE draft=?", ("Working draft",)
+            ).fetchone()
 
         self.assertEqual(update_response.status_code, 200)
         self.assertEqual(state_response.status_code, 200)
         self.assertEqual(state_response.json["personal_statement_draft"], "Working draft")
+        self.assertIsNone(row)
 
-    def test_drafts_are_session_scoped(self):
+        fresh_client = self.app_module.app.test_client()
+        fresh_state = fresh_client.get("/get_initial_state")
+        self.assertEqual(fresh_state.json["personal_statement_draft"], "")
+        self.assertEqual(fresh_state.json["chat_history"], [])
+
+    def test_authenticated_drafts_and_chat_histories_are_private(self):
         first = self.app_module.app.test_client()
         second = self.app_module.app.test_client()
 
+        with first.session_transaction() as flask_session:
+            flask_session["authenticated_user_id"] = "account-one"
+        with second.session_transaction() as flask_session:
+            flask_session["authenticated_user_id"] = "account-two"
+
         first.post("/update_statement", json={"personal_statement_draft": "First"})
         second.post("/update_statement", json={"personal_statement_draft": "Second"})
+        first.post("/chat", json={"message": "First chat"})
+        second.post("/chat", json={"message": "Second chat"})
 
         self.assertEqual(first.get("/get_initial_state").json["personal_statement_draft"], "First")
         self.assertEqual(second.get("/get_initial_state").json["personal_statement_draft"], "Second")
+        self.assertEqual(first.get("/get_initial_state").json["chat_history"], [{"role": "user", "content": "First chat"}])
+        self.assertEqual(second.get("/get_initial_state").json["chat_history"], [{"role": "user", "content": "Second chat"}])
+
+    def test_signing_in_does_not_migrate_guest_draft_or_chat(self):
+        guest = self.app_module.app.test_client()
+        guest.post("/update_statement", json={"personal_statement_draft": "Guest draft"})
+        guest.post("/chat", json={"message": "Guest chat"})
+        with guest.session_transaction() as flask_session:
+            flask_session["authenticated_user_id"] = "account-after-guest"
+
+        state = guest.get("/get_initial_state")
+
+        self.assertEqual(state.json["personal_statement_draft"], "")
+        self.assertEqual(state.json["chat_history"], [])
+        with self.app_module.app.app_context():
+            row = self.app_module.get_db().execute(
+                "SELECT content FROM chat_history WHERE content=?", ("Guest chat",)
+            ).fetchone()
+        self.assertIsNone(row)
 
     def test_chat_sse_reports_missing_ai_configuration(self):
         response = self.client.get("/chat?message=hello")
@@ -104,8 +142,8 @@ class AppContractTests(unittest.TestCase):
     def test_document_analysis_requires_google_key_when_not_configured(self):
         response = self.client.post("/process_document_ocr", data={})
 
-        self.assertEqual(response.status_code, 503)
-        self.assertIn("GOOGLE_API_KEY", response.json["error"])
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json, {"error": "authentication_required"})
 
     def test_document_upload_can_save_mocked_analysis_to_knowledge_base(self):
         original_llm = self.app_module.llm
@@ -130,6 +168,8 @@ class AppContractTests(unittest.TestCase):
             return {"ok": True, "message": "saved", "chunk_count": 1}
 
         try:
+            with self.client.session_transaction() as flask_session:
+                flask_session["authenticated_user_id"] = "document-account"
             self.app_module.llm = object()
             self.app_module.llm_ocr.analyze_document = fake_analyze_document
             self.app_module.ingest_text_to_vector_store = fake_ingest_text_to_vector_store
@@ -168,6 +208,8 @@ class AppContractTests(unittest.TestCase):
             return {"ok": True, "message": "saved", "chunk_count": 1}
 
         try:
+            with self.client.session_transaction() as flask_session:
+                flask_session["authenticated_user_id"] = "statistics-account"
             self.app_module.ingest_text_to_vector_store = fake_ingest_text_to_vector_store
             response = self.client.post(
                 "/statistics/analyze",
@@ -196,14 +238,38 @@ class AppContractTests(unittest.TestCase):
         self.assertTrue(captured["user_id"])
 
     def test_statistics_analysis_rejects_unsupported_file_type(self):
-        response = self.client.post(
+        response = self.app_module.app.test_client().post(
             "/statistics/analyze",
             data={"file": (io.BytesIO(b"not a table"), "sample.txt")},
             content_type="multipart/form-data",
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("File type not allowed", response.json["error"])
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json, {"error": "authentication_required"})
+
+    def test_guest_provider_upload_routes_require_authentication_before_body_processing(self):
+        routes = (
+            "/process_document_ocr",
+            "/statistics/analyze",
+            "/transcribe_and_summarize_audio_file",
+            "/transcribe_and_summarize_audio_blob",
+        )
+
+        for route in routes:
+            with self.subTest(route=route):
+                response = self.app_module.app.test_client().post(
+                    route,
+                    data={"file": (io.BytesIO(b"body must not be processed"), "sample.txt")},
+                    content_type="multipart/form-data",
+                )
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(response.json, {"error": "authentication_required"})
+
+    def test_guest_cannot_clear_knowledge_base(self):
+        response = self.app_module.app.test_client().post("/knowledge_base/clear")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json, {"error": "authentication_required"})
 
 
 if __name__ == "__main__":
