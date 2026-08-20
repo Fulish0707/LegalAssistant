@@ -99,7 +99,7 @@ class DailyQuotaTests(unittest.TestCase):
         self.assertEqual(identity, hashlib.sha256(b"test-salt:2001:db8::1").hexdigest())
         self.assertNotIn("2001:0db8::1", identity)
 
-    def test_client_ip_uses_forwarded_chain_only_for_configured_trusted_proxies(self):
+    def test_client_ip_ignores_forwarded_headers(self):
         from quota import client_ip_from_request
 
         app = Flask(__name__)
@@ -108,15 +108,4 @@ class DailyQuotaTests(unittest.TestCase):
             headers={"X-Forwarded-For": "198.51.100.14, 10.0.0.7"},
             environ_base={"REMOTE_ADDR": "10.0.0.8"},
         ):
-            # Flask's access_route contains only X-Forwarded-For values, not REMOTE_ADDR.
-            self.assertEqual(list(request.access_route), ["198.51.100.14", "10.0.0.7"])
-            self.assertEqual(client_ip_from_request(request, trusted_proxy_count=0), "10.0.0.8")
-            self.assertEqual(client_ip_from_request(request, trusted_proxy_count=1), "10.0.0.7")
-            self.assertEqual(client_ip_from_request(request, trusted_proxy_count=2), "198.51.100.14")
-
-        with app.test_request_context(
-            "/",
-            headers={"X-Forwarded-For": "198.51.100.14"},
-            environ_base={"REMOTE_ADDR": "10.0.0.8"},
-        ):
-            self.assertEqual(client_ip_from_request(request, trusted_proxy_count=1), "198.51.100.14")
+            self.assertEqual(client_ip_from_request(request), "10.0.0.8")
