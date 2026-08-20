@@ -8,6 +8,8 @@ import unittest
 from contextlib import contextmanager
 from unittest.mock import patch
 
+from authlib.integrations.base_client.errors import OAuthError
+
 
 class FakeGoogleClient:
     def __init__(self, token):
@@ -19,6 +21,8 @@ class FakeGoogleClient:
         return "redirected"
 
     def authorize_access_token(self):
+        if isinstance(self.token, Exception):
+            raise self.token
         return self.token
 
 
@@ -296,6 +300,63 @@ class AuthFoundationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIsNone(user_id)
         self.assertEqual(user_count, user_count_before)
+
+    def test_callback_rejects_invalid_oauth_state_without_leaking_provider_error(self):
+        with self.imported_app_with_environment({
+            "GOOGLE_OIDC_CLIENT_ID": "client-id",
+            "GOOGLE_OIDC_CLIENT_SECRET": "client-secret",
+            "GOOGLE_OIDC_REDIRECT_URI": "http://localhost:5005/auth/callback",
+        }) as configured_app:
+            client = configured_app.app.test_client()
+            with sqlite3.connect(configured_app.DB_FILE) as conn:
+                user_count_before = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            with patch.object(
+                configured_app.auth,
+                "oauth",
+                FakeOAuth(OAuthError(error="mismatching_state", description="provider detail")),
+            ):
+                response = client.get("/auth/callback")
+            with client.session_transaction() as flask_session:
+                account_identity = flask_session.get("authenticated_user_id")
+            with sqlite3.connect(configured_app.DB_FILE) as conn:
+                user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json, {"error": "google_oidc_authentication_failed"})
+        self.assertNotIn("mismatching_state", response.get_data(as_text=True))
+        self.assertIsNone(account_identity)
+        self.assertEqual(user_count, user_count_before)
+
+    def test_upsert_uses_atomic_conflict_handling_and_preserves_internal_id(self):
+        class RecordingConnection:
+            def __init__(self, connection):
+                self.connection = connection
+                self.statements = []
+
+            def execute(self, statement, parameters=()):
+                self.statements.append(statement)
+                return self.connection.execute(statement, parameters)
+
+            def commit(self):
+                self.connection.commit()
+
+        with self.app_module.app.app_context():
+            recording_connection = RecordingConnection(self.app_module.get_db())
+            with patch.object(self.app_module, "get_db", return_value=recording_connection):
+                first_id = self.app_module.auth.upsert_google_user(
+                    "atomic-google-subject", "first@example.com"
+                )
+                second_id = self.app_module.auth.upsert_google_user(
+                    "atomic-google-subject", "second@example.com"
+                )
+            row = recording_connection.connection.execute(
+                "SELECT id, email FROM users WHERE google_subject=?", ("atomic-google-subject",)
+            ).fetchone()
+
+        self.assertEqual(first_id, second_id)
+        self.assertEqual(row["id"], first_id)
+        self.assertEqual(row["email"], "second@example.com")
+        self.assertTrue(all("ON CONFLICT(google_subject)" in statement for statement in recording_connection.statements))
 
     def test_knowledge_base_status_requires_an_authenticated_account(self):
         response = self.client.get("/knowledge_base/status")

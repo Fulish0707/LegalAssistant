@@ -4,6 +4,7 @@ from functools import wraps
 from urllib.parse import urlsplit
 import uuid
 
+from authlib.integrations.base_client.errors import OAuthError
 from authlib.integrations.flask_client import OAuth
 from flask import current_app, jsonify, redirect, request, session, url_for
 
@@ -72,22 +73,18 @@ def upsert_google_user(subject, email):
     normalized_email = email.strip() if isinstance(email, str) and email.strip() else None
     connection = get_db()
     row = connection.execute(
-        "SELECT id FROM users WHERE google_subject=?", (normalized_subject,)
+        """
+        INSERT INTO users (id, google_subject, email)
+        VALUES (?, ?, ?)
+        ON CONFLICT(google_subject) DO UPDATE SET
+            email=excluded.email,
+            last_login_at=CURRENT_TIMESTAMP
+        RETURNING id
+        """,
+        (uuid.uuid4().hex, normalized_subject, normalized_email),
     ).fetchone()
-    if row:
-        user_id = row["id"]
-        connection.execute(
-            "UPDATE users SET email=?, last_login_at=CURRENT_TIMESTAMP WHERE id=?",
-            (normalized_email, user_id),
-        )
-    else:
-        user_id = uuid.uuid4().hex
-        connection.execute(
-            "INSERT INTO users (id, google_subject, email) VALUES (?, ?, ?)",
-            (user_id, normalized_subject, normalized_email),
-        )
     connection.commit()
-    return user_id
+    return row["id"]
 
 
 def get_current_user_email():
@@ -125,7 +122,7 @@ def register_auth_routes(app):
             if not isinstance(subject, str) or not subject.strip():
                 raise ValueError("Google account subject is missing")
             user_id = upsert_google_user(subject, userinfo.get("email"))
-        except Exception:
+        except (OAuthError, ValueError, TypeError, AttributeError):
             current_app.logger.warning("Google OIDC callback failed", exc_info=True)
             return jsonify({"error": "google_oidc_authentication_failed"}), 400
 
