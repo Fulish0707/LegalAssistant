@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from quota import guest_ip_identity, reserve_daily_quota
 
 
 class AppContractTests(unittest.TestCase):
@@ -139,11 +140,53 @@ class AppContractTests(unittest.TestCase):
         self.assertIn("AI chat is not configured", body)
         self.assertIn("stream_end", body)
 
+    def test_chat_sse_reports_quota_exhaustion_without_invoking_the_agent(self):
+        original_agent = self.app_module.agent
+        guest_identity = guest_ip_identity("127.0.0.1", self.app_module.app.config["QUOTA_IP_SALT"])
+        try:
+            with self.app_module.app.app_context():
+                for _ in range(20):
+                    reserve_daily_quota(
+                        self.app_module.get_db(), "guest_ip", guest_identity
+                    )
+            self.app_module.agent = object()
+
+            response = self.app_module.app.test_client().get("/chat?message=hello")
+        finally:
+            self.app_module.agent = original_agent
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("daily_ai_quota_exceeded", response.get_data(as_text=True))
+        self.assertIn("stream_end", response.get_data(as_text=True))
+
     def test_document_analysis_requires_google_key_when_not_configured(self):
         response = self.client.post("/process_document_ocr", data={})
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json, {"error": "authentication_required"})
+
+    def test_statistics_returns_json_429_when_account_quota_is_exhausted(self):
+        original_llm = self.app_module.llm
+        account_id = "quota-exhausted-account"
+        try:
+            with self.app_module.app.app_context():
+                for _ in range(20):
+                    reserve_daily_quota(self.app_module.get_db(), "user", account_id)
+            with self.client.session_transaction() as flask_session:
+                flask_session["authenticated_user_id"] = account_id
+            self.app_module.llm = object()
+
+            response = self.client.post(
+                "/statistics/analyze",
+                data={"file": (io.BytesIO(b"name,value\na,1\n"), "sample.csv")},
+                content_type="multipart/form-data",
+            )
+        finally:
+            self.app_module.llm = original_llm
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.json["error"], "daily_ai_quota_exceeded")
+        self.assertEqual(response.json["limit"], 20)
 
     def test_document_upload_can_save_mocked_analysis_to_knowledge_base(self):
         original_llm = self.app_module.llm

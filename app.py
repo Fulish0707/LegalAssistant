@@ -22,6 +22,13 @@ import tempfile
 from dotenv import load_dotenv
 import requests
 import auth
+from quota import (
+    DAILY_AI_REQUEST_LIMIT,
+    QuotaResult,
+    client_ip_from_request,
+    guest_ip_identity,
+    reserve_daily_quota,
+)
 
 # Assuming llm_ocr.py is in the same directory or accessible via PYTHONPATH
 try:
@@ -70,7 +77,9 @@ app.config.update(
     GOOGLE_OIDC_REDIRECT_URI=os.getenv("GOOGLE_OIDC_REDIRECT_URI"),
     QUOTA_IP_SALT=os.getenv("QUOTA_IP_SALT"),
     TRUSTED_PROXY_COUNT=int(os.getenv("TRUSTED_PROXY_COUNT", "0")),
+    DAILY_AI_REQUEST_LIMIT=int(os.getenv("DAILY_AI_REQUEST_LIMIT", str(DAILY_AI_REQUEST_LIMIT))),
 )
+app.config["QUOTA_IP_SALT"] = app.config["QUOTA_IP_SALT"] or secret_key
 app.config["GOOGLE_OIDC_CONFIGURED"] = all(
     app.config[name]
     for name in (
@@ -145,7 +154,8 @@ with app.app_context():
 def get_db():
     db = getattr(g, '_database', None)
     if db is None:
-        db = g._database = sqlite3.connect(DB_FILE)
+        db = g._database = sqlite3.connect(DB_FILE, timeout=5)
+        db.execute("PRAGMA busy_timeout = 5000")
         db.row_factory = sqlite3.Row
     return db
 
@@ -209,6 +219,34 @@ def clear_chat_history_in_db(user_id):
     c.execute('DELETE FROM chat_history WHERE user_id=?', (user_id,))
     conn.commit()
     print("Chat history cleared for the active anonymous session.")
+
+
+def reserve_ai_request():
+    """Reserve one daily AI request for the current account or anonymous client."""
+    user_id = auth.get_current_user_id()
+    if user_id:
+        identity_kind, identity_value = "user", user_id
+    else:
+        client_ip = client_ip_from_request(
+            request,
+            trusted_proxy_count=app.config["TRUSTED_PROXY_COUNT"],
+        )
+        identity_kind = "guest_ip"
+        identity_value = guest_ip_identity(client_ip, app.config["QUOTA_IP_SALT"])
+    return reserve_daily_quota(
+        get_db(),
+        identity_kind,
+        identity_value,
+        limit=app.config["DAILY_AI_REQUEST_LIMIT"],
+    )
+
+
+def quota_exceeded_response(result: QuotaResult):
+    return jsonify({
+        "error": "daily_ai_quota_exceeded",
+        "limit": result.limit,
+        "remaining": result.remaining,
+    }), 429
 
 
 # --- Text Cleaning Utility ---
@@ -369,6 +407,11 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
     try:
         if agent is None:
             yield f"data: {json.dumps({'type': 'error', 'content': 'AI chat is not configured. Set GOOGLE_API_KEY in .env and restart the app.'})}\n\n"
+            return
+
+        quota_result = reserve_ai_request()
+        if not quota_result.allowed:
+            yield f"data: {json.dumps({'type': 'error', 'content': 'Daily AI request quota exceeded.', 'error': 'daily_ai_quota_exceeded', 'limit': quota_result.limit})}\n\n"
             return
 
         q = queue.Queue()
@@ -671,6 +714,9 @@ def analyze_statistics_route():
         ai_insight = None
         if llm is not None:
             prompt_text = build_ai_statistics_prompt(filename, analysis, user_question)
+            quota_result = reserve_ai_request()
+            if not quota_result.allowed:
+                return quota_exceeded_response(quota_result)
             ai_response = llm.invoke(prompt_text)
             ai_insight = sanitize_report_html(getattr(ai_response, "content", str(ai_response)))
 
@@ -751,6 +797,10 @@ def process_document_ocr():
 
         # At this point, temp_file_obj is closed, and the file is saved at temp_file_path
         file_extension = filename.rsplit('.', 1)[1].lower()
+
+        quota_result = reserve_ai_request()
+        if not quota_result.allowed:
+            return quota_exceeded_response(quota_result)
 
         result_dict, status_code = llm_ocr.analyze_document(
             file_path=temp_file_path,
@@ -845,6 +895,10 @@ def process_audio_common(audio_file_path):
         # Ensure this returns a structure the calling function can check for "error"
         return {"error": "Naver Cloud Platform credentials not configured on server."}
 
+    transcription_quota = reserve_ai_request()
+    if not transcription_quota.allowed:
+        return {"error": "daily_ai_quota_exceeded", "quota_result": transcription_quota}
+
     # 1. Transcribe audio using Naver STT (from llm_stt.py logic)
     lang = "Kor"
     url = f"https://naveropenapi.apigw.ntruss.com/recog/v1/stt?lang={lang}"
@@ -892,7 +946,9 @@ def process_audio_common(audio_file_path):
             chat_history=[], 
             input=summarization_input_text
         )
-        
+        summarization_quota = reserve_ai_request()
+        if not summarization_quota.allowed:
+            return {"error": "daily_ai_quota_exceeded", "quota_result": summarization_quota, "transcript": transcript, "summary": ""}
         ai_response = llm.invoke(formatted_prompt_messages)
         summary = ai_response.content if hasattr(ai_response, 'content') else str(ai_response)
         app.logger.info(f"LLM summarization successful: {summary[:100]}...")
@@ -928,6 +984,8 @@ def transcribe_and_summarize_audio_file_route():
             
             # Check error from process_audio_common (which now returns a dict)
             if result.get("error"):
+                if result["error"] == "daily_ai_quota_exceeded":
+                    return quota_exceeded_response(result["quota_result"])
                 status_code = 500
                 if "credentials not configured" in result["error"]:
                     status_code = 400 # Or 503 Service Unavailable
@@ -980,6 +1038,8 @@ def transcribe_and_summarize_audio_blob_route():
         result = process_audio_common(temp_file_path)
         
         if result.get("error"):
+            if result["error"] == "daily_ai_quota_exceeded":
+                return quota_exceeded_response(result["quota_result"])
             status_code = 500
             if "credentials not configured" in result["error"]:
                 status_code = 400
