@@ -219,7 +219,7 @@ The final output must be *only* the HTML content itself.
 The response should begin directly with <html> or a similar top-level HTML tag.
 """
 
-def analyze_document(file_path, file_extension, user_instructions, llm, prompt_template, logger, analysis_mode="report", question="", include_extracted_text=False):
+def analyze_document(file_path, file_extension, user_instructions, llm, prompt_template, logger, analysis_mode="report", question="", include_extracted_text=False, quota_reserver=None):
     """
     Extracts text from a document and analyzes it as a summary, report, action list, or Q&A answer.
     """
@@ -248,6 +248,11 @@ def analyze_document(file_path, file_extension, user_instructions, llm, prompt_t
             input=report_generation_input
         )
         
+        if quota_reserver is not None:
+            quota_result = quota_reserver()
+            if not quota_result.allowed:
+                return ({"error": "daily_ai_quota_exceeded", "quota_result": quota_result}, 429)
+
         ai_response = llm.invoke(formatted_prompt_messages)
         report_html = ai_response.content if hasattr(ai_response, 'content') else str(ai_response)
         report_html = clean_html_response(report_html)
