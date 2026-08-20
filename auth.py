@@ -46,7 +46,15 @@ def _safe_next_path(candidate):
 
 
 def _is_api_request():
-    return request.path.startswith(("/knowledge_base/", "/api/")) or request.accept_mimetypes.best == "application/json"
+    return (
+        request.path.startswith(("/knowledge_base/", "/api/", "/statistics/"))
+        or request.path in {
+            "/process_document_ocr",
+            "/transcribe_and_summarize_audio_file",
+            "/transcribe_and_summarize_audio_blob",
+        }
+        or request.accept_mimetypes.best == "application/json"
+    )
 
 
 def login_required(view):

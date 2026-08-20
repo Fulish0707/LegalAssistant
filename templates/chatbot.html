@@ -151,6 +151,7 @@
                             </div>
                         </div>
 
+                        {% if authenticated_user_id %}
                         <div class="card knowledge-card">
                             <div class="card-body">
                                 <h2 class="h5 d-flex justify-content-between align-items-center">
@@ -168,6 +169,7 @@
                                 <div id="knowledgeSources" class="knowledge-list"></div>
                             </div>
                         </div>
+                        {% endif %}
 
                         <div class="card thoughts-card">
                             <div class="card-body">
@@ -340,7 +342,9 @@
                 console.error('Initial state error:', error);
                 addMessage('assistant', 'An error occurred while loading the initial state. Please refresh.');
             }
+            {% if authenticated_user_id %}
             fetchKnowledgeBaseStatus();
+            {% endif %}
         }
 
         async function sendMessage() {
