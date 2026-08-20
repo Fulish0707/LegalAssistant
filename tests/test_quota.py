@@ -5,6 +5,7 @@ import tempfile
 import threading
 import unittest
 from datetime import datetime, timezone
+from flask import Flask, request
 
 
 class DailyQuotaTests(unittest.TestCase):
@@ -101,9 +102,21 @@ class DailyQuotaTests(unittest.TestCase):
     def test_client_ip_uses_forwarded_chain_only_for_configured_trusted_proxies(self):
         from quota import client_ip_from_request
 
-        class Request:
-            remote_addr = "10.0.0.8"
-            access_route = ("198.51.100.14", "10.0.0.7", "10.0.0.8")
+        app = Flask(__name__)
+        with app.test_request_context(
+            "/",
+            headers={"X-Forwarded-For": "198.51.100.14, 10.0.0.7"},
+            environ_base={"REMOTE_ADDR": "10.0.0.8"},
+        ):
+            # Flask's access_route contains only X-Forwarded-For values, not REMOTE_ADDR.
+            self.assertEqual(list(request.access_route), ["198.51.100.14", "10.0.0.7"])
+            self.assertEqual(client_ip_from_request(request, trusted_proxy_count=0), "10.0.0.8")
+            self.assertEqual(client_ip_from_request(request, trusted_proxy_count=1), "10.0.0.7")
+            self.assertEqual(client_ip_from_request(request, trusted_proxy_count=2), "198.51.100.14")
 
-        self.assertEqual(client_ip_from_request(Request(), trusted_proxy_count=0), "10.0.0.8")
-        self.assertEqual(client_ip_from_request(Request(), trusted_proxy_count=2), "198.51.100.14")
+        with app.test_request_context(
+            "/",
+            headers={"X-Forwarded-For": "198.51.100.14"},
+            environ_base={"REMOTE_ADDR": "10.0.0.8"},
+        ):
+            self.assertEqual(client_ip_from_request(request, trusted_proxy_count=1), "198.51.100.14")
