@@ -141,7 +141,7 @@ class AppContractTests(unittest.TestCase):
         self.assertIn("stream_end", body)
 
     def test_chat_sse_reports_quota_exhaustion_without_invoking_the_agent(self):
-        original_agent = self.app_module.agent
+        original_build_agent = self.app_module.build_agent
         guest_identity = guest_ip_identity("127.0.0.1", self.app_module.app.config["QUOTA_IP_SALT"])
         try:
             with self.app_module.app.app_context():
@@ -149,11 +149,11 @@ class AppContractTests(unittest.TestCase):
                     reserve_daily_quota(
                         self.app_module.get_db(), "guest_ip", guest_identity
                     )
-            self.app_module.agent = object()
+            self.app_module.build_agent = lambda user_id: object()
 
             response = self.app_module.app.test_client().get("/chat?message=hello")
         finally:
-            self.app_module.agent = original_agent
+            self.app_module.build_agent = original_build_agent
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("daily_ai_quota_exceeded", response.get_data(as_text=True))

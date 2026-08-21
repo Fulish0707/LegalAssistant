@@ -3,13 +3,14 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain_chroma import Chroma
 from langchain_community.agent_toolkits.load_tools import load_tools
-from langchain_classic.memory import ConversationBufferMemory
 from langchain_classic.agents import initialize_agent
 from langchain_classic.chains import RetrievalQA
 from langchain_classic.chains.question_answering import load_qa_chain
 from langchain_core.documents import Document
 from llm_model import embedding_model, llm
 import os
+import uuid
+from datetime import datetime, timezone
 from langchain_core.tools import Tool
 from dotenv import load_dotenv
 
@@ -96,12 +97,9 @@ else:
         print(f"An error occurred during vector store creation: {e}")
         vector_store = None
 
-# Create a retriever
-retriever = vector_store.as_retriever(search_kwargs={"k": 3}) if vector_store else None
-
 def ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
     """Add extracted document text to the persistent RAG store for later chat follow-up."""
-    global vector_store, retriever
+    global vector_store
 
     if not user_id:
         return {"ok": False, "message": "user_id is required.", "chunk_count": 0}
@@ -116,7 +114,13 @@ def ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
     }
     if metadata:
         document_metadata.update(metadata)
-    document_metadata["user_id"] = user_id
+    document_id = uuid.uuid4().hex
+    ingested_at = datetime.now(timezone.utc).isoformat()
+    document_metadata.update({
+        "document_id": document_id,
+        "ingested_at": ingested_at,
+        "user_id": user_id,
+    })
 
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
@@ -141,11 +145,12 @@ def ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
     if hasattr(vector_store, "persist"):
         vector_store.persist()
 
-    retriever = vector_store.as_retriever(search_kwargs={"k": 3, "filter": {"user_id": user_id}})
     return {
         "ok": True,
         "message": f"Saved {len(chunks)} chunks to the knowledge base.",
         "chunk_count": len(chunks),
+        "document_id": document_id,
+        "ingested_at": ingested_at,
     }
 
 def get_knowledge_base_status(user_id):
@@ -189,10 +194,8 @@ def get_knowledge_base_status(user_id):
 
 def clear_knowledge_base(user_id):
     """Remove all chunks from the active Chroma collection without deleting files manually."""
-    global vector_store, retriever
 
     if vector_store is None:
-        retriever = None
         return {"ok": True, "message": "Knowledge base is already empty.", "deleted_count": 0}
 
     try:
@@ -202,17 +205,23 @@ def clear_knowledge_base(user_id):
             vector_store.delete(ids=ids)
             if hasattr(vector_store, "persist"):
                 vector_store.persist()
-        retriever = None
         return {"ok": True, "message": f"Removed {len(ids)} chunks from the knowledge base.", "deleted_count": len(ids)}
     except Exception as e:
         return {"ok": False, "message": f"Failed to clear knowledge base: {e}", "deleted_count": 0}
 
-# Create a memory
-memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+def get_user_retriever(user_id):
+    """Build a retriever for one account without mutating process-global state."""
+    if vector_store is None or not user_id:
+        return None
+    return vector_store.as_retriever(search_kwargs={"k": 3, "filter": {"user_id": user_id}})
 
-# Define a RAG tool using the retriever
-def rag_tool_func(query):
-    if retriever:
+
+def build_rag_tool(user_id):
+    """Create a RAG tool whose retrieval is permanently scoped to one account."""
+    def rag_tool_func(query):
+        retriever = get_user_retriever(user_id)
+        if not retriever:
+            return "RAG가 현재 사용 불가능합니다."
         try:
             # 1. 기본 검색
             docs = retriever.invoke(query)
@@ -247,14 +256,12 @@ def rag_tool_func(query):
         except Exception as e:
             print(f"RAG 처리 중 오류 발생: {e}")
             return "RAG 처리 중 오류가 발생했습니다."
-    else:
-        return "RAG가 현재 사용 불가능합니다."
 
-rag_tool = Tool(
-    name="RAG Retriever",
-    func=rag_tool_func,
-    description="Use this tool to search the internal document database and get detailed answers to questions."
-)
+    return Tool(
+        name="RAG Retriever",
+        func=rag_tool_func,
+        description="Use this tool to search the signed-in user's internal document database and get detailed answers to questions.",
+    )
 
 AGENT_PREFIX = """You are PS_Agent, a practical AI work companion for students and professionals.
 
@@ -287,16 +294,16 @@ if serpapi_api_key and llm is not None:
 else:
     print("SERPAPI_API_KEY not found. Web search is disabled until it is configured.")
 
-# Combine tools
-tools = [rag_tool] + serpapi_tools
+def build_agent(user_id=None):
+    """Create a request-scoped agent and only expose RAG to signed-in accounts."""
+    if llm is None:
+        return None
 
-# Create agent with custom prompt
-if llm is None:
-    print("LLM is unavailable. Chat agent is disabled until GOOGLE_API_KEY is configured.")
-    agent = None
-else:
-    agent = initialize_agent(
-        tools = tools,
+    tools = list(serpapi_tools)
+    if user_id:
+        tools.insert(0, build_rag_tool(user_id))
+    return initialize_agent(
+        tools=tools,
         llm = llm,
         agent="conversational-react-description",
         streaming = True,
@@ -306,3 +313,7 @@ else:
         temperature = 0.0,
         agent_kwargs={"prefix": AGENT_PREFIX}
     )
+
+
+if llm is None:
+    print("LLM is unavailable. Chat agent is disabled until GOOGLE_API_KEY is configured.")

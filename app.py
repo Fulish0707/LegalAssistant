@@ -1,8 +1,6 @@
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context, g, session
 from langchain_config import (
-    retriever,
-    memory,
-    agent,
+    build_agent,
     ingest_text_to_vector_store,
     get_knowledge_base_status,
     clear_knowledge_base,
@@ -401,6 +399,7 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
     """
     full_streamed_llm_output = ""
     try:
+        agent = build_agent(auth.get_current_user_id())
         if agent is None:
             yield f"data: {json.dumps({'type': 'error', 'content': 'AI chat is not configured. Set GOOGLE_API_KEY in .env and restart the app.'})}\n\n"
             return
@@ -526,9 +525,10 @@ def health():
     return jsonify({
         "status": "ok",
         "llm_configured": llm is not None,
-        "agent_configured": agent is not None,
+        "agent_configured": llm is not None,
         "search_configured": bool(os.getenv("SERPAPI_API_KEY")),
         "naver_stt_configured": bool(os.getenv("client_id")) and bool(os.getenv("client_secret")),
+        "google_oidc_configured": app.config["GOOGLE_OIDC_CONFIGURED"],
     })
 
 @app.route('/chat', methods=['GET', 'POST'])
