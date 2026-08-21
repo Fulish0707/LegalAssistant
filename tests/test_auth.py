@@ -364,6 +364,14 @@ class AuthFoundationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json, {"error": "authentication_required"})
 
+    def test_health_reports_oidc_readiness_without_disclosing_secrets(self):
+        response = self.client.get("/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("google_oidc_configured", response.json)
+        self.assertFalse(response.json["google_oidc_configured"])
+        self.assertNotIn("GOOGLE_OIDC_CLIENT_SECRET", response.get_data(as_text=True))
+
     def test_logout_post_clears_account_and_guest_draft(self):
         with self.client.session_transaction() as flask_session:
             flask_session["authenticated_user_id"] = "user-1"

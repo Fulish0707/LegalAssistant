@@ -117,7 +117,7 @@ graph TD
 ## 5. 주요 코드 파일 설명 (Key Code Files)
 
 -   `app.py`: Flask 애플리케이션 실행, 라우팅, 핵심 로직 담당.
--   `langchain_config.py`: Langchain 에이전트, RAG 도구, Retriever, 메모리 설정. ChromaDB 초기화 및 문서 로딩/인덱싱.
+-   `langchain_config.py`: 요청별 Langchain 에이전트와 계정 범위 RAG 도구를 생성하고, ChromaDB 초기화 및 문서 로딩/인덱싱을 담당합니다.
 -   `llm_model.py`: Google Gemini LLM 및 임베딩 모델 초기화.
 -   `llm_prompt.py`: LLM의 역할, 응답 형식, 도구 사용법 등을 정의하는 시스템 프롬프트.
 -   `llm_ocr.py`: 이미지, PDF, DOCX 파일에서 텍스트를 추출하고, LLM을 이용해 HTML 보고서 생성.
@@ -137,6 +137,15 @@ graph TD
         client_id="YOUR_NAVER_CLIENT_ID"
         client_secret="YOUR_NAVER_CLIENT_SECRET"
         ```
+    -   Google 계정과 계정별 문서 작업공간을 사용하려면 Google Cloud Console에서 OAuth 동의 화면과 Web application 클라이언트를 설정한 뒤, 승인된 리디렉션 URI에 `http://localhost:5005/auth/callback`을 등록합니다. `.env`에는 아래 값을 추가합니다. 운영 환경에서는 HTTPS 리디렉션 URI와 장기 보관되는 `SECRET_KEY`가 필요하며, 비밀 값은 저장소에 커밋하지 않습니다.
+        ```
+        SECRET_KEY="LONG_RANDOM_SECRET"
+        GOOGLE_OIDC_CLIENT_ID="YOUR_GOOGLE_OIDC_CLIENT_ID"
+        GOOGLE_OIDC_CLIENT_SECRET="YOUR_GOOGLE_OIDC_CLIENT_SECRET"
+        GOOGLE_OIDC_REDIRECT_URI="http://localhost:5005/auth/callback"
+        QUOTA_IP_SALT="LONG_RANDOM_SALT"
+        ```
+    -   로그인하지 않은 사용자는 세션 안에서만 초안을 유지하고 AI 요청은 하루 20회로 제한됩니다. Google 로그인 사용자는 자신의 SQLite 초안·채팅 기록과 Chroma 문서만 사용할 수 있으며, 다른 계정의 문서는 검색하거나 삭제할 수 없습니다.
 2.  **필수 라이브러리 설치:**
     -   (프로젝트에 `requirements.txt` 파일이 있다면) `pip install -r requirements.txt` 명령을 실행합니다.
     -   `requirements.txt`가 없다면, 주요 라이브러리 (`flask`, `langchain`, `langchain-google-genai`, `langchain-community`, `langchain-chroma`, `pytesseract`, `pillow`, `pypdf2`, `python-docx`, `sounddevice`, `soundfile`, `requests`, `python-dotenv`, `werkzeug`, `google-generativeai`, `soundfile`, `numpy`) 등을 설치해야 합니다. Tesseract OCR 자체도 시스템에 설치되어 있어야 합니다.
@@ -151,7 +160,7 @@ graph TD
 
 -   현재 통합 우선순위와 상태는 [`docs/integration-roadmap.md`](docs/integration-roadmap.md)에서 관리합니다.
 -   더 다양한 문서 포맷 지원 (e.g., .pptx, .xls).
--   사용자별 문서 관리 및 인증 기능 추가.
+-   문서별 삭제, 인용 표시, 중복 제거와 검색 품질 평가.
 -   Langchain Expression Language (LCEL)을 활용한 체인 구성 고도화.
 -   프롬프트 엔지니어링 최적화 및 LLM 모델 파인튜닝 고려.
 -   Streamlit 또는 Gradio를 이용한 인터페이스 개선 또는 대안 UI 제공.
