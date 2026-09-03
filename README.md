@@ -6,7 +6,7 @@
 
 -   본 프로젝트는 사용자의 자기소개서(대학 입학용, 직장 지원용) 작성 및 전문적인 보고서 생성을 돕는 AI 에이전트입니다.
 -   Google의 Gemini LLM (`gemini-1.5-flash` 또는 유사 모델)을 핵심 엔진으로 사용하며, Langchain 프레임워크를 통해 RAG (Retrieval Augmented Generation) 파이프라인을 구축하여 문서 기반 질의응답 및 콘텐츠 생성을 지원합니다.
--   다양한 입력 방식(텍스트, 문서 파일, 음성)을 지원하여 사용자 편의성을 높였습니다.
+-   다양한 입력 방식(텍스트, 문서 파일)을 지원하여 사용자 편의성을 높였습니다.
 
 ## 2. 주요 기능 (Main Features)
 
@@ -20,11 +20,8 @@
 -   **다중 입력 방식 지원:**
     -   **문서 업로드 및 분석 (OCR):**
         -   PDF, TXT, DOCX, 이미지(PNG, JPG) 파일 업로드 지원.
-        -   Tesseract OCR (이미지) 및 PyPDF2/python-docx (문서)를 통한 텍스트 추출.
+        -   Tesseract OCR (이미지) 및 pypdf/python-docx (문서)를 통한 텍스트 추출.
         -   추출된 텍스트를 기반으로 Gemini LLM을 활용하여 HTML 형식의 보고서 자동 생성 (한국어).
-    -   **음성 입력 (STT):**
-        -   Naver Clova Speech Recognition API를 이용한 음성-텍스트 변환.
-        -   변환된 텍스트를 기반으로 LLM을 통한 요약 또는 추가 처리.
 -   **외부 정보 검색:**
     -   SerpAPI를 연동하여 웹 검색 기능 제공.
 -   **데이터 관리:**
@@ -41,11 +38,8 @@
 -   **벡터 데이터베이스 (Vector Database):** ChromaDB
 -   **문서 처리 (Document Processing):**
     -   OCR: Tesseract OCR, Pillow
-    -   PDF: PyPDF2
+    -   PDF: pypdf
     -   DOCX: python-docx
--   **음성 처리 (Speech Processing):**
-    -   STT: Naver Clova Speech Recognition API
-    -   Audio Recording: `sounddevice`, `soundfile`
 -   **데이터베이스 (Database):** SQLite
 -   **기타 (Others):** SerpAPI (웹 검색), `dotenv` (환경변수 관리)
 
@@ -56,7 +50,6 @@ graph TD
     subgraph UserInput["사용자 입력"]
         UI_Text[텍스트 입력]
         UI_DocUpload[문서 업로드 .pdf, .docx, .png]
-        UI_Audio[음성 입력]
     end
 
     subgraph Processing["처리 계층"]
@@ -65,7 +58,6 @@ graph TD
         P_LLM["LLM: Gemini (llm_model.py)"]
         P_Embed["Embedding: text-embedding-004 (llm_model.py)"]
         P_OCR["OCR: Tesseract (llm_ocr.py)"]
-        P_STT["STT: Naver Clova (llm_stt.py)"]
         P_SerpAPI["Web Search: SerpAPI"]
     end
 
@@ -77,7 +69,6 @@ graph TD
 
     UI_Text --> P_Flask
     UI_DocUpload -- OCR --> P_OCR --> P_Flask
-    UI_Audio -- STT --> P_STT --> P_Flask
 
     P_Flask --> P_Langchain
     P_Langchain -- Uses --> P_LLM
@@ -92,7 +83,7 @@ graph TD
 
     P_LLM --> UserOutput["사용자 출력: 웹 UI"]
 
-    class UserInput,P_Flask,P_Langchain,P_LLM,P_Embed,P_OCR,P_STT,P_SerpAPI,DS_Chroma,DS_SQLite,DS_Docs,UserOutput user
+    class UserInput,P_Flask,P_Langchain,P_LLM,P_Embed,P_OCR,P_SerpAPI,DS_Chroma,DS_SQLite,DS_Docs,UserOutput user
     class Processing processing
     class DataStorage data
 ```
@@ -100,12 +91,11 @@ graph TD
 1.  **데이터 수집 및 전처리 (Data Ingestion & Preprocessing):**
     -   **문서:** `./documents` 폴더의 PDF, TXT 파일들이 로드되어 텍스트로 변환되고 청크(chunk) 단위로 분할됩니다.
     -   **OCR:** 사용자가 업로드한 이미지/PDF/DOCX 파일에서 텍스트가 추출됩니다.
-    -   **STT:** 사용자의 음성 입력이 Naver STT를 통해 텍스트로 변환됩니다.
 2.  **임베딩 및 벡터 저장 (Embedding & Vector Storage - RAG Core):**
     -   분할된 문서 청크들은 Google `text-embedding-004` 모델을 통해 임베딩 벡터로 변환됩니다.
     -   생성된 벡터들은 ChromaDB에 저장되어 검색 가능한 인덱스를 구축합니다.
 3.  **사용자 질의 및 컨텍스트 검색 (User Query & Context Retrieval - RAG Core):**
-    -   사용자의 텍스트 입력 (채팅, STT 변환 텍스트 등)은 동일한 임베딩 모델을 사용하여 벡터로 변환됩니다.
+    -   사용자의 텍스트 입력 (채팅 등)은 동일한 임베딩 모델을 사용하여 벡터로 변환됩니다.
     -   ChromaDB에서 사용자 질의 벡터와 유사도가 높은 문서 청크(컨텍스트)를 검색합니다.
 4.  **LLM을 통한 답변/콘텐츠 생성 (Response/Content Generation via LLM):**
     -   Langchain 에이전트는 사용자 질의, 검색된 컨텍스트, 채팅 히스토리, 그리고 `llm_prompt.py`에 정의된 시스템 프롬프트를 Gemini LLM에 전달합니다.
@@ -121,11 +111,10 @@ graph TD
 -   `llm_model.py`: Google Gemini LLM 및 임베딩 모델 초기화.
 -   `llm_prompt.py`: LLM의 역할, 응답 형식, 도구 사용법 등을 정의하는 시스템 프롬프트.
 -   `llm_ocr.py`: 이미지, PDF, DOCX 파일에서 텍스트를 추출하고, LLM을 이용해 HTML 보고서 생성.
--   `llm_stt.py`: Naver Clova API를 이용한 음성-텍스트 변환 기능.
 -   `chroma_db/`: ChromaDB 벡터 데이터 저장소.
 -   `documents/`: RAG 시스템에 사용될 원본 문서 저장 폴더.
 -   `sqlite_db/`: 채팅 내역, 자기소개서 초안 저장 SQLite DB.
--   `templates/`: Flask HTML 템플릿 (chatbot.html, document.html, audio.html).
+-   `templates/`: Flask HTML 템플릿 (chatbot.html, document.html, statistics.html).
 
 ## 6. 실행 방법 (How to Run)
 
@@ -134,12 +123,10 @@ graph TD
         ```
         GOOGLE_API_KEY="YOUR_GOOGLE_API_KEY"
         SERPAPI_API_KEY="YOUR_SERPAPI_API_KEY"
-        client_id="YOUR_NAVER_CLIENT_ID"
-        client_secret="YOUR_NAVER_CLIENT_SECRET"
         ```
 2.  **필수 라이브러리 설치:**
     -   (프로젝트에 `requirements.txt` 파일이 있다면) `pip install -r requirements.txt` 명령을 실행합니다.
-    -   `requirements.txt`가 없다면, 주요 라이브러리 (`flask`, `langchain`, `langchain-google-genai`, `langchain-community`, `langchain-chroma`, `pytesseract`, `pillow`, `pypdf2`, `python-docx`, `sounddevice`, `soundfile`, `requests`, `python-dotenv`, `werkzeug`, `google-generativeai`, `soundfile`, `numpy`) 등을 설치해야 합니다. Tesseract OCR 자체도 시스템에 설치되어 있어야 합니다.
+    -   `requirements.txt`가 없다면, 주요 라이브러리 (`flask`, `langchain`, `langchain-classic`, `langchain-google-genai`, `langchain-community`, `langchain-chroma`, `chromadb`, `pytesseract`, `pillow`, `pypdf`, `python-docx`, `requests`, `python-dotenv`, `werkzeug`, `pandas`, `openpyxl`, `numpy`) 등을 설치해야 합니다. Tesseract OCR 자체도 시스템에 설치되어 있어야 합니다.
 3.  **문서 준비 (RAG용):**
     -   `documents` 폴더를 생성하고 (이미 있다면 비워도 됩니다), RAG 시스템에서 참조할 PDF 또는 TXT 파일들을 넣어둡니다.
 4.  **애플리케이션 실행:**
