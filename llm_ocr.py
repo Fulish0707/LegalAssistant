@@ -4,6 +4,7 @@ import os
 import pypdf # Added for PDF processing
 import re # Added for improved post-processing
 import docx # Added for DOCX processing
+from html_sanitizer import sanitize_report_html
 
 DOCUMENT_ANALYSIS_MODES = {
     "summary": {
@@ -163,7 +164,7 @@ def clean_html_response(report_html):
     if not ("<html" in report_html.lower() or "<body" in report_html.lower() or "<div" in report_html.lower()):
         report_html = f"<html><head><title>Generated Document Analysis</title></head><body><pre>{report_html}</pre></body></html>"
 
-    return report_html
+    return sanitize_report_html(report_html)
 
 def build_document_analysis_prompt(extracted_text, user_instructions, analysis_mode, question):
     mode_config = DOCUMENT_ANALYSIS_MODES.get(analysis_mode, DOCUMENT_ANALYSIS_MODES["report"])

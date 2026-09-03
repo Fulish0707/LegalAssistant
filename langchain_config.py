@@ -99,10 +99,12 @@ else:
 # Create a retriever
 retriever = vector_store.as_retriever(search_kwargs={"k": 3}) if vector_store else None
 
-def ingest_text_to_vector_store(text, source_name, metadata=None):
+def ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
     """Add extracted document text to the persistent RAG store for later chat follow-up."""
     global vector_store, retriever
 
+    if not user_id:
+        return {"ok": False, "message": "user_id is required.", "chunk_count": 0}
     if embedding_model is None:
         return {"ok": False, "message": "Embedding model is not configured.", "chunk_count": 0}
 
@@ -114,6 +116,7 @@ def ingest_text_to_vector_store(text, source_name, metadata=None):
     }
     if metadata:
         document_metadata.update(metadata)
+    document_metadata["user_id"] = user_id
 
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
@@ -138,14 +141,14 @@ def ingest_text_to_vector_store(text, source_name, metadata=None):
     if hasattr(vector_store, "persist"):
         vector_store.persist()
 
-    retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+    retriever = vector_store.as_retriever(search_kwargs={"k": 3, "filter": {"user_id": user_id}})
     return {
         "ok": True,
         "message": f"Saved {len(chunks)} chunks to the knowledge base.",
         "chunk_count": len(chunks),
     }
 
-def get_knowledge_base_status():
+def get_knowledge_base_status(user_id):
     """Return a compact summary of documents currently stored in Chroma."""
     if vector_store is None:
         return {
@@ -155,7 +158,7 @@ def get_knowledge_base_status():
         }
 
     try:
-        stored = vector_store.get(include=["metadatas"])
+        stored = vector_store.get(where={"user_id": user_id}, include=["metadatas"])
         metadatas = stored.get("metadatas", []) or []
         sources_by_name = {}
         for metadata in metadatas:
@@ -184,7 +187,7 @@ def get_knowledge_base_status():
             "error": str(e),
         }
 
-def clear_knowledge_base():
+def clear_knowledge_base(user_id):
     """Remove all chunks from the active Chroma collection without deleting files manually."""
     global vector_store, retriever
 
@@ -193,7 +196,7 @@ def clear_knowledge_base():
         return {"ok": True, "message": "Knowledge base is already empty.", "deleted_count": 0}
 
     try:
-        stored = vector_store.get()
+        stored = vector_store.get(where={"user_id": user_id})
         ids = stored.get("ids", []) or []
         if ids:
             vector_store.delete(ids=ids)
@@ -296,7 +299,6 @@ else:
         tools = tools,
         llm = llm,
         agent="conversational-react-description",
-        memory=memory,
         streaming = True,
         callbacks = [StreamingStdOutCallbackHandler()],
         verbose = True,
