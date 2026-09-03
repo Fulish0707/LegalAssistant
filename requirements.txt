@@ -1,25 +1,29 @@
-flask
-python-dotenv
-requests
-werkzeug
+# Target: Python 3.10 (>=3.10, <3.11 verified)
+# All versions below are the newest releases that still support Python 3.10.
 
-langchain
-langchain-community
-langchain-chroma
-langchain-google-genai
-google-generativeai
-chromadb
+flask==3.1.3
+python-dotenv==1.2.3
+requests==2.34.2
+werkzeug==3.1.8
 
-pytesseract
-pillow
-PyPDF2
-python-docx
+# LangChain 1.x stack — all resolve on langchain-core 1.6.1
+langchain==1.3.18
+langchain-classic==1.0.8
+langchain-community==0.4.2
+langchain-chroma==1.1.0
+langchain-text-splitters==1.1.2
+langchain-google-genai==4.4.0
+langchain-core==1.6.1
+chromadb==1.5.9
 
-sounddevice
-soundfile
-numpy
-pandas
-openpyxl
+pytesseract==0.3.13
+pillow==12.3.0
+pypdf==6.16.2
+python-docx==1.2.0
 
-google-search-results
-mypy-extensions
+numpy==2.2.6
+pandas==2.3.3
+openpyxl==3.1.5
+
+google-search-results==2.4.2
+mypy-extensions==1.1.0

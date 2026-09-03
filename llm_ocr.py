@@ -1,7 +1,7 @@
 import pytesseract
 from PIL import Image
 import os
-import PyPDF2 # Added for PDF processing
+import pypdf # Added for PDF processing
 import re # Added for improved post-processing
 import docx # Added for DOCX processing
 
@@ -90,7 +90,7 @@ def extract_text_from_document(file_path, file_extension, logger):
     if file_extension == 'pdf':
         try:
             with open(file_path, 'rb') as pdf_file_obj:
-                reader = PyPDF2.PdfReader(pdf_file_obj)
+                reader = pypdf.PdfReader(pdf_file_obj)
                 text_parts = []
                 if not reader.pages:
                     logger.warning(f"PDF file {file_path} has no pages.")
@@ -102,12 +102,12 @@ def extract_text_from_document(file_path, file_extension, logger):
             if not extracted_text.strip() and reader.pages:
                 logger.warning(f"No text extracted from PDF {file_path}. It might be image-based or protected.")
             return ({"text": extracted_text}, 200)
-        except PyPDF2.errors.PdfReadError as e_pdf_read:
-            logger.error(f"PyPDF2 could not read PDF {file_path}: {e_pdf_read}")
+        except pypdf.errors.PdfReadError as e_pdf_read:
+            logger.error(f"pypdf could not read PDF {file_path}: {e_pdf_read}")
             return ({"error": f"Invalid or corrupted PDF file. Error: {str(e_pdf_read)}"}, 400)
         except ImportError:
-            logger.error("PyPDF2 library is not installed for PDF processing.")
-            return ({"error": "PDF processing library (PyPDF2) not available on server."}, 501)
+            logger.error("pypdf library is not installed for PDF processing.")
+            return ({"error": "PDF processing library (pypdf) not available on server."}, 501)
         except Exception as e_pdf:
             logger.error(f"Error processing PDF {file_path}: {e_pdf}", exc_info=True)
             return ({"error": f"Failed to extract text from PDF: {str(e_pdf)}"}, 500)
@@ -284,5 +284,5 @@ if __name__ == '__main__':
     # ... (rest of the __main__ block remains unchanged from previous version)
     
     print("\nllm_ocr.py loaded. Functions detect_text and generate_report_from_document are available.")
-    print("Ensure Tesseract OCR is installed and 'pytesseract', 'Pillow', 'PyPDF2', 'python-docx' Python packages are installed.")
+    print("Ensure Tesseract OCR is installed and 'pytesseract', 'Pillow', 'pypdf', 'python-docx' Python packages are installed.")
     print("To test generate_report_from_document, you would need to call it with LLM, prompt_template, and logger instances.")

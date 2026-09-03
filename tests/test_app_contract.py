@@ -13,8 +13,6 @@ class AppContractTests(unittest.TestCase):
         os.environ["APP_STATE_DB"] = os.path.join(cls.tmpdir.name, "app_state.db")
         os.environ.pop("GOOGLE_API_KEY", None)
         os.environ.pop("SERPAPI_API_KEY", None)
-        os.environ.pop("client_id", None)
-        os.environ.pop("client_secret", None)
 
         for module_name in ["app", "langchain_config", "llm_model", "llm_prompt"]:
             sys.modules.pop(module_name, None)

@@ -4,8 +4,10 @@ __pycache__/
 *$py.class
 
 .venv/
+.venv-310/
 venv/
 env/
+venv-310/
 
 uploads/
 sqlite_db/*.db
