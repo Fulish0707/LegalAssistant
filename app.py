@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, Response, stream_with_context, g
+from flask import Flask, request, jsonify, render_template, Response, stream_with_context, g, session
 from langchain_config import (
     retriever,
     memory,
@@ -16,6 +16,7 @@ import re # Added for cleaning output
 from langchain_core.callbacks import BaseCallbackHandler
 import os
 import sys
+import secrets
 from werkzeug.utils import secure_filename
 import tempfile
 from dotenv import load_dotenv
@@ -42,45 +43,51 @@ from statistics_analysis import (
     load_table,
     render_statistics_html,
 )
+from html_sanitizer import sanitize_report_html
 
 # Disable Flask's default request logging for cleaner output if not needed
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR) # or logging.INFO for more details
 
 app = Flask(__name__)
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY") or secrets.token_urlsafe(32)
+
+
+@app.before_request
+def establish_anonymous_user():
+    if "user_id" not in session:
+        session["user_id"] = secrets.token_urlsafe(32)
 
 DB_FILE = os.getenv("APP_STATE_DB", "sqlite_db/app_state.db") # Define DB_FILE before use
 db_dir = os.path.dirname(DB_FILE)
 if db_dir:
     os.makedirs(db_dir, exist_ok=True)
 
-# Ensure DB is initialized when app module is loaded
-# This is a simple way for development; for production, a CLI command or more sophisticated setup might be used.
-with app.app_context():
-    # The init_db function already handles app_context internally for its operations.
-    # To ensure it runs on app startup:
-    conn = sqlite3.connect(DB_FILE) # Now DB_FILE is defined
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS personal_statement (
-            id INTEGER PRIMARY KEY,
-            draft TEXT
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS chat_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role TEXT,
-            content TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    # Ensure the default draft row exists
-    c.execute('INSERT OR IGNORE INTO personal_statement (id, draft) VALUES (1, "")')
+def ensure_database_schema(conn):
+    cursor = conn.cursor()
+    statement_columns = {row[1] for row in cursor.execute("PRAGMA table_info(personal_statement)")}
+    if statement_columns and "user_id" not in statement_columns:
+        cursor.execute("ALTER TABLE personal_statement RENAME TO personal_statement_legacy")
+    chat_columns = {row[1] for row in cursor.execute("PRAGMA table_info(chat_history)")}
+    if chat_columns and "user_id" not in chat_columns:
+        cursor.execute("ALTER TABLE chat_history RENAME TO chat_history_legacy")
+    cursor.execute("CREATE TABLE IF NOT EXISTS personal_statement (user_id TEXT PRIMARY KEY, draft TEXT NOT NULL DEFAULT '')")
+    cursor.execute("CREATE TABLE IF NOT EXISTS chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_user_id_id ON chat_history(user_id, id)")
+    if cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='personal_statement_legacy'").fetchone():
+        row = cursor.execute("SELECT draft FROM personal_statement_legacy WHERE id=1").fetchone()
+        if row:
+            cursor.execute("INSERT OR IGNORE INTO personal_statement (user_id, draft) VALUES ('legacy-unassigned', ?)", (row[0],))
+        cursor.execute("DROP TABLE personal_statement_legacy")
+    if cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='chat_history_legacy'").fetchone():
+        cursor.execute("INSERT INTO chat_history (user_id, role, content, timestamp) SELECT 'legacy-unassigned', role, content, timestamp FROM chat_history_legacy")
+        cursor.execute("DROP TABLE chat_history_legacy")
     conn.commit()
+
+with app.app_context():
+    conn = sqlite3.connect(DB_FILE)
+    ensure_database_schema(conn)
     conn.close()
-    print("Database initialized directly on app startup.")
 
 # --- Database Setup and Utility Functions ---
 def get_db():
@@ -100,66 +107,44 @@ def init_db():
     print("Attempting to initialize database...")
     with app.app_context(): # Operations outside a request need an app context for get_db
         conn = get_db()
-        c = conn.cursor()
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS personal_statement (
-                id INTEGER PRIMARY KEY,
-                draft TEXT
-            )
-        ''')
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS chat_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role TEXT,
-                content TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        c.execute('INSERT OR IGNORE INTO personal_statement (id, draft) VALUES (1, "")')
-        conn.commit()
+        ensure_database_schema(conn)
         print("Database initialized successfully.")
         # No need to close here, teardown_appcontext will handle it if get_db was called
         # For standalone init, explicitly closing is safer if not within app context management
         # but since we used `with app.app_context()`, `close_connection` will be triggered.
 
-def get_personal_statement_from_db():
+def get_personal_statement_from_db(user_id):
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT draft FROM personal_statement WHERE id=1')
+    c.execute('SELECT draft FROM personal_statement WHERE user_id=?', (user_id,))
     row = c.fetchone()
     return row['draft'] if row else ""
 
-def set_personal_statement_in_db(draft):
+def set_personal_statement_in_db(user_id, draft):
     conn = get_db()
     c = conn.cursor()
-    c.execute('UPDATE personal_statement SET draft=? WHERE id=1', (draft,))
+    c.execute('INSERT INTO personal_statement (user_id, draft) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET draft=excluded.draft', (user_id, draft))
     conn.commit()
 
-def get_chat_history_from_db():
+def get_chat_history_from_db(user_id):
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT role, content FROM chat_history ORDER BY id ASC')
+    c.execute('SELECT role, content FROM chat_history WHERE user_id=? ORDER BY id ASC', (user_id,))
     rows = c.fetchall()
     return [{"role": row["role"], "content": row["content"]} for row in rows]
 
-def add_chat_message_to_db(role, content):
+def add_chat_message_to_db(user_id, role, content):
     conn = get_db()
     c = conn.cursor()
-    c.execute('INSERT INTO chat_history (role, content) VALUES (?, ?)', (role, content))
+    c.execute('INSERT INTO chat_history (user_id, role, content) VALUES (?, ?, ?)', (user_id, role, content))
     conn.commit()
 
-def clear_chat_history_in_db():
+def clear_chat_history_in_db(user_id):
     conn = get_db()
     c = conn.cursor()
-    c.execute('DELETE FROM chat_history')
+    c.execute('DELETE FROM chat_history WHERE user_id=?', (user_id,))
     conn.commit()
-    # Note: You might want to clear the Langchain 'memory' as well if it's persistent
-    # For the FakeMemory, we could add a clear method:
-    if hasattr(memory, 'chat_memory') and 'messages' in memory.chat_memory:
-        memory.chat_memory['messages'] = []
-    elif hasattr(memory, 'clear'): # For more generic Langchain memory objects
-        memory.clear()
-    print("Chat history cleared from DB and in-memory Langchain memory (if applicable).")
+    print("Chat history cleared for the active anonymous session.")
 
 
 # --- Text Cleaning Utility ---
@@ -387,11 +372,7 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
         # if POST hasn't completed or if GET is called directly.
         # For now, we assume POST has added the user message.
         # A more robust solution might involve session management or passing a request ID.
-        add_chat_message_to_db("assistant", parsed_chat_response)
-        memory.save_context(
-            {"input": user_input}, # This user_input is from the GET request's params
-            {"output": parsed_chat_response}
-        )
+        add_chat_message_to_db(session["user_id"], "assistant", parsed_chat_response)
 
         final_data = {
             "type": "final_response",
@@ -407,8 +388,7 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
         logging.exception("Error during AI processing stream (_generate_agent_response_stream)")
         error_response_content = "An error occurred while processing your request. Please check server logs."
         # Potentially add error to DB here as well, associated with the user_input from GET
-        add_chat_message_to_db("assistant", error_response_content) # Or a more specific error message
-        memory.save_context({"input": user_input}, {"output": error_response_content})
+        add_chat_message_to_db(session["user_id"], "assistant", error_response_content) # Or a more specific error message
         yield f"data: {json.dumps({'type': 'error', 'content': error_response_content})}\n\n"
     finally:
         yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
@@ -449,7 +429,7 @@ def chat():
         if not user_input:
             return jsonify({"error": "No message provided"}), 400
 
-        add_chat_message_to_db("user", user_input)
+        add_chat_message_to_db(session["user_id"], "user", user_input)
         # The POST request now just acknowledges receipt.
         # The actual processing and streaming will be triggered by the frontend's GET request.
         return jsonify({"status": "message_received_ok", "message": "Proceed to connect to SSE for response."})
@@ -480,8 +460,8 @@ def chat():
 def get_initial_state():
     # Fetches from DB, so no change needed due to global var removal
     return jsonify({
-        "personal_statement_draft": get_personal_statement_from_db(),
-        "chat_history": get_chat_history_from_db()
+        "personal_statement_draft": get_personal_statement_from_db(session["user_id"]),
+        "chat_history": get_chat_history_from_db(session["user_id"])
     })
 
 @app.route('/update_statement', methods=['POST'])
@@ -491,7 +471,7 @@ def update_statement():
         return jsonify({"error": "No personal_statement_draft provided"}), 400
     
     try:
-        set_personal_statement_in_db(new_draft)
+        set_personal_statement_in_db(session["user_id"], new_draft)
         return jsonify({"message": "Personal statement updated successfully."}), 200
     except Exception as e:
         logging.exception("Error updating personal statement in DB")
@@ -510,10 +490,10 @@ def get_similar_chats_route(): # Renamed to avoid conflict with internal var
     c.execute('''
         SELECT role, content, timestamp
         FROM chat_history
-        WHERE content LIKE ? AND timestamp < datetime('now', '-5 seconds')
+        WHERE user_id=? AND content LIKE ? AND timestamp < datetime('now', '-5 seconds')
         ORDER BY timestamp DESC
         LIMIT 5
-    ''', (f'%{query}%',))
+    ''', (session["user_id"], f'%{query}%'))
     similar_chats = [{"role": row["role"], "content": row["content"], "timestamp": row["timestamp"]}
                      for row in c.fetchall()]
 
@@ -523,7 +503,7 @@ def get_similar_chats_route(): # Renamed to avoid conflict with internal var
 @app.route('/clear_chat_history_endpoint', methods=['POST']) # Added specific endpoint name
 def clear_chat_history_endpoint():
     try:
-        clear_chat_history_in_db() # This now also clears Langchain FakeMemory
+        clear_chat_history_in_db(session["user_id"]) # This now also clears Langchain FakeMemory
         return jsonify({"message": "Chat history cleared successfully."}), 200
     except Exception as e:
         logging.error(f"Error clearing chat history: {e}")
@@ -531,11 +511,11 @@ def clear_chat_history_endpoint():
 
 @app.route('/knowledge_base/status', methods=['GET'])
 def knowledge_base_status_route():
-    return jsonify(get_knowledge_base_status())
+    return jsonify(get_knowledge_base_status(session["user_id"]))
 
 @app.route('/knowledge_base/clear', methods=['POST'])
 def clear_knowledge_base_route():
-    result = clear_knowledge_base()
+    result = clear_knowledge_base(session["user_id"])
     return jsonify(result), 200 if result.get("ok") else 500
 
 
@@ -597,14 +577,14 @@ def analyze_statistics_route():
         if llm is not None:
             prompt_text = build_ai_statistics_prompt(filename, analysis, user_question)
             ai_response = llm.invoke(prompt_text)
-            ai_insight = getattr(ai_response, "content", str(ai_response))
+            ai_insight = sanitize_report_html(getattr(ai_response, "content", str(ai_response)))
 
-        report_html = render_statistics_html(
+        report_html = sanitize_report_html(render_statistics_html(
             filename=filename,
             analysis=analysis,
             ai_insight=ai_insight,
             ai_enabled=llm is not None,
-        )
+        ))
 
         response_payload = {
             "report_html": report_html,
@@ -620,7 +600,7 @@ def analyze_statistics_route():
                 metadata={
                     "analysis_type": "statistics",
                     "uploaded_via": "statistics_workspace",
-                },
+                }, user_id=session["user_id"],
             )
 
         return jsonify(response_payload), 200
@@ -696,7 +676,7 @@ def process_document_ocr():
                 metadata={
                     "analysis_mode": analysis_mode,
                     "uploaded_via": "document_workspace",
-                }
+                }, user_id=session["user_id"]
             )
             result_dict["knowledge_base"] = ingestion_result
         

@@ -32,6 +32,22 @@ class AppContractTests(unittest.TestCase):
         self.assertFalse(response.json["llm_configured"])
         self.assertFalse(response.json["agent_configured"])
 
+    def test_clients_receive_distinct_stable_anonymous_identities(self):
+        first = self.app_module.app.test_client()
+        second = self.app_module.app.test_client()
+
+        first.get("/health")
+        first.get("/health")
+        second.get("/health")
+
+        with first.session_transaction() as first_session:
+            first_id = first_session["user_id"]
+        with second.session_transaction() as second_session:
+            second_id = second_session["user_id"]
+
+        self.assertNotEqual(first_id, second_id)
+        self.assertGreaterEqual(len(first_id), 32)
+
     def test_initial_state_and_draft_update_use_configured_db(self):
         update_response = self.client.post(
             "/update_statement",
@@ -42,6 +58,16 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(update_response.status_code, 200)
         self.assertEqual(state_response.status_code, 200)
         self.assertEqual(state_response.json["personal_statement_draft"], "Working draft")
+
+    def test_drafts_are_session_scoped(self):
+        first = self.app_module.app.test_client()
+        second = self.app_module.app.test_client()
+
+        first.post("/update_statement", json={"personal_statement_draft": "First"})
+        second.post("/update_statement", json={"personal_statement_draft": "Second"})
+
+        self.assertEqual(first.get("/get_initial_state").json["personal_statement_draft"], "First")
+        self.assertEqual(second.get("/get_initial_state").json["personal_statement_draft"], "Second")
 
     def test_chat_sse_reports_missing_ai_configuration(self):
         response = self.client.get("/chat?message=hello")
@@ -72,10 +98,11 @@ class AppContractTests(unittest.TestCase):
                 "extracted_text": "source text",
             }, 200)
 
-        def fake_ingest_text_to_vector_store(text, source_name, metadata=None):
+        def fake_ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
             captured["text"] = text
             captured["source_name"] = source_name
             captured["metadata"] = metadata
+            captured["user_id"] = user_id
             return {"ok": True, "message": "saved", "chunk_count": 1}
 
         try:
@@ -103,15 +130,17 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(captured["text"], "source text")
         self.assertEqual(captured["source_name"], "sample.txt")
         self.assertEqual(captured["metadata"]["analysis_mode"], "summary")
+        self.assertTrue(captured["user_id"])
 
     def test_statistics_analysis_handles_csv_without_ai_key(self):
         original_ingest = self.app_module.ingest_text_to_vector_store
         captured = {}
 
-        def fake_ingest_text_to_vector_store(text, source_name, metadata=None):
+        def fake_ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
             captured["text"] = text
             captured["source_name"] = source_name
             captured["metadata"] = metadata
+            captured["user_id"] = user_id
             return {"ok": True, "message": "saved", "chunk_count": 1}
 
         try:
@@ -140,6 +169,7 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(response.json["knowledge_base"]["chunk_count"], 1)
         self.assertEqual(captured["source_name"], "sample.csv")
         self.assertEqual(captured["metadata"]["analysis_type"], "statistics")
+        self.assertTrue(captured["user_id"])
 
     def test_statistics_analysis_rejects_unsupported_file_type(self):
         response = self.client.post(
