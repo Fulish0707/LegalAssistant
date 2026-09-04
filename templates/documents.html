@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>법률 상담 데스크 - 사건 자료</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;height:100%}
+body{background:#f7f5f1;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:#1f4b7a;text-decoration:none}
+button{font:inherit;color:inherit}
+textarea,input{font:inherit}
+::selection{background:#e6f0f0}
+@keyframes lpb{0%,100%{opacity:.2}50%{opacity:1}}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#dcd8d0;border-radius:6px;border:3px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script src="{{ url_for('static', filename='lc-data.js') }}"></script>
+<script src="{{ url_for('static', filename='lc-shell.js') }}"></script>
+<script src="{{ url_for('static', filename='lc-docs.js') }}"></script>
+</body>
+</html>

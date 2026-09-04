@@ -1,4 +1,7 @@
-import bleach
+try:
+    import bleach  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - optional dependency for local environments
+    bleach = None
 
 
 ALLOWED_TAGS = [
@@ -13,10 +16,22 @@ ALLOWED_ATTRIBUTES = {
 
 
 def sanitize_report_html(value):
-    return bleach.clean(
-        value or "",
-        tags=ALLOWED_TAGS,
-        attributes=ALLOWED_ATTRIBUTES,
-        protocols=["http", "https", "mailto"],
-        strip=True,
-    )
+    text = value or ""
+
+    if bleach is not None:
+        return bleach.clean(
+            text,
+            tags=ALLOWED_TAGS,
+            attributes=ALLOWED_ATTRIBUTES,
+            protocols=["http", "https", "mailto"],
+            strip=True,
+        )
+
+    # Minimal fallback for environments where bleach is unavailable.
+    import html
+    import re
+
+    text = re.sub(r"<\s*(script|style)\b[^>]*>.*?<\s*/\s*\1\s*>", "", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<\s*[^>]+>", "", text)
+    text = html.unescape(text)
+    return text.strip()
