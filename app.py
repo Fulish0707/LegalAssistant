@@ -6,6 +6,8 @@ from langchain_config import (
     ingest_text_to_vector_store,
     get_knowledge_base_status,
     clear_knowledge_base,
+    search_knowledge_base,
+    delete_knowledge_base_source,
 ) # Assuming these are correctly configured
 import time # Needed for a brief pause
 import logging
@@ -402,13 +404,13 @@ def index():
 def chatbot_page_explicit():
     return render_template('chatbot.html')
 
-@app.route('/document.html')
-def document_page():
-    return render_template('document.html')
+@app.route('/documents.html')
+def documents_page():
+    return render_template('documents.html')
 
-@app.route('/statistics.html')
-def statistics_page():
-    return render_template('statistics.html')
+@app.route('/cases.html')
+def cases_page():
+    return render_template('cases.html')
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -516,6 +518,28 @@ def knowledge_base_status_route():
 @app.route('/knowledge_base/clear', methods=['POST'])
 def clear_knowledge_base_route():
     result = clear_knowledge_base(session["user_id"])
+    return jsonify(result), 200 if result.get("ok") else 500
+
+@app.route('/knowledge_base/search', methods=['POST'])
+def search_knowledge_base_route():
+    data = request.get_json(silent=True) or {}
+    query = (data.get('query') or '').strip()
+    if not query:
+        return jsonify({"ok": False, "results": [], "error": "No query provided"}), 400
+    try:
+        k = max(1, min(int(data.get('k', 6)), 20))
+    except (TypeError, ValueError):
+        k = 6
+    result = search_knowledge_base(session["user_id"], query, k=k)
+    return jsonify(result), 200 if result.get("ok") else 500
+
+@app.route('/knowledge_base/source', methods=['DELETE'])
+def delete_knowledge_base_source_route():
+    data = request.get_json(silent=True) or {}
+    source = (data.get('source') or '').strip()
+    if not source:
+        return jsonify({"ok": False, "message": "No source provided"}), 400
+    result = delete_knowledge_base_source(session["user_id"], source)
     return jsonify(result), 200 if result.get("ok") else 500
 
 

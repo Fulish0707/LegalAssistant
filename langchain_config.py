@@ -207,6 +207,45 @@ def clear_knowledge_base(user_id):
     except Exception as e:
         return {"ok": False, "message": f"Failed to clear knowledge base: {e}", "deleted_count": 0}
 
+def search_knowledge_base(user_id, query, k=6):
+    """Similarity search over the user's chunks. Returns a list of {source, score, quote, chunk_index}."""
+    if vector_store is None or not user_id or not query or not query.strip():
+        return {"ok": vector_store is not None, "results": []}
+    try:
+        pairs = vector_store.similarity_search_with_relevance_scores(
+            query, k=k, filter={"user_id": user_id}
+        )
+        results = []
+        for doc, score in pairs:
+            metadata = doc.metadata or {}
+            results.append({
+                "source": metadata.get("source") or "Unknown source",
+                "score": max(0.0, min(1.0, float(score))),
+                "quote": (doc.page_content or "").strip(),
+                "analysis_mode": metadata.get("analysis_mode", ""),
+            })
+        return {"ok": True, "results": results}
+    except Exception as e:
+        return {"ok": False, "results": [], "error": str(e)}
+
+def delete_knowledge_base_source(user_id, source):
+    """Remove every chunk that belongs to one uploaded file for this user."""
+    global retriever
+    if vector_store is None:
+        return {"ok": True, "deleted_count": 0}
+    if not user_id or not source:
+        return {"ok": False, "message": "user_id and source are required.", "deleted_count": 0}
+    try:
+        stored = vector_store.get(where={"$and": [{"user_id": user_id}, {"source": source}]})
+        ids = stored.get("ids", []) or []
+        if ids:
+            vector_store.delete(ids=ids)
+            if hasattr(vector_store, "persist"):
+                vector_store.persist()
+        return {"ok": True, "deleted_count": len(ids)}
+    except Exception as e:
+        return {"ok": False, "message": f"Failed to delete source: {e}", "deleted_count": 0}
+
 # Create a memory
 memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
