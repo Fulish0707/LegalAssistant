@@ -4,14 +4,12 @@ from langchain_core.callbacks.streaming_stdout import StreamingStdOutCallbackHan
 from langchain_chroma import Chroma
 from langchain_community.agent_toolkits.load_tools import load_tools
 from langchain_classic.agents import initialize_agent
-from langchain_classic.chains import RetrievalQA
-from langchain_classic.chains.question_answering import load_qa_chain
 from langchain_core.documents import Document
 from llm_model import get_chat_model, get_collection_name, get_embedding_model
 import os
 import uuid
 from datetime import datetime, timezone
-from langchain_core.tools import Tool
+from langchain_core.tools import tool
 
 # Define directories. Resolved at call time, never at import: importing this
 # module must not touch disk or construct a client.
@@ -268,53 +266,45 @@ def get_user_retriever(user_id):
     return vector_store.as_retriever(search_kwargs={"k": 3, "filter": {"user_id": user_id}})
 
 
+def retrieve_for_user(user_id, query, k=4):
+    """Similarity search scoped to one account. Seam for tests."""
+    store = get_vector_store()
+    if store is None or not user_id:
+        return []
+    return store.similarity_search(query, k=k, filter={"user_id": user_id})
+
+
 def build_rag_tool(user_id):
-    """Create a RAG tool whose retrieval is permanently scoped to one account."""
-    def rag_tool_func(query):
-        retriever = get_user_retriever(user_id)
-        llm = get_chat_model()
-        if not retriever or llm is None:
-            return "RAG가 현재 사용 불가능합니다."
-        try:
-            # 1. 기본 검색
-            docs = retriever.invoke(query)
-            basic_results = "\n".join([doc.page_content for doc in docs])
-            
-            # 2. RetrievalQA 체인 생성
-            qa_chain = load_qa_chain(
-                llm = llm,
-                chain_type="stuff"
-            )
+    """A deterministic retrieval tool scoped to one account.
 
-            qa = RetrievalQA(
-                combine_documents_chain=qa_chain,
-                retriever=retriever,
-                return_source_documents=True
-            )
-            
-            # 3. 질의응답 실행
-            qa_result = qa({"query": query})
-            
-            # 4. 결과 결합
-            combined_response = f"""
-관련 문서:
-{basic_results}
+    Every step here is code, not model judgement. That matters more with a 4B
+    model: what the model cannot decide, it cannot get wrong. The old version
+    retrieved twice per call -- once directly, then again inside the QA chain --
+    and spent an extra LLM call summarising what the agent was about to read
+    anyway. This retrieves once and hands back the passages.
+    """
 
-질문에 대한 답변:
-{qa_result['result']}
+    @tool("search_documents")
+    def search_documents(query: str) -> str:
+        """Search the signed-in user's uploaded documents. Returns excerpts with sources."""
+        documents = retrieve_for_user(user_id, query)
+        if not documents:
+            return "No matching passages were found in the user's documents."
 
-참고한 문서 수: {len(qa_result['source_documents'])}
-"""
-            return combined_response
-        except Exception as e:
-            print(f"RAG 처리 중 오류 발생: {e}")
-            return "RAG 처리 중 오류가 발생했습니다."
+        seen = set()
+        blocks = []
+        for document in documents:
+            body = (document.page_content or "").strip()
+            if not body or body in seen:
+                continue
+            seen.add(body)
+            source = (document.metadata or {}).get("source") or "Unknown source"
+            blocks.append(f"[source: {source}]\n{body}")
 
-    return Tool(
-        name="RAG Retriever",
-        func=rag_tool_func,
-        description="Use this tool to search the signed-in user's internal document database and get detailed answers to questions.",
-    )
+        return "\n\n".join(blocks)
+
+    return search_documents
+
 
 AGENT_PREFIX = """You are PS_Agent, a practical AI work companion for students and professionals.
 
@@ -323,7 +313,7 @@ Your main jobs are:
 - Summarize uploaded or retrieved documents clearly.
 - Answer general questions in a ChatGPT-like way.
 - Use Search when the user asks for current, external, or broadly factual information.
-- Use RAG Retriever when the user asks about the local document database or source documents.
+- Use search_documents when the user asks about the local document database or source documents.
 
 When the task is about writing, return useful sections when relevant:
 [CHAT] for the conversational answer.
