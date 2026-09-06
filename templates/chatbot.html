@@ -22,6 +22,19 @@ textarea,input{font:inherit}
 </style>
 </head>
 <body>
+<!-- Auth strip. Ported from the OIDC branch, whose sign-in controls lived in an
+     inline server-rendered layout that main's lc-*.js shell replaced. Kept
+     server-rendered so login state is correct on first paint. -->
+<div id="auth-bar" style="display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:8px 16px;font:400 13px/1.4 'Noto Sans KR',system-ui,sans-serif;color:#5a5750;background:#f2efe9;border-bottom:1px solid #e2ddd3">
+  {% if authenticated_account_email %}
+    <span>{{ authenticated_account_email }}</span>
+    <form action="{{ url_for('auth_logout') }}" method="post" style="margin:0">
+      <button type="submit" style="background:none;border:1px solid #cfc9bd;border-radius:4px;padding:3px 10px;cursor:pointer">Sign out</button>
+    </form>
+  {% else %}
+    <a href="{{ url_for('auth_login') }}" style="border:1px solid #cfc9bd;border-radius:4px;padding:3px 10px">Sign in with Google</a>
+  {% endif %}
+</div>
 <div id="app"></div>
 
 <script src="{{ url_for('static', filename='lc-data.js') }}"></script>

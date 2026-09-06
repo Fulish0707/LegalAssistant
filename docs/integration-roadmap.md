@@ -1,10 +1,10 @@
 # Project Integration Roadmap
 
-This tracker records the integration status and implementation order for production readiness. Status reflects `main` as of 2026-08-20.
+This tracker records the integration status and implementation order for production readiness. Status reflects `main` as of 2026-09-06.
 
 | Priority | Integration | Status | Next deliverable |
 | --- | --- | --- | --- |
-| 1 | Google OIDC accounts, data ownership, and quotas | Planned | Implement the approved [design](superpowers/specs/2026-08-19-google-oidc-user-foundation-design.md). |
+| 1 | Google OIDC accounts, data ownership, and quotas | Integrated | Google OIDC, account/guest boundaries, 20-request daily quotas, and request-scoped RAG retrieval are covered by tests. |
 | 2 | Generated-report HTML sanitization | Integrated | Bleach allowlist is active for OCR and statistics reports. |
 | 3 | Upload and expensive-route hardening | Not started | Add size, MIME/signature, document-complexity, and rate-limit controls. |
 | 4 | Production serving and configuration | Not started | App factory, environment profiles, WSGI server, secure logging. |
@@ -13,11 +13,12 @@ This tracker records the integration status and implementation order for product
 | 7 | Application modularization | Not started | Split routes, services, persistence, and configuration around the new boundaries. |
 | 8 | Reproducible dependencies and CI | Not started | Pin dependencies, define Python support, and add test/lint/security workflows. |
 | 9 | Test expansion | Partially integrated | Add authentication, quota, upload-defense, RAG-isolation, and failure-path coverage. |
-| 10 | STT parameter bug | Not started | Rename the invalid `language_code` keyword at the caller to `language`. |
+| 10 | STT parameter bug | Not applicable | Audio processing was removed from `main`; this bug now belongs to `feat/local-audio-document`. |
 
 ## Completed foundation work
 
-- Anonymous browser-session IDs isolate the current SQLite draft/chat rows and uploaded RAG metadata.
+- Google OIDC accounts own persistent SQLite drafts/chat history and RAG chunks; guests retain only a non-persistent session draft.
+- Per-account RAG retrievers and document metadata prevent one account's document chunks from being retrieved by another request.
 - Server-side report HTML sanitization uses a strict Bleach allowlist.
 
-The anonymous isolation is not sufficient for multi-user deployment because the RAG retriever remains mutable process-global. Priority 1 replaces it with authenticated, request-scoped ownership.
+The LangGraph agent migration is designed and planned (Priority 6); see `superpowers/plans/2026-09-06-langgraph-rag-agent.md`. The next production-readiness work is upload and expensive-route hardening (Priority 3). RAG lifecycle improvements such as citations, deduplication, document-level deletion, and evaluation remain tracked in Priority 6.
