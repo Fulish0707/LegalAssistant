@@ -7,6 +7,7 @@ load_dotenv()
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context, g, session
 from langchain_config import (
     build_agent,
+    extract_agent_sections,
     ingest_text_to_vector_store,
     get_knowledge_base_status,
     clear_knowledge_base,
@@ -410,11 +411,13 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
         q = queue.Queue()
         streaming_handler = StreamingCallbackHandler(q)
 
-        agent_input_payload = {
-            "input": user_input,
-        }
+        # create_agent takes a message list, not the AgentExecutor input/chat_history
+        # payload. Task 7 replaces this producer with a real LangGraph stream; until
+        # then this is only the shape change needed to keep the app running.
+        agent_prompt = user_input
         if current_personal_statement_draft:
-            agent_input_payload["input"] += f"\n\n[Current Draft Context]\n{current_personal_statement_draft}"
+            agent_prompt += f"\n\n[Current Draft Context]\n{current_personal_statement_draft}"
+        agent_input_payload = {"messages": [("user", agent_prompt)]}
 
         # Run agent.invoke in a separate thread to allow the queue to be processed concurrently.
         # This is a common pattern for integrating synchronous Langchain calls with Flask streaming.
@@ -455,16 +458,20 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
         if llm_token_buffer: # Final flush
             yield f"data: {json.dumps({'type': 'token_chunk', 'content': llm_token_buffer})}\n\n"
 
-        agent_output_string = agent_response_obj.get("output", "")
-        # Clean the final agent output string
-        cleaned_agent_output_string = clean_agent_output(agent_output_string)
-        
-        parsed_sections = parse_agent_output_sections(cleaned_agent_output_string)
+        # Preferred route: the schema-enforced sections, from structured_response
+        # (Gemini) or from JSON in the final message content (qwen3:4b). Falls back
+        # to the legacy [CHAT] marker parser when neither is available.
+        parsed_sections = extract_agent_sections(agent_response_obj)
+        if parsed_sections is None:
+            messages = (agent_response_obj or {}).get("messages") or []
+            agent_output_string = getattr(messages[-1], "content", "") if messages else ""
+            cleaned_agent_output_string = clean_agent_output(agent_output_string)
+            parsed_sections = parse_agent_output_sections(cleaned_agent_output_string)
+            if not agent_output_string:
+                print(f"Warning: Agent returned no final message. Full response object: {agent_response_obj}")
+            elif not cleaned_agent_output_string:
+                print(f"Warning: Agent output became empty after cleaning. Original: '{agent_output_string}'")
         parsed_chat_response = parsed_sections["chat_response"] if parsed_sections["chat_response"] else "Sorry, I couldn't generate a response."
-        if not agent_output_string: # Log warning based on original output
-             print(f"Warning: Agent returned an empty 'output'. Full response object: {agent_response_obj}")
-        elif not cleaned_agent_output_string and agent_output_string: # Log if cleaning resulted in empty
-             print(f"Warning: Agent output became empty after cleaning. Original: '{agent_output_string}'")
 
 
         # Save assistant message and update Langchain memory

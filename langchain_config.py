@@ -1,15 +1,17 @@
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain_chroma import Chroma
-from langchain_community.agent_toolkits.load_tools import load_tools
-from langchain_classic.agents import initialize_agent
 from langchain_core.documents import Document
 from llm_model import get_chat_model, get_collection_name, get_embedding_model
+import json
 import os
+import re
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Optional
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 # Define directories. Resolved at call time, never at import: importing this
 # module must not touch disk or construct a client.
@@ -315,45 +317,141 @@ Your main jobs are:
 - Use Search when the user asks for current, external, or broadly factual information.
 - Use search_documents when the user asks about the local document database or source documents.
 
-When the task is about writing, return useful sections when relevant:
-[CHAT] for the conversational answer.
-[STATEMENT_SUGGESTION] for university personal statement improvements.
-[JOB_STATEMENT_SUGGESTION] for job application statement improvements.
-[REPORT_SUGGESTION] for report structure, clarity, and business/audience improvements.
+Your final answer is returned as a structured object, not as free text with markers:
+- chat_response: the conversational answer. Never leave this empty.
+- statement_suggestion: university personal statement improvements, when relevant.
+- job_statement_suggestion: job application statement improvements, when relevant.
+- report_suggestion: report structure, clarity, and business/audience improvements, when relevant.
+Leave a suggestion field as an empty string when it does not apply. Do not write
+section markers such as [CHAT] into any field.
 
 Follow the user's language. Prefer Korean when the user writes in Korean; otherwise use English."""
 
-# Load SerpAPI tool only when configured so the app can still run locally without web search.
-serpapi_api_key = os.getenv("SERPAPI_API_KEY")
-serpapi_tools = []
-if serpapi_api_key:
-    try:
-        serpapi_tools = load_tools(
-            tool_names=["serpapi"],
-            serpapi_api_key=serpapi_api_key
-        )
-    except Exception as e:
-        print(f"Search tool could not be initialized: {e}")
-else:
-    print("SERPAPI_API_KEY not found. Web search is disabled until it is configured.")
+@dataclass
+class AgentContext:
+    """Typed request context. Replaces closure-captured globals."""
 
-def build_agent(user_id=None):
-    """Create a request-scoped agent and only expose RAG to signed-in accounts."""
-    llm = get_chat_model()
-    if llm is None:
+    user_id: Optional[str] = None
+
+
+class AgentSections(BaseModel):
+    """Schema-enforced replacement for the [CHAT]/[STATEMENT_SUGGESTION] markers.
+
+    A 4B model follows freeform marker conventions far less reliably than Gemini,
+    so the contract is enforced by schema instead of recovered by regex.
+    """
+
+    chat_response: str = Field(description="The conversational answer.")
+    statement_suggestion: str = Field(default="", description="University personal statement improvements.")
+    job_statement_suggestion: str = Field(default="", description="Job application statement improvements.")
+    report_suggestion: str = Field(default="", description="Report structure and clarity improvements.")
+
+
+SECTION_FIELDS = (
+    "chat_response",
+    "statement_suggestion",
+    "job_statement_suggestion",
+    "report_suggestion",
+)
+
+
+def extract_agent_sections(result):
+    """Pull the four answer sections out of a create_agent result, or None.
+
+    Two routes, because the two providers behave differently. Gemini emits the
+    schema as a structured-output tool call, so `structured_response` arrives as
+    an AgentSections instance. qwen3:4b (verified over repeated runs) writes the
+    same JSON into the final message content and never routes it through the tool
+    call, leaving `structured_response` as None -- so the content is parsed here.
+
+    Returns None when neither route yields sections, which is the caller's signal
+    to fall back to the legacy [CHAT] marker parser.
+    """
+    if not isinstance(result, dict):
         return None
 
-    tools = list(serpapi_tools)
+    structured = result.get("structured_response")
+    if structured is not None:
+        if isinstance(structured, BaseModel):
+            structured = structured.model_dump()
+        if isinstance(structured, dict) and structured.get("chat_response"):
+            return {field: str(structured.get(field) or "").strip() for field in SECTION_FIELDS}
+
+    messages = result.get("messages") or []
+    content = ""
+    for message in reversed(messages):
+        text = getattr(message, "content", None)
+        if isinstance(text, str) and text.strip():
+            content = text.strip()
+            break
+    if not content:
+        return None
+
+    # Parse the raw content before any cleaning. clean_agent_output() unwraps code
+    # fences and rewrites text, which can break otherwise valid JSON.
+    fenced = re.match(r"^```(?:json)?\s*\n(.*?)\n?```$", content, re.DOTALL)
+    if fenced:
+        content = fenced.group(1).strip()
+    if not content.startswith("{"):
+        return None
+    try:
+        payload = json.loads(content)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict) or not payload.get("chat_response"):
+        return None
+    return {field: str(payload.get(field) or "").strip() for field in SECTION_FIELDS}
+
+
+def get_search_tools():
+    """Build the SerpAPI tool on demand, or return nothing when unconfigured.
+
+    This used to run at import, which read the environment before the process had
+    finished configuring it and printed to stdout on every import.
+    """
+    serpapi_api_key = os.getenv("SERPAPI_API_KEY")
+    if not serpapi_api_key:
+        return []
+    try:
+        from langchain_community.agent_toolkits.load_tools import load_tools
+
+        return load_tools(tool_names=["serpapi"], serpapi_api_key=serpapi_api_key)
+    except Exception as e:
+        print(f"Search tool could not be initialized: {e}")
+        return []
+
+
+def build_agent(user_id=None, checkpointer=None):
+    """Create a request-scoped agent and only expose RAG to signed-in accounts."""
+    # Imported here, not at module scope: importing langchain_config must stay
+    # cheap and inert, and langgraph is a heavy import.
+    from langchain.agents import create_agent
+
+    model = get_chat_model()
+    if model is None:
+        return None
+
+    if not hasattr(model, "bind_tools"):
+        # Verified: qwen3:4b via ChatOllama does support bind_tools. Reaching this
+        # branch means the configured provider cannot run a tool loop at all, so a
+        # RAG agent is not what would come back. Fail loudly rather than quietly
+        # serving a different, worse product under the same name.
+        raise RuntimeError(
+            f"LLM_PROVIDER={os.getenv('LLM_PROVIDER')} returned a model without "
+            "bind_tools; create_agent cannot run a tool loop with it."
+        )
+
+    # Keep the tool list small. A 4B degrades quickly as tool count grows:
+    # search_documents plus optional web search is the whole budget.
+    tools = list(get_search_tools())
     if user_id:
         tools.insert(0, build_rag_tool(user_id))
-    return initialize_agent(
+
+    return create_agent(
+        model,
         tools=tools,
-        llm = llm,
-        agent="conversational-react-description",
-        streaming = True,
-        callbacks = [StreamingStdOutCallbackHandler()],
-        verbose = True,
-        handle_parsing_errors = True,
-        temperature = 0.0,
-        agent_kwargs={"prefix": AGENT_PREFIX}
+        system_prompt=AGENT_PREFIX,
+        response_format=AgentSections,
+        context_schema=AgentContext,
+        checkpointer=checkpointer,
     )
