@@ -31,19 +31,36 @@ def get_chat_model():
     if provider == "ollama":
         from langchain_ollama import ChatOllama
 
-        # reasoning=True keeps `content` clean and isolates Qwen3's thinking in
-        # additional_kwargs["reasoning_content"]. reasoning=False is NOT the safe
-        # choice: it strips the <think> tags and leaves the reasoning prose inside
-        # content, where nothing downstream can recognise it. Verified on qwen3:4b.
-        return ChatOllama(
-            model=os.getenv("OLLAMA_MODEL", "qwen3:4b"),
-            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-            reasoning=True,
+        # The `reasoning` kwarg is deliberately left unset. All three settings were
+        # measured on qwen3:4b, and each one trades away something:
+        #
+        #   reasoning=False  thinking prose leaks into `content` with the <think>
+        #                    tags stripped, so nothing downstream can recognise it.
+        #   reasoning=True   `content` stays clean and thinking is isolated in
+        #                    additional_kwargs["reasoning_content"] — but it
+        #                    suppressed the structured-output tool call in 3 of 3
+        #                    create_agent runs, so `structured_response` was never
+        #                    populated.
+        #   unset            `content` stays clean, thinking is dropped, and
+        #                    `structured_response` populated in 2 of 3 runs.
+        #
+        # Unset is the only setting where the structured-output path works at all,
+        # so it wins. That 2-of-3 is also why extract_agent_sections() in
+        # langchain_config.py must keep its JSON fallback: a 4B does not honour a
+        # response schema reliably enough to depend on. Set OLLAMA_REASONING=true
+        # to trade structured output for thinking visibility in traces.
+        options = {
+            "model": os.getenv("OLLAMA_MODEL", "qwen3:4b"),
+            "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             # Qwen3 degrades and repeats under greedy decoding. Do not use 0.
-            temperature=float(os.getenv("OLLAMA_TEMPERATURE", "0.7")),
-            top_p=0.8,
-            top_k=20,
-        )
+            "temperature": float(os.getenv("OLLAMA_TEMPERATURE", "0.7")),
+            "top_p": 0.8,
+            "top_k": 20,
+        }
+        reasoning = os.getenv("OLLAMA_REASONING")
+        if reasoning is not None:
+            options["reasoning"] = reasoning.strip().lower() in ("1", "true", "yes")
+        return ChatOllama(**options)
 
     if provider == "google":
         if not os.getenv("GOOGLE_API_KEY"):
