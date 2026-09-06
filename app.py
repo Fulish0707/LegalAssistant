@@ -1,3 +1,9 @@
+from dotenv import load_dotenv
+
+# Load environment variables before importing project modules: library modules no
+# longer call load_dotenv() themselves.
+load_dotenv()
+
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context, g, session
 from langchain_config import (
     build_agent,
@@ -19,7 +25,6 @@ import sys
 import secrets
 from werkzeug.utils import secure_filename
 import tempfile
-from dotenv import load_dotenv
 import requests
 import auth
 from quota import (
@@ -30,8 +35,6 @@ from quota import (
     reserve_daily_quota,
 )
 
-# Load environment variables
-load_dotenv()
 
 # Assuming llm_ocr.py is in the same directory or accessible via PYTHONPATH
 try:
@@ -39,10 +42,8 @@ try:
 except ModuleNotFoundError:
     llm_ocr = None
 
-# Assuming the main prompt template and llm model can be accessed
-# This might require adjustments if langchain_config doesn't expose llm directly
 from llm_prompt import prompt as main_chat_prompt_template
-from langchain_config import llm # TRYING TO IMPORT LLM DIRECTLY
+from llm_model import get_chat_model
 from statistics_analysis import (
     ALLOWED_STATISTICS_EXTENSIONS,
     analyze_dataframe,
@@ -515,10 +516,11 @@ def cases_page():
 
 @app.route('/health', methods=['GET'])
 def health():
+    llm_available = get_chat_model() is not None
     return jsonify({
         "status": "ok",
-        "llm_configured": llm is not None,
-        "agent_configured": llm is not None,
+        "llm_configured": llm_available,
+        "agent_configured": llm_available,
         "search_configured": bool(os.getenv("SERPAPI_API_KEY")),
         "google_oidc_configured": app.config["GOOGLE_OIDC_CONFIGURED"],
     })
@@ -720,6 +722,7 @@ def analyze_statistics_route():
         dataframe = load_table(temp_file_path, file_extension)
         analysis = analyze_dataframe(dataframe)
 
+        llm = get_chat_model()
         ai_insight = None
         if llm is not None:
             prompt_text = build_ai_statistics_prompt(filename, analysis, user_question)
@@ -774,9 +777,10 @@ def process_document_ocr():
         return jsonify({
             "error": "OCR processing requires optional OCR dependencies such as pytesseract."
         }), 503
+    llm = get_chat_model()
     if llm is None:
         return jsonify({
-            "error": "Document analysis requires GOOGLE_API_KEY to be configured in .env."
+            "error": "Document analysis requires an LLM provider to be configured."
         }), 503
 
     if 'file' not in request.files:

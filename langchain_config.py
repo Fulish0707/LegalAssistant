@@ -7,14 +7,11 @@ from langchain_classic.agents import initialize_agent
 from langchain_classic.chains import RetrievalQA
 from langchain_classic.chains.question_answering import load_qa_chain
 from langchain_core.documents import Document
-from llm_model import embedding_model, llm
+from llm_model import get_chat_model, get_embedding_model
 import os
 import uuid
 from datetime import datetime, timezone
 from langchain_core.tools import Tool
-from dotenv import load_dotenv
-
-load_dotenv() # Load variables from .env file
 
 # Define directories
 persis_directory = "./chroma_db"
@@ -53,9 +50,12 @@ def get_document_source_folder():
         return legacy_doc_folder
     return doc_folder
 
+# Task 3 restructures this into a provider-scoped get_vector_store().
+embedding_model = get_embedding_model()
+
 # Check if the vector store already exists
 if embedding_model is None:
-    print("Embedding model is unavailable. RAG vector store is disabled until GOOGLE_API_KEY is configured.")
+    print("Embedding model is unavailable. RAG vector store is disabled until the embedding provider is configured.")
     vector_store = None
 elif os.path.exists(persis_directory):
     print(f"Loading existing vector store from {persis_directory}")
@@ -258,7 +258,8 @@ def build_rag_tool(user_id):
     """Create a RAG tool whose retrieval is permanently scoped to one account."""
     def rag_tool_func(query):
         retriever = get_user_retriever(user_id)
-        if not retriever:
+        llm = get_chat_model()
+        if not retriever or llm is None:
             return "RAG가 현재 사용 불가능합니다."
         try:
             # 1. 기본 검색
@@ -321,7 +322,7 @@ Follow the user's language. Prefer Korean when the user writes in Korean; otherw
 # Load SerpAPI tool only when configured so the app can still run locally without web search.
 serpapi_api_key = os.getenv("SERPAPI_API_KEY")
 serpapi_tools = []
-if serpapi_api_key and llm is not None:
+if serpapi_api_key:
     try:
         serpapi_tools = load_tools(
             tool_names=["serpapi"],
@@ -334,6 +335,7 @@ else:
 
 def build_agent(user_id=None):
     """Create a request-scoped agent and only expose RAG to signed-in accounts."""
+    llm = get_chat_model()
     if llm is None:
         return None
 
@@ -351,7 +353,3 @@ def build_agent(user_id=None):
         temperature = 0.0,
         agent_kwargs={"prefix": AGENT_PREFIX}
     )
-
-
-if llm is None:
-    print("LLM is unavailable. Chat agent is disabled until GOOGLE_API_KEY is configured.")
