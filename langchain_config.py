@@ -70,10 +70,20 @@ def get_vector_store():
     )
 
 
-def ingest_source_folder():
-    """Ingest ./documents into the provider-scoped collection. Explicit by design:
-    this used to run at import, which made the collection a function of import
-    order. Callers invoke it when they actually want ingestion."""
+def ingest_source_folder(user_id=None):
+    """Ingest ./documents into the provider-scoped collection.
+
+    Explicit by design: this used to run at import, which made the collection a
+    function of import order. Callers invoke it when they actually want ingestion.
+
+    user_id is what makes the result reachable. Every read path -- search,
+    status, the per-account retriever -- filters on user_id, so chunks ingested
+    without one are write-only: stored in Chroma and invisible to the app. The
+    old import-time block never stamped it either.
+
+    Not idempotent. The old block ran only when chroma_db/ was absent; calling
+    this twice ingests the same files twice.
+    """
     vector_store = get_vector_store()
     if vector_store is None:
         return {"ok": False, "message": "Embedding model is not configured.", "chunk_count": 0}
@@ -88,6 +98,10 @@ def ingest_source_folder():
     print(f"Loaded {len(documents)} documents from {source_folder}")
     if not documents:
         return {"ok": False, "message": f"No supported RAG documents found in {source_folder}.", "chunk_count": 0}
+
+    if user_id:
+        for document in documents:
+            document.metadata = {**(document.metadata or {}), "user_id": user_id}
 
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = text_splitter.split_documents(documents)
