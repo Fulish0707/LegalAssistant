@@ -6,6 +6,7 @@ load_dotenv()
 
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context, g, session
 from langchain_config import (
+    AgentContext,
     build_agent,
     extract_agent_sections,
     ingest_text_to_vector_store,
@@ -100,6 +101,36 @@ DB_FILE = os.getenv("APP_STATE_DB", "sqlite_db/app_state.db") # Define DB_FILE b
 db_dir = os.path.dirname(DB_FILE)
 if db_dir:
     os.makedirs(db_dir, exist_ok=True)
+
+# The agent's working state, kept deliberately apart from DB_FILE's chat_history
+# table. chat_history is the display record the UI renders; this is what the agent
+# actually reasons over between turns. Unifying them would mean the renderer and
+# the model share one schema, and they do not: the checkpointer stores tool calls,
+# tool results and structured-output messages the UI never shows.
+CHECKPOINT_DB_FILE = os.getenv("AGENT_CHECKPOINT_DB", "sqlite_db/checkpoints.db")
+checkpoint_db_dir = os.path.dirname(CHECKPOINT_DB_FILE)
+if checkpoint_db_dir:
+    os.makedirs(checkpoint_db_dir, exist_ok=True)
+
+
+def build_checkpointer():
+    """One long-lived SqliteSaver over one connection, shared by every request.
+
+    Not SqliteSaver.from_conn_string(): that is a context manager which closes the
+    connection on exit, which is right for a test and wrong for a process that must
+    keep it open. check_same_thread=False is not optional either -- Flask runs the
+    streaming generator on a different thread from the one that opens this
+    connection, and without it the first streamed request raises a thread-affinity
+    error from sqlite3.
+    """
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    connection = sqlite3.connect(CHECKPOINT_DB_FILE, check_same_thread=False)
+    connection.execute("PRAGMA busy_timeout = 5000")
+    return SqliteSaver(connection)
+
+
+CHECKPOINTER = build_checkpointer()
 
 def ensure_database_schema(conn):
     cursor = conn.cursor()
@@ -398,7 +429,18 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
     """
     full_streamed_llm_output = ""
     try:
-        agent = build_agent(auth.get_current_user_id())
+        # thread_id is the authenticated account id and nothing else. A guest's only
+        # identity is a random token in a signed cookie, with no lifecycle, no
+        # deletion path and no owner to attribute the stored turns to, so guests get
+        # no checkpointer and no thread: they are stateless between turns, exactly
+        # as their chat history already is (add_chat_message_to_db is
+        # authenticated-only). That also makes it impossible for two guests, or a
+        # guest and an account, to land in one thread.
+        thread_user_id = auth.get_current_user_id()
+        agent = build_agent(
+            thread_user_id,
+            checkpointer=CHECKPOINTER if thread_user_id else None,
+        )
         if agent is None:
             yield f"data: {json.dumps({'type': 'error', 'content': 'AI chat is not configured. Set GOOGLE_API_KEY in .env and restart the app.'})}\n\n"
             return
@@ -426,9 +468,21 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
         # If true non-blocking for other requests is needed, agent.invoke would need to be
         # offloaded to a thread pool executor.
 
+        # Only the new turn goes in. The checkpointer replays the thread's earlier
+        # messages, so passing history here as well would duplicate every turn.
+        # Task 7 owns the remaining half of this: agent_prompt above appends the
+        # whole personal-statement draft to every user message, and now that the
+        # thread is persisted, turn N carries N copies of that draft into context.
+        # It was harmless while every turn was stateless; it is a truncation risk on
+        # qwen3:4b once it accumulates.
+        run_config = {"callbacks": [streaming_handler]}
+        if thread_user_id:
+            run_config["configurable"] = {"thread_id": thread_user_id}
+
         agent_response_obj = agent.invoke(
             agent_input_payload,
-            {"callbacks": [streaming_handler]}
+            run_config,
+            context=AgentContext(user_id=thread_user_id),
         )
 
         llm_token_buffer = ""
@@ -668,12 +722,28 @@ def get_similar_chats_route(): # Renamed to avoid conflict with internal var
     return jsonify({"similar_chats": similar_chats})
 
 
+def clear_agent_thread(user_id):
+    """Drop the agent's checkpointed thread when the display history is cleared.
+
+    These two stores are separate, but a user clearing their history means one
+    thing, not two: a user who clears the transcript and then finds the agent still
+    quoting it back would call that a bug, correctly. Failures here are logged and
+    swallowed -- clearing the record the user can see is this endpoint's job, and it
+    must not 500 because the checkpoint store is unhappy.
+    """
+    try:
+        CHECKPOINTER.delete_thread(user_id)
+    except Exception as error:
+        logging.warning(f"Could not clear the agent thread for {user_id}: {error}")
+
+
 @app.route('/clear_chat_history_endpoint', methods=['POST']) # Added specific endpoint name
 def clear_chat_history_endpoint():
     try:
         authenticated_user_id = auth.get_current_user_id()
         if authenticated_user_id:
             clear_chat_history_in_db(authenticated_user_id)
+            clear_agent_thread(authenticated_user_id)
         return jsonify({"message": "Chat history cleared successfully."}), 200
     except Exception as e:
         logging.error(f"Error clearing chat history: {e}")
