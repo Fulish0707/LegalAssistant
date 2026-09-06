@@ -139,19 +139,14 @@ class AgentMemoryTests(unittest.TestCase):
 
 
 class RecordingAgent:
-    """Stands in for the compiled graph and records how app.py invokes it."""
+    """Stands in for the compiled graph and records how app.py streams it."""
 
     def __init__(self):
         self.calls = []
 
-    def invoke(self, payload, config=None, **kwargs):
+    def stream(self, payload, config=None, **kwargs):
         self.calls.append({"payload": payload, "config": config, "kwargs": kwargs})
-        # Unblock the streaming producer's queue.get(timeout=10) so the test does
-        # not sit for ten seconds. Task 7 replaces that producer.
-        for callback in (config or {}).get("callbacks", []):
-            if hasattr(callback, "queue"):
-                callback.queue.put({"type": "llm_end"})
-        return {"structured_response": None, "messages": [AIMessage("ack")]}
+        yield "values", {"structured_response": None, "messages": [AIMessage("ack")]}
 
 
 class AppCheckpointerWiringTests(unittest.TestCase):
@@ -245,7 +240,7 @@ class AppCheckpointerWiringTests(unittest.TestCase):
         _, call = self.drive_chat("account-one")
 
         context = call["kwargs"].get("context")
-        self.assertIsNotNone(context, "invoke() was called without context=AgentContext(...)")
+        self.assertIsNotNone(context, "stream() was called without context=AgentContext(...)")
         self.assertEqual(context.user_id, "account-one")
 
     def test_clearing_chat_history_also_clears_the_agents_thread(self):
