@@ -91,12 +91,31 @@ def get_embedding_descriptor():
     raise ValueError(f"Unknown EMBEDDING_PROVIDER: {provider!r}")
 
 
+def _normalise_model_id(model):
+    """Collapse the spellings of one model onto a single key.
+
+    Google accepts both `models/text-embedding-004` and `text-embedding-004`, and
+    Ollama accepts both `nomic-embed-text` and `nomic-embed-text:latest`. They are
+    the same embedding space each time, so they must not produce two collections:
+    that would silently re-embed and hide everything ingested under the other
+    spelling. Lookup path only. get_embedding_descriptor() keeps reporting the raw
+    spelling, because that is what is handed to the SDK.
+    """
+    model = model.strip()
+    if model.startswith("models/"):
+        model = model[len("models/"):]
+    if model.endswith(":latest"):
+        model = model[: -len(":latest")]
+    return model
+
+
 def get_collection_name():
     """Chroma collection dedicated to the active embedding provider and model."""
-    descriptor = get_embedding_descriptor()
-    if descriptor in COLLECTION_NAMES:
-        return COLLECTION_NAMES[descriptor]
-    provider, model = descriptor
+    provider, model = get_embedding_descriptor()
+    model = _normalise_model_id(model)
+    for (table_provider, table_model), name in COLLECTION_NAMES.items():
+        if table_provider == provider and _normalise_model_id(table_model) == model:
+            return name
     safe_model = "".join(c if c.isalnum() else "_" for c in model).strip("_")
     return f"docs_{provider}_{safe_model}"
 
