@@ -49,20 +49,22 @@ loading stays available as a later provider branch if the runtime changes.
 
 ### Qwen3-specific settings, owned by the connector
 
-- **Set `reasoning=True`. Never `reasoning=False`.** Qwen3 is a hybrid-reasoning
-  model. Measured on `qwen3:4b` via `ChatOllama`:
+- **Leave `reasoning` unset.** All three settings were measured on `qwen3:4b`,
+  and each trades away something:
 
-  | setting | `content` | thinking |
-  | --- | --- | --- |
-  | `reasoning=True` | clean (`''`) | isolated in `additional_kwargs['reasoning_content']` |
-  | unset (default) | clean (`''`) | dropped |
-  | `reasoning=False` | **thinking leaks in as prose** | — |
+  | setting | `content` | thinking | `structured_response` |
+  | --- | --- | --- | --- |
+  | unset (default) | clean | dropped | populated 2/3 (simple schema) |
+  | `reasoning=True` | clean | isolated in `reasoning_content` | **0/3 — suppressed** |
+  | `reasoning=False` | **thinking leaks in as prose** | — | not measured |
 
   `reasoning=False` reads like the safe choice and is the only one that pollutes
-  output: it strips the `<think>` tags and leaves the reasoning text in `content`,
-  where it reaches `clean_agent_output` and the section parser untagged and
-  unrecognizable. Use `reasoning=True` so thinking stays inspectable in traces
-  while `content` stays clean.
+  output: it strips the `<think>` tags and leaves reasoning text in `content`.
+  `reasoning=True` looks better still — thinking stays inspectable in traces — but
+  it suppressed the structured-output tool call in every run. Unset is the only
+  setting where that path works at all. `OLLAMA_REASONING=true` trades it back for
+  trace visibility.
+
 - **Do not use `temperature=0`.** The current code hardcodes it, and greedy
   decoding is a known degradation and repetition mode for Qwen3. Sampling
   parameters are per-provider and belong in the connector, not at the agent call
@@ -109,12 +111,26 @@ replaces `initialize_agent`.
   for freeform `[CHAT]` / `[STATEMENT_SUGGESTION]` / `[JOB_STATEMENT_SUGGESTION]` /
   `[REPORT_SUGGESTION]` markers and recovers them with a regex. A 4B model follows
   that convention far less reliably than Gemini. Declaring the same four fields as
-  `response_format` on `create_agent` makes the contract schema-enforced and lets
-  the regex parser go. Verified compatible with the tool loop on `qwen3:4b`: a
-  single run produced both a real `ToolMessage` and a populated
-  `structured_response`. They compose because `create_agent` emits the structured
-  answer as its own tool call — which does cost one extra model turn per request,
-  and that lands against `DAILY_AI_REQUEST_LIMIT` and latency.
+  `response_format` on `create_agent` makes the contract schema-enforced.
+
+  **But a 4B does not honour it reliably, so the regex parser cannot simply go.**
+  Measured on `qwen3:4b`: with a one-field schema, `structured_response` populated
+  in 2 of 3 runs; with the real four-field `AgentSections` plus the full system
+  prompt, it populated in **0 of 3**. The tool loop itself never failed — the model
+  called `search_documents` every time — and the final message content was valid
+  schema JSON every time. What fails is routing that JSON through the
+  structured-output tool call.
+
+  `ProviderStrategy` was tried and rejected: it populates `structured_response`
+  reliably, but Ollama's `format=json_schema` constrains every generation to the
+  schema, so the model can never emit a tool call and the RAG tool becomes
+  unreachable. That defeats the migration.
+
+  The resolution is `extract_agent_sections()`: read `structured_response` first
+  (Gemini's route), then fall back to parsing JSON out of the final message content
+  (Qwen's route), then fall back to the legacy markers. Parse before any cleanup
+  pass that unwraps code fences, which would corrupt valid JSON. The fallback is
+  load-bearing, not belt-and-braces — it is what carries every Qwen request.
 - **Keep the tool set small.** A 4B model degrades quickly as tool count grows.
   `search_documents` plus optional web search is the budget.
 
