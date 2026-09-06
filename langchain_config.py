@@ -7,20 +7,20 @@ from langchain_classic.agents import initialize_agent
 from langchain_classic.chains import RetrievalQA
 from langchain_classic.chains.question_answering import load_qa_chain
 from langchain_core.documents import Document
-from llm_model import get_chat_model, get_embedding_model
+from llm_model import get_chat_model, get_collection_name, get_embedding_model
 import os
 import uuid
 from datetime import datetime, timezone
 from langchain_core.tools import Tool
 
-# Define directories
-persis_directory = "./chroma_db"
-doc_folder = os.getenv("RAG_DOCUMENTS_DIR", "./documents")
+# Define directories. Resolved at call time, never at import: importing this
+# module must not touch disk or construct a client.
+PERSIST_DIRECTORY = "./chroma_db"
 
-# Create documents directory if it doesn't exist
-if not os.path.exists(doc_folder):
-    os.makedirs(doc_folder)
-    print(f"Created documents directory at {doc_folder}")
+
+def get_documents_dir():
+    return os.getenv("RAG_DOCUMENTS_DIR", "./documents")
+
 
 def load_rag_documents(source_folder):
     supported_loaders = {
@@ -42,6 +42,7 @@ def load_rag_documents(source_folder):
     return loaded_documents
 
 def get_document_source_folder():
+    doc_folder = get_documents_dir()
     if os.path.exists(doc_folder) and any(os.scandir(doc_folder)):
         return doc_folder
     legacy_doc_folder = "./doc_folder"
@@ -50,60 +51,62 @@ def get_document_source_folder():
         return legacy_doc_folder
     return doc_folder
 
-# Task 3 restructures this into a provider-scoped get_vector_store().
-embedding_model = get_embedding_model()
+def get_vector_store():
+    """Build the Chroma handle on demand. Never at import.
 
-# Check if the vector store already exists
-if embedding_model is None:
-    print("Embedding model is unavailable. RAG vector store is disabled until the embedding provider is configured.")
-    vector_store = None
-elif os.path.exists(persis_directory):
-    print(f"Loading existing vector store from {persis_directory}")
-    vector_store = Chroma(
-        persist_directory = persis_directory,
-        embedding_function = embedding_model
+    collection_name is the only thing keeping providers apart. text-embedding-004
+    and nomic-embed-text are both 768-dimensional, so Chroma would accept vectors
+    from either into one collection and then compute neighbours across two
+    unrelated embedding spaces -- wrong results, no exception. A bare Chroma(...)
+    would land in the legacy `langchain` collection, which is Google-embedded.
+    """
+    embedding_model = get_embedding_model()
+    if embedding_model is None:
+        return None
+    return Chroma(
+        collection_name=get_collection_name(),
+        persist_directory=PERSIST_DIRECTORY,
+        embedding_function=embedding_model,
     )
-else:
-    print(f"Creating new vector store in {persis_directory}")
-    
-    try:
-        source_folder = get_document_source_folder()
-        documents = load_rag_documents(source_folder)
-        print(f"Loaded {len(documents)} documents from {source_folder}")
 
-        if len(documents) == 0:
-            print(f"Warning: No supported RAG documents found in {source_folder}")
-            vector_store = None
-        else:
-            # Split documents into chunks
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=200
-            )
-            chunks = text_splitter.split_documents(documents)
-            print(f"Split into {len(chunks)} chunks")
 
-            # Create and persist vector store
-            vector_store = Chroma.from_documents(
-                documents=chunks,
-                embedding=embedding_model,
-                persist_directory=persis_directory
-            )
-            if hasattr(vector_store, "persist"):
-                vector_store.persist()
-            print(f"Vector store created and persisted in {persis_directory}")
+def ingest_source_folder():
+    """Ingest ./documents into the provider-scoped collection. Explicit by design:
+    this used to run at import, which made the collection a function of import
+    order. Callers invoke it when they actually want ingestion."""
+    vector_store = get_vector_store()
+    if vector_store is None:
+        return {"ok": False, "message": "Embedding model is not configured.", "chunk_count": 0}
 
-    except Exception as e:
-        print(f"An error occurred during vector store creation: {e}")
-        vector_store = None
+    doc_folder = get_documents_dir()
+    if not os.path.exists(doc_folder):
+        os.makedirs(doc_folder)
+        print(f"Created documents directory at {doc_folder}")
+
+    source_folder = get_document_source_folder()
+    documents = load_rag_documents(source_folder)
+    print(f"Loaded {len(documents)} documents from {source_folder}")
+    if not documents:
+        return {"ok": False, "message": f"No supported RAG documents found in {source_folder}.", "chunk_count": 0}
+
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    chunks = text_splitter.split_documents(documents)
+    if not chunks:
+        return {"ok": False, "message": "Documents could not be split into chunks.", "chunk_count": 0}
+
+    vector_store.add_documents(chunks)
+    if hasattr(vector_store, "persist"):
+        vector_store.persist()
+    print(f"Ingested {len(chunks)} chunks into {get_collection_name()}")
+    return {"ok": True, "message": f"Ingested {len(chunks)} chunks.", "chunk_count": len(chunks)}
+
 
 def ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
     """Add extracted document text to the persistent RAG store for later chat follow-up."""
-    global vector_store
-
     if not user_id:
         return {"ok": False, "message": "user_id is required.", "chunk_count": 0}
-    if embedding_model is None:
+    vector_store = get_vector_store()
+    if vector_store is None:
         return {"ok": False, "message": "Embedding model is not configured.", "chunk_count": 0}
 
     if not text or not text.strip():
@@ -133,14 +136,7 @@ def ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
     if not chunks:
         return {"ok": False, "message": "Document text could not be split into chunks.", "chunk_count": 0}
 
-    if vector_store is None:
-        vector_store = Chroma.from_documents(
-            documents=chunks,
-            embedding=embedding_model,
-            persist_directory=persis_directory
-        )
-    else:
-        vector_store.add_documents(chunks)
+    vector_store.add_documents(chunks)
 
     if hasattr(vector_store, "persist"):
         vector_store.persist()
@@ -155,6 +151,7 @@ def ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
 
 def get_knowledge_base_status(user_id):
     """Return a compact summary of documents currently stored in Chroma."""
+    vector_store = get_vector_store()
     if vector_store is None:
         return {
             "available": False,
@@ -194,7 +191,7 @@ def get_knowledge_base_status(user_id):
 
 def clear_knowledge_base(user_id):
     """Remove all chunks from the active Chroma collection without deleting files manually."""
-
+    vector_store = get_vector_store()
     if vector_store is None:
         return {"ok": True, "message": "Knowledge base is already empty.", "deleted_count": 0}
 
@@ -211,6 +208,7 @@ def clear_knowledge_base(user_id):
 
 def search_knowledge_base(user_id, query, k=6):
     """Similarity search over the user's chunks. Returns a list of {source, score, quote, chunk_index}."""
+    vector_store = get_vector_store()
     if vector_store is None or not user_id or not query or not query.strip():
         return {"ok": vector_store is not None, "results": []}
     try:
@@ -232,6 +230,7 @@ def search_knowledge_base(user_id, query, k=6):
 
 def delete_knowledge_base_source(user_id, source):
     """Remove every chunk that belongs to one uploaded file for this user."""
+    vector_store = get_vector_store()
     if vector_store is None:
         return {"ok": True, "deleted_count": 0}
     if not user_id or not source:
@@ -249,6 +248,7 @@ def delete_knowledge_base_source(user_id, source):
 
 def get_user_retriever(user_id):
     """Build a retriever for one account without mutating process-global state."""
+    vector_store = get_vector_store()
     if vector_store is None or not user_id:
         return None
     return vector_store.as_retriever(search_kwargs={"k": 3, "filter": {"user_id": user_id}})
