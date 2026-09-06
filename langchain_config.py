@@ -23,6 +23,17 @@ from pydantic import BaseModel, Field
 # module must not touch disk or construct a client.
 PERSIST_DIRECTORY = "./chroma_db"
 
+
+def get_persist_directory():
+    """Where Chroma lives. Env-overridable so the eval harness can be sandboxed.
+
+    evals/run_eval.py must not write its fixture vectors into the real user
+    knowledge base, and deleting them afterwards by id is a weaker guarantee
+    than never sharing the store. RAG_PERSIST_DIR points it at a temporary
+    directory instead; unset, nothing changes.
+    """
+    return os.getenv("RAG_PERSIST_DIR", PERSIST_DIRECTORY)
+
 # --- LangSmith tracing ---------------------------------------------------
 #
 # Off unless LANGSMITH_TRACING is explicitly truthy. Tracing ships the full
@@ -140,7 +151,7 @@ def get_vector_store():
         return None
     return Chroma(
         collection_name=get_collection_name(),
-        persist_directory=PERSIST_DIRECTORY,
+        persist_directory=get_persist_directory(),
         embedding_function=embedding_model,
     )
 
