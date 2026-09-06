@@ -14,6 +14,8 @@ from langchain_config import (
     clear_knowledge_base,
     search_knowledge_base,
     delete_knowledge_base_source,
+    build_run_config,
+    tracing_status,
 ) # Assuming these are correctly configured
 import time # Needed for a brief pause
 import logging
@@ -567,9 +569,11 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
             yield _sse({'type': 'error', 'content': 'Daily AI request quota exceeded.', 'error': 'daily_ai_quota_exceeded', 'limit': quota_result.limit})
             return
 
-        run_config = {}
-        if thread_user_id:
-            run_config["configurable"] = {"thread_id": thread_user_id}
+        # Metadata and tags ride on the runnable config, which is how LangChain
+        # gets them onto the LangSmith run. Attached unconditionally: a guest
+        # turn is still a run whose provider and model must be identifiable, and
+        # comparing qwen3:4b against Gemini needs every run labelled, not most.
+        run_config = build_run_config(thread_user_id)
 
         # Only the new turn goes in. The checkpointer replays the thread's earlier
         # messages, so passing history here as well would duplicate every turn.
@@ -717,6 +721,9 @@ def health():
         "embedding_provider": None,
         "collection": None,
         "llm_reachable": None,
+        # Whether prompts and retrieved document text are being shipped to
+        # LangSmith is an operational fact worth being able to check.
+        "tracing": tracing_status(),
     }
 
     # An endpoint whose job is to make misconfiguration visible must not 500 on
