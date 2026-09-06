@@ -45,6 +45,43 @@ class ModelConnectorTests(unittest.TestCase):
 
         self.assertNotEqual(google_name, ollama_name)
 
+    def test_google_embedding_model_spellings_share_one_collection(self):
+        """models/text-embedding-004 and text-embedding-004 are the same embedding
+        space. Two collection names for one space means a silent re-embed and
+        previously ingested documents becoming invisible."""
+        module = importlib.import_module("llm_model")
+
+        os.environ["EMBEDDING_PROVIDER"] = "google"
+        os.environ["GOOGLE_EMBED_MODEL"] = "models/text-embedding-004"
+        prefixed = module.get_collection_name()
+        os.environ["GOOGLE_EMBED_MODEL"] = "text-embedding-004"
+        bare = module.get_collection_name()
+
+        self.assertEqual(prefixed, bare)
+
+    def test_ollama_embedding_model_tag_spellings_share_one_collection(self):
+        """`ollama list` prints nomic-embed-text:latest; the bare name is the same
+        model. Both spellings must resolve to one collection."""
+        module = importlib.import_module("llm_model")
+
+        os.environ["EMBEDDING_PROVIDER"] = "ollama"
+        os.environ["OLLAMA_EMBED_MODEL"] = "nomic-embed-text"
+        bare = module.get_collection_name()
+        os.environ["OLLAMA_EMBED_MODEL"] = "nomic-embed-text:latest"
+        tagged = module.get_collection_name()
+
+        self.assertEqual(bare, tagged)
+
+    def test_descriptor_reports_the_spelling_handed_to_the_sdk(self):
+        """Normalisation belongs to the collection lookup only. The descriptor must
+        keep reporting what get_embedding_model() actually passes to the SDK."""
+        module = importlib.import_module("llm_model")
+
+        os.environ["EMBEDDING_PROVIDER"] = "google"
+        os.environ["GOOGLE_EMBED_MODEL"] = "text-embedding-004"
+
+        self.assertEqual(module.get_embedding_descriptor(), ("google", "text-embedding-004"))
+
     def test_unknown_provider_raises(self):
         os.environ["LLM_PROVIDER"] = "not-a-provider"
         module = importlib.import_module("llm_model")
