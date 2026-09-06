@@ -26,22 +26,39 @@ class FakeVectorStore:
 
 
 class RagIsolationTests(unittest.TestCase):
+    PINNED_ENV = ("GOOGLE_API_KEY", "EMBEDDING_PROVIDER")
+
     @classmethod
     def setUpClass(cls):
-        os.environ.pop("GOOGLE_API_KEY", None)
+        # Popping GOOGLE_API_KEY is not enough: any earlier test that imports app
+        # has run load_dotenv(), which repopulates it. Pin it to "" instead, and
+        # pin the provider so an ambient EMBEDDING_PROVIDER cannot make an
+        # unpatched call reach a live service. With both pinned, get_vector_store()
+        # returns None rather than opening Chroma.
+        cls.original_env = {name: os.environ.get(name) for name in cls.PINNED_ENV}
+        os.environ["GOOGLE_API_KEY"] = ""
+        os.environ["EMBEDDING_PROVIDER"] = "google"
         sys.modules.pop("langchain_config", None)
         cls.module = importlib.import_module("langchain_config")
 
+    @classmethod
+    def tearDownClass(cls):
+        for name, value in cls.original_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        sys.modules.pop("langchain_config", None)
+
     def setUp(self):
-        self.original_store = self.module.vector_store
-        self.original_embedding_model = self.module.embedding_model
+        # get_vector_store() is the seam now: every function looks it up on the
+        # module at call time, so replacing the attribute reaches all of them.
+        self.original_get_vector_store = self.module.get_vector_store
         self.store = FakeVectorStore()
-        self.module.vector_store = self.store
-        self.module.embedding_model = object()
+        self.module.get_vector_store = lambda: self.store
 
     def tearDown(self):
-        self.module.vector_store = self.original_store
-        self.module.embedding_model = self.original_embedding_model
+        self.module.get_vector_store = self.original_get_vector_store
 
     def test_retrievers_are_created_with_the_callers_user_filter(self):
         get_user_retriever = getattr(self.module, "get_user_retriever", None)

@@ -43,7 +43,7 @@ except ModuleNotFoundError:
     llm_ocr = None
 
 from llm_prompt import prompt as main_chat_prompt_template
-from llm_model import get_chat_model
+from llm_model import describe_configuration, get_chat_model
 from statistics_analysis import (
     ALLOWED_STATISTICS_EXTENSIONS,
     analyze_dataframe,
@@ -514,16 +514,55 @@ def documents_page():
 def cases_page():
     return render_template('cases.html')
 
+LLM_PROBE_TIMEOUT_SECONDS = 1.0
+
+
+def probe_llm_reachable():
+    """Is the local LLM server actually answering?
+
+    get_chat_model() builds a ChatOllama unconditionally -- no key, no
+    connection -- so llm_configured reports True with Ollama stopped. This is the
+    only field that can tell the difference. Opt-in via ?probe=llm, short timeout,
+    never raises. Returns None when reachability is not something we can answer:
+    the probe was not requested, or the provider is a hosted API we do not ping.
+    """
+    provider = os.getenv("LLM_PROVIDER", "ollama").strip().lower()
+    if provider != "ollama":
+        return None
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    try:
+        response = requests.get(f"{base_url}/api/tags", timeout=LLM_PROBE_TIMEOUT_SECONDS)
+        return response.ok
+    except Exception:
+        return False
+
+
 @app.route('/health', methods=['GET'])
 def health():
     llm_available = get_chat_model() is not None
-    return jsonify({
+    payload = {
         "status": "ok",
         "llm_configured": llm_available,
         "agent_configured": llm_available,
         "search_configured": bool(os.getenv("SERPAPI_API_KEY")),
         "google_oidc_configured": app.config["GOOGLE_OIDC_CONFIGURED"],
-    })
+        "llm_provider": None,
+        "embedding_provider": None,
+        "collection": None,
+        "llm_reachable": None,
+    }
+
+    # An endpoint whose job is to make misconfiguration visible must not 500 on
+    # misconfiguration: describe_configuration() raises on an unknown provider.
+    try:
+        payload.update(describe_configuration())
+    except Exception as error:
+        payload["configuration_error"] = str(error)
+
+    if request.args.get("probe") == "llm":
+        payload["llm_reachable"] = probe_llm_reachable()
+
+    return jsonify(payload)
 
 @app.route('/chat', methods=['GET', 'POST'])
 def chat():
