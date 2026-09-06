@@ -163,7 +163,7 @@ class AppContractTests(unittest.TestCase):
                     reserve_daily_quota(
                         self.app_module.get_db(), "guest_ip", guest_identity
                     )
-            self.app_module.build_agent = lambda user_id: object()
+            self.app_module.build_agent = lambda user_id, checkpointer=None: object()
 
             response = self.app_module.app.test_client().get("/chat?message=hello")
         finally:
