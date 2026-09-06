@@ -1,6 +1,7 @@
 import importlib
 import os
 import sys
+import tempfile
 import unittest
 
 
@@ -89,6 +90,29 @@ class RagIsolationTests(unittest.TestCase):
         self.assertTrue(all(chunk.metadata["user_id"] == "account-a" for chunk in self.store.added_documents))
         self.assertTrue(all(chunk.metadata["document_id"] == result["document_id"] for chunk in self.store.added_documents))
         self.assertTrue(all(chunk.metadata["ingested_at"] == result["ingested_at"] for chunk in self.store.added_documents))
+
+    def test_folder_ingestion_stamps_the_owner_so_the_chunks_are_retrievable(self):
+        """Every read path filters on user_id. Chunks ingested without one are
+        write-only: stored in Chroma and invisible to search and the retriever."""
+        with tempfile.TemporaryDirectory() as source_dir:
+            with open(os.path.join(source_dir, "note.txt"), "w", encoding="utf-8") as handle:
+                handle.write("PS_Agent drafts personal statements and reports.")
+            original_dir = os.environ.get("RAG_DOCUMENTS_DIR")
+            os.environ["RAG_DOCUMENTS_DIR"] = source_dir
+            try:
+                result = self.module.ingest_source_folder(user_id="account-a")
+            finally:
+                if original_dir is None:
+                    os.environ.pop("RAG_DOCUMENTS_DIR", None)
+                else:
+                    os.environ["RAG_DOCUMENTS_DIR"] = original_dir
+
+        self.assertTrue(result["ok"])
+        self.assertGreater(result["chunk_count"], 0)
+        self.assertTrue(self.store.added_documents)
+        self.assertTrue(
+            all(chunk.metadata.get("user_id") == "account-a" for chunk in self.store.added_documents)
+        )
 
 
 if __name__ == "__main__":
