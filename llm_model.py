@@ -75,6 +75,21 @@ def get_chat_model():
     raise ValueError(f"Unknown LLM_PROVIDER: {provider!r}")
 
 
+def get_chat_descriptor():
+    """(provider, model) for the active chat model, without constructing one.
+
+    Symmetric with get_embedding_descriptor(), and the reason tracing metadata
+    can name the model: provider alone does not identify a run, since qwen3:4b
+    and qwen3:8b are the same provider and a different experiment.
+    """
+    provider = _llm_provider()
+    if provider == "ollama":
+        return provider, os.getenv("OLLAMA_MODEL", "qwen3:4b")
+    if provider == "google":
+        return provider, os.getenv("GOOGLE_CHAT_MODEL", "gemini-2.0-flash")
+    raise ValueError(f"Unknown LLM_PROVIDER: {provider!r}")
+
+
 def get_embedding_model():
     """Return an embedding model, or None when the provider is not configured."""
     provider = _embedding_provider()

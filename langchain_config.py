@@ -2,7 +2,13 @@ from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from llm_model import get_chat_model, get_collection_name, get_embedding_model
+from llm_model import (
+    get_chat_descriptor,
+    get_chat_model,
+    get_collection_name,
+    get_embedding_descriptor,
+    get_embedding_model,
+)
 import json
 import os
 import re
@@ -16,6 +22,75 @@ from pydantic import BaseModel, Field
 # Define directories. Resolved at call time, never at import: importing this
 # module must not touch disk or construct a client.
 PERSIST_DIRECTORY = "./chroma_db"
+
+# --- LangSmith tracing ---------------------------------------------------
+#
+# Off unless LANGSMITH_TRACING is explicitly truthy. Tracing ships the full
+# prompt, the retrieved document text and the model's answer to LangSmith, and
+# this app holds users' personal statements -- so it is opt-in, per deployment,
+# and never the default.
+
+TRUTHY = ("1", "true", "yes", "on")
+
+
+def tracing_enabled():
+    """True only when tracing was deliberately switched on.
+
+    Empty string counts as off: .env.example ships `LANGSMITH_TRACING=` and
+    load_dotenv() puts that empty value into the environment, so a plain
+    presence check would enable tracing for anyone who copied the file.
+    """
+    return os.getenv("LANGSMITH_TRACING", "").strip().lower() in TRUTHY
+
+
+def tracing_status():
+    """What /health and startup logging can say without leaking the API key."""
+    return {
+        "enabled": tracing_enabled(),
+        "project": os.getenv("LANGSMITH_PROJECT", "") or "default",
+        "api_key_present": bool(os.getenv("LANGSMITH_API_KEY", "").strip()),
+    }
+
+
+def run_metadata(user_id=None):
+    """Metadata attached to every agent run, for LangSmith run comparison.
+
+    Provider and model are the whole point: a trace that does not say whether it
+    came from gemini-2.0-flash or qwen3:4b cannot answer the question this
+    migration exists to answer. Guests have no thread, so they are tagged
+    "guest" rather than dropped -- an untagged run is an unattributable run.
+    """
+    llm_provider, llm_model = get_chat_descriptor()
+    embedding_provider, embedding_model = get_embedding_descriptor()
+    return {
+        "thread_id": user_id or "guest",
+        "llm_provider": llm_provider,
+        "llm_model": llm_model,
+        "embedding_provider": embedding_provider,
+        "embedding_model": embedding_model,
+        "collection": get_collection_name(),
+    }
+
+
+def run_tags(user_id=None):
+    """Tags are what a LangSmith comparison view filters and groups on."""
+    llm_provider, llm_model = get_chat_descriptor()
+    return [f"provider:{llm_provider}", f"model:{llm_model}"]
+
+
+def build_run_config(user_id=None, extra=None):
+    """The runnable config for one agent run: thread, metadata and tags.
+
+    Built in one place so agent.stream() and any future agent.invoke() cannot
+    drift apart on what a run is tagged with.
+    """
+    config = {"metadata": run_metadata(user_id), "tags": run_tags(user_id)}
+    if user_id:
+        config["configurable"] = {"thread_id": user_id}
+    if extra:
+        config.update(extra)
+    return config
+
 
 
 def get_documents_dir():
