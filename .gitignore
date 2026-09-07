@@ -16,3 +16,9 @@ chroma_db/
 .ipynb_checkpoints/
 .vscode/
 .worktrees/
+
+# legal_rag data and env
+.venv/
+data/**
+!data/**/
+!data/**/.gitkeep
