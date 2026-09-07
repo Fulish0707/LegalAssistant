@@ -1,0 +1,5 @@
+# Ubuntu host with an RTX 4060. Ollama serves both the LLM and the embedder.
+embedding:
+  model: bge-m3
+llm:
+  model: qwen3:4b

@@ -1,0 +1,64 @@
+# Every setting with its safe local default. Profiles (local.yaml, colab.yaml)
+# override sections; environment variables LEGAL_RAG__SECTION__KEY override both.
+# Secrets (qdrant.api_key) are environment-only and rejected here.
+
+paths:
+  root: .
+  raw_dir: data/raw
+  processed_dir: data/processed
+  index_dir: data/indexes
+  eval_dir: data/eval
+
+corpus:
+  version: v1
+
+embedding:
+  backend: ollama          # ollama | fake
+  model: bge-m3            # Korean-capable dense model served by Ollama
+  base_url: http://localhost:11434
+  batch_size: 16
+  fake_dimension: 64
+
+sparse:
+  tokenizer: regex         # regex | kiwi (requires the `kiwi` extra)
+  k1: 1.2
+  b: 0.75
+
+qdrant:
+  mode: embedded           # embedded | server
+  url: http://localhost:6333
+
+retrieval:
+  k_dense: 20
+  k_sparse: 20
+  k_fused: 20
+  k_final: 5
+  rrf_k: 60
+  dense_weight: 1.0
+  sparse_weight: 1.0
+
+rerank:
+  backend: noop            # noop | cross_encoder (requires the `rerank` extra)
+  model: BAAI/bge-reranker-v2-m3
+  device: cpu
+
+llm:
+  backend: ollama          # ollama | fake | transformers (V0.4)
+  model: qwen3:4b
+  base_url: http://localhost:11434
+  temperature: 0.2
+  max_tokens: 1024
+
+rag:
+  allow_clarification: true
+  llm_rewrite: false
+  history_turns: 4
+  max_regenerations: 1
+  max_evidence_chars: 1500
+
+api:
+  host: 127.0.0.1
+  port: 8000
+
+trace:
+  include_text: false
