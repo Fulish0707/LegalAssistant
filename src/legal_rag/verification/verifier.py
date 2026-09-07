@@ -2,14 +2,28 @@
 
 from __future__ import annotations
 
+from typing import Iterable
+
 from legal_rag.schemas import Evidence, EvidenceBundle, LegalAnswer, VerificationIssue, VerificationReport
 
 from .citations import answer_text, extract_case_refs, extract_statute_refs
 
 
 class Verifier:
-    def verify(self, answer: LegalAnswer, bundle: EvidenceBundle) -> VerificationReport:
+    def verify(self, answer: LegalAnswer, bundle: EvidenceBundle, *, user_refs: Iterable[str] = ()) -> VerificationReport:
+        """Check every authority the answer asserts against the evidence bundle.
+
+        ``user_refs`` are statute or case references the user wrote in their own question.
+        Repeating one of those (for example to say it could not be confirmed) is not
+        fabrication, so they are exempt from the not-in-evidence checks. Citing one with a
+        source id is still verified against that block.
+        """
         by_id = bundle.by_id()
+        exempt: set[str] = set()
+        for user_ref in user_refs:
+            exempt.add(user_ref)
+            exempt.update(ref.article for ref in extract_statute_refs(user_ref))
+            exempt.update(extract_case_refs(user_ref))
         evidence_statutes: set[str] = set()
         evidence_cases: set[str] = set()
         for item in bundle.items:
@@ -36,10 +50,14 @@ class Verifier:
         text = answer_text(answer)
         statute_refs = extract_statute_refs(text)
         for ref in statute_refs:
+            if ref.render() in exempt or ref.article in exempt:
+                continue
             if ref.render() not in evidence_statutes and ref.article not in evidence_statutes:
                 issues.append(VerificationIssue(kind="statute_not_in_evidence", detail=ref.render()))
         case_refs = extract_case_refs(text)
         for case in case_refs:
+            if case in exempt:
+                continue
             if case not in evidence_cases:
                 issues.append(VerificationIssue(kind="case_not_in_evidence", detail=case))
 

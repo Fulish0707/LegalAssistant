@@ -8,7 +8,7 @@ from legal_rag.config import Settings
 from legal_rag.llm import ChatModel
 from legal_rag.retrieval.hybrid import HybridRetriever, Retriever
 from legal_rag.schemas import ChatResponse, LegalAnswer, Turn, VerificationAction, VerificationReport
-from legal_rag.verification import VerificationPolicy, Verifier
+from legal_rag.verification import VerificationPolicy, Verifier, backfill_citations
 
 from .analyzer import QueryAnalyzer
 from .clarify import ClarificationPolicy
@@ -110,7 +110,8 @@ class Orchestrator:
             with recorder.stage(f"generate[{attempt}]"):
                 answer = self.generator.generate(message, bundle, feedback=feedback)
             with recorder.stage(f"verify[{attempt}]"):
-                report = self.verifier.verify(answer, bundle)
+                answer = backfill_citations(answer, bundle)
+                report = self.verifier.verify(answer, bundle, user_refs=[*analysis.statute_refs, *analysis.case_refs])
             action = self.policy.decide(report, attempt)
             if action != VerificationAction.regenerate:
                 break
