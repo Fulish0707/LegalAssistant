@@ -1,25 +1,33 @@
+from dotenv import load_dotenv
+
+# Load environment variables before importing project modules: library modules no
+# longer call load_dotenv() themselves.
+load_dotenv()
+
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context, g, session
 from langchain_config import (
+    AgentContext,
     build_agent,
+    extract_agent_sections,
     ingest_text_to_vector_store,
     get_knowledge_base_status,
     clear_knowledge_base,
     search_knowledge_base,
     delete_knowledge_base_source,
+    build_run_config,
+    tracing_status,
 ) # Assuming these are correctly configured
 import time # Needed for a brief pause
 import logging
 import sqlite3
 import json
-import queue
 import re # Added for cleaning output
-from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 import os
 import sys
 import secrets
 from werkzeug.utils import secure_filename
 import tempfile
-from dotenv import load_dotenv
 import requests
 import auth
 from quota import (
@@ -30,8 +38,6 @@ from quota import (
     reserve_daily_quota,
 )
 
-# Load environment variables
-load_dotenv()
 
 # Assuming llm_ocr.py is in the same directory or accessible via PYTHONPATH
 try:
@@ -39,10 +45,8 @@ try:
 except ModuleNotFoundError:
     llm_ocr = None
 
-# Assuming the main prompt template and llm model can be accessed
-# This might require adjustments if langchain_config doesn't expose llm directly
 from llm_prompt import prompt as main_chat_prompt_template
-from langchain_config import llm # TRYING TO IMPORT LLM DIRECTLY
+from llm_model import describe_configuration, get_chat_model
 from statistics_analysis import (
     ALLOWED_STATISTICS_EXTENSIONS,
     analyze_dataframe,
@@ -98,6 +102,36 @@ DB_FILE = os.getenv("APP_STATE_DB", "sqlite_db/app_state.db") # Define DB_FILE b
 db_dir = os.path.dirname(DB_FILE)
 if db_dir:
     os.makedirs(db_dir, exist_ok=True)
+
+# The agent's working state, kept deliberately apart from DB_FILE's chat_history
+# table. chat_history is the display record the UI renders; this is what the agent
+# actually reasons over between turns. Unifying them would mean the renderer and
+# the model share one schema, and they do not: the checkpointer stores tool calls,
+# tool results and structured-output messages the UI never shows.
+CHECKPOINT_DB_FILE = os.getenv("AGENT_CHECKPOINT_DB", "sqlite_db/checkpoints.db")
+checkpoint_db_dir = os.path.dirname(CHECKPOINT_DB_FILE)
+if checkpoint_db_dir:
+    os.makedirs(checkpoint_db_dir, exist_ok=True)
+
+
+def build_checkpointer():
+    """One long-lived SqliteSaver over one connection, shared by every request.
+
+    Not SqliteSaver.from_conn_string(): that is a context manager which closes the
+    connection on exit, which is right for a test and wrong for a process that must
+    keep it open. check_same_thread=False is not optional either -- Flask runs the
+    streaming generator on a different thread from the one that opens this
+    connection, and without it the first streamed request raises a thread-affinity
+    error from sqlite3.
+    """
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    connection = sqlite3.connect(CHECKPOINT_DB_FILE, check_same_thread=False)
+    connection.execute("PRAGMA busy_timeout = 5000")
+    return SqliteSaver(connection)
+
+
+CHECKPOINTER = build_checkpointer()
 
 def ensure_database_schema(conn):
     cursor = conn.cursor()
@@ -322,155 +356,294 @@ def parse_agent_output_sections(text_content):
         "report_suggestion": parsed["REPORT_SUGGESTION"].strip(),
     }
 
-# --- Langchain Callback Handler ---
-class StreamingCallbackHandler(BaseCallbackHandler):
-    def __init__(self, queue):
-        self.queue = queue
+# --- Streaming helpers ---
 
-    def on_llm_new_token(self, token: str, **kwargs) -> None:
-        self.queue.put({"type": "token", "content": token})
+DRAFT_CONTEXT_HEADER = "[Current Draft Context]"
 
-    def on_llm_end(self, *args, **kwargs) -> None:
-        self.queue.put({"type": "llm_end"}) # Signal end of LLM token stream
+_THINK_OPEN = "<think>"
+_THINK_CLOSE = "</think>"
 
-    def on_agent_action(self, action, **kwargs) -> None:
-        log_text = ""
-        if hasattr(action, 'log') and action.log:
-            log_text = action.log.strip()
 
-        thought_message = ""
-        # Simplified thought message generation for brevity, original logic was fine
-        if log_text:
-            thought_message = f"Thought:\n{log_text}"
-        elif action.tool:
-            thought_message = f"Thought: Decided to use tool.\nAction: {action.tool}"
-            tool_input_str = str(action.tool_input) if action.tool_input is not None else ""
-            if tool_input_str.strip():
-                thought_message += f"\nAction Input: {tool_input_str}"
-        else:
-            thought_message = "Thought: (Agent is processing an action)"
-        
-        cleaned_thought_message = clean_agent_output(thought_message)
-        self.queue.put({"type": "thought", "content": cleaned_thought_message})
+def _message_text(content):
+    """Normalise a message's content to a plain string.
 
-    def on_tool_end(self, output: str, **kwargs) -> None:
-        cleaned_output = clean_agent_output(output) # Clean the full output first
-        max_len = 200
-        tool_output_display = cleaned_output[:max_len] + "..." if len(cleaned_output) > max_len else cleaned_output
-        self.queue.put({"type": "thought", "content": f"Tool Output: {tool_output_display}"})
+    ChatOllama with reasoning enabled can hand back a list of content blocks
+    rather than a str; json.dumps-ing that straight to the browser arrives as
+    "[object Object]" because the frontend does `streamed += data.content`. Only
+    text blocks are visible answer; reasoning blocks are dropped here.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text") or "")
+        return "".join(parts)
+    return ""
 
-    def on_chain_start(self, serialized, inputs, **kwargs) -> None:
-        chain_name = "Unknown Chain"
-        if serialized: # Check if serialized is not None
-            chain_name = serialized.get("name", serialized.get("id", ["Unknown Chain"])[-1])
-        
-        # Only log certain chain types to avoid too much noise, or adjust as needed
-        if chain_name and "AgentExecutor" not in chain_name and "RunnableSequence" not in chain_name and "LLMChain" not in chain_name:
-            self.queue.put({"type": "thought", "content": f"Starting sub-chain: {chain_name}"})
 
-    def on_agent_finish(self, finish, **kwargs) -> None:
-        if hasattr(finish, 'log') and finish.log:
-            final_thought_log = finish.log.strip()
-            if "Final Answer:" in final_thought_log:
-                final_thought_log = final_thought_log.split("Final Answer:", 1)[0].strip()
-            
-            if final_thought_log: # Only send if there's content
-                cleaned_final_thought = clean_agent_output(f"Final thoughts:\n{final_thought_log}")
-                if cleaned_final_thought.startswith("Final thoughts:\n"): # Ensure prefix isn't stripped if content becomes empty
-                    cleaned_final_thought_content = cleaned_final_thought[len("Final thoughts:\n"):].strip()
-                    if cleaned_final_thought_content: # Only send if there's actual thought content left
-                         self.queue.put({"type": "thought", "content": f"Final thoughts:\n{cleaned_final_thought_content}"})
-                    # else: don't send "Final thoughts:" if there's nothing after cleaning
-                elif cleaned_final_thought.strip(): # If "Final thoughts:" was stripped but other content remains
-                    self.queue.put({"type": "thought", "content": cleaned_final_thought})
+def _tail_prefix_length(text, tag):
+    """Length of the longest suffix of text that is a proper prefix of tag."""
+    for size in range(min(len(text), len(tag) - 1), 0, -1):
+        if text.endswith(tag[:size]):
+            return size
+    return 0
 
-        # self.queue.put({"type": "agent_end"})
+
+class _AnswerTokenFilter:
+    """Decide once, per model call, whether a message stream is visible answer.
+
+    Two things must never reach the browser as answer tokens. Reasoning, which
+    qwen3 emits inline as <think>...</think>, is stripped wherever it appears.
+    And the response_format schema JSON: a 4B rarely routes the answer through
+    the structured-output tool call, so the final message content *is* the JSON,
+    and the old token callback streamed `"job_statement_suggestion"` and `"}"`
+    to users verbatim.
+
+    The gate is deliberately decide-once rather than an incremental JSON parser.
+    The frontend overwrites the streamed text with final_response.chat_response
+    anyway, so a partial-JSON extractor would buy progressive reveal at the cost
+    of a new class of leak (escapes, keys split across chunks, braces inside a
+    value). Here the first non-whitespace character settles it: `{` or a code
+    fence means structured output, and nothing from that message is streamed.
+    The sections still arrive, once, in final_response.
+    """
+
+    def __init__(self):
+        self._pending = ""
+        self._in_think = False
+        self._decided = False
+        self._suppressed = False
+        self._head = ""
+
+    def feed(self, text):
+        if not text:
+            return ""
+        self._pending += text
+        visible = []
+        while self._pending:
+            if self._in_think:
+                index = self._pending.find(_THINK_CLOSE)
+                if index == -1:
+                    keep = _tail_prefix_length(self._pending, _THINK_CLOSE)
+                    self._pending = self._pending[len(self._pending) - keep:] if keep else ""
+                    break
+                self._pending = self._pending[index + len(_THINK_CLOSE):]
+                self._in_think = False
+                continue
+            index = self._pending.find(_THINK_OPEN)
+            if index == -1:
+                keep = _tail_prefix_length(self._pending, _THINK_OPEN)
+                cut = len(self._pending) - keep
+                if cut:
+                    visible.append(self._pending[:cut])
+                self._pending = self._pending[cut:]
+                break
+            visible.append(self._pending[:index])
+            self._pending = self._pending[index + len(_THINK_OPEN):]
+            self._in_think = True
+        return self._gate("".join(visible))
+
+    def flush(self):
+        """Emit whatever was held back waiting on a possible tag boundary."""
+        if self._in_think:
+            self._pending = ""
+            return ""
+        remainder, self._pending = self._pending, ""
+        return self._gate(remainder)
+
+    def _gate(self, text):
+        if self._suppressed or not text:
+            return ""
+        if self._decided:
+            return text
+        self._head += text
+        stripped = self._head.lstrip()
+        if not stripped:
+            return ""
+        if stripped[0] in "{`":
+            self._suppressed = True
+            self._head = ""
+            return ""
+        self._decided = True
+        emitted, self._head = self._head, ""
+        return emitted
+
+
+def _tool_activity(node, update):
+    """One short trace line per tool result, mirroring the old on_tool_end.
+
+    The frontend shows only the newest trace line while a turn is in flight, and
+    the surrounding UI is Korean, so these are written for a reader rather than
+    emitted as raw node names.
+    """
+    lines = []
+    messages = (update or {}).get("messages") if isinstance(update, dict) else None
+    for message in messages or []:
+        if not isinstance(message, ToolMessage):
+            continue
+        output = clean_agent_output(_message_text(message.content))
+        if len(output) > 200:
+            output = output[:200] + "..."
+        name = getattr(message, "name", None) or "tool"
+        lines.append(f"도구 결과 ({name}): {output}" if output else f"도구 실행: {name}")
+    if lines:
+        return lines
+    return ["답변 생성 중" if node == "model" else f"단계: {node}"]
+
+
+def _draft_is_already_in_thread(agent, run_config, draft):
+    """True when the thread's last user turn already carried this exact draft.
+
+    The draft used to be appended to every user message. That was harmless while
+    turns were stateless, but the thread is persisted now, so turn N carried N
+    copies of the draft into a 4B's context window. The fix keeps the draft in
+    the message (the model needs it inline; the system prompt is static and the
+    typed context is not interpolated into it) but sends it only when it changed.
+
+    The thread itself is the source of truth, not a process-local cache: multiple
+    workers would each hold a different one. Guests have no checkpointer, so
+    nothing accumulates for them and get_state has nothing to read -- they always
+    get the draft.
+    """
+    if not draft:
+        return True
+    if "thread_id" not in (run_config.get("configurable") or {}):
+        return False
+    try:
+        state = agent.get_state(run_config)
+    except Exception:
+        logging.debug("Could not read thread state for draft de-duplication", exc_info=True)
+        return False
+    messages = (getattr(state, "values", None) or {}).get("messages") or []
+    # Scan back to the most recent turn that actually carried a draft, not merely
+    # the most recent user turn: once a draft is skipped, the latest user message
+    # has no draft in it, and comparing against that would re-send on every other
+    # turn -- half-rate accumulation is still accumulation.
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            content = _message_text(message.content)
+            if DRAFT_CONTEXT_HEADER in content:
+                carried = content.split(DRAFT_CONTEXT_HEADER, 1)[1].strip()
+                return carried == draft.strip()
+    return False
+
+
+def _sse(payload):
+    return f"data: {json.dumps(payload)}\n\n"
 
 
 # --- Flask Routes ---
 
 def _generate_agent_response_stream(user_input, current_personal_statement_draft):
+    """Stream a chat turn as SSE events from the LangGraph agent's own stream.
+
+    The old producer pushed AgentExecutor callbacks (on_agent_action,
+    on_tool_end, on_agent_finish) into a queue. Those callbacks never fire under
+    create_agent, and the drain loop also broke on the first on_llm_end, which in
+    a tool loop discarded the final turn. Iterating agent.stream() to exhaustion
+    replaces both.
     """
-    Helper function to generate agent response stream.
-    This function contains the core logic previously in the nested generate_response_stream.
-    """
-    full_streamed_llm_output = ""
     try:
-        agent = build_agent(auth.get_current_user_id())
+        # thread_id is the authenticated account id and nothing else. A guest's only
+        # identity is a random token in a signed cookie, with no lifecycle, no
+        # deletion path and no owner to attribute the stored turns to, so guests get
+        # no checkpointer and no thread: they are stateless between turns, exactly
+        # as their chat history already is (add_chat_message_to_db is
+        # authenticated-only). That also makes it impossible for two guests, or a
+        # guest and an account, to land in one thread.
+        thread_user_id = auth.get_current_user_id()
+        agent = build_agent(
+            thread_user_id,
+            checkpointer=CHECKPOINTER if thread_user_id else None,
+        )
         if agent is None:
-            yield f"data: {json.dumps({'type': 'error', 'content': 'AI chat is not configured. Set GOOGLE_API_KEY in .env and restart the app.'})}\n\n"
+            yield _sse({'type': 'error', 'content': 'AI chat is not configured. Set LLM_PROVIDER and start Ollama, then restart the app.'})
             return
 
         quota_result = reserve_ai_request()
         if not quota_result.allowed:
-            yield f"data: {json.dumps({'type': 'error', 'content': 'Daily AI request quota exceeded.', 'error': 'daily_ai_quota_exceeded', 'limit': quota_result.limit})}\n\n"
+            yield _sse({'type': 'error', 'content': 'Daily AI request quota exceeded.', 'error': 'daily_ai_quota_exceeded', 'limit': quota_result.limit})
             return
 
-        q = queue.Queue()
-        streaming_handler = StreamingCallbackHandler(q)
+        # Metadata and tags ride on the runnable config, which is how LangChain
+        # gets them onto the LangSmith run. Attached unconditionally: a guest
+        # turn is still a run whose provider and model must be identifiable, and
+        # comparing qwen3:4b against Gemini needs every run labelled, not most.
+        run_config = build_run_config(thread_user_id)
 
-        agent_input_payload = {
-            "input": user_input,
-        }
-        if current_personal_statement_draft:
-            agent_input_payload["input"] += f"\n\n[Current Draft Context]\n{current_personal_statement_draft}"
+        # Only the new turn goes in. The checkpointer replays the thread's earlier
+        # messages, so passing history here as well would duplicate every turn.
+        agent_prompt = user_input
+        if current_personal_statement_draft and not _draft_is_already_in_thread(
+            agent, run_config, current_personal_statement_draft
+        ):
+            agent_prompt += f"\n\n{DRAFT_CONTEXT_HEADER}\n{current_personal_statement_draft}"
 
-        # Run agent.invoke in a separate thread to allow the queue to be processed concurrently.
-        # This is a common pattern for integrating synchronous Langchain calls with Flask streaming.
-        # However, for simplicity and given the current structure, we'll keep it synchronous
-        # within this generator function. The `stream_with_context` handles the yielding.
-        # If true non-blocking for other requests is needed, agent.invoke would need to be
-        # offloaded to a thread pool executor.
+        final_state = None
+        filters = {}
+        buffer = ""
+        for mode, chunk in agent.stream(
+            {"messages": [("user", agent_prompt)]},
+            run_config,
+            context=AgentContext(user_id=thread_user_id),
+            stream_mode=["messages", "updates", "values"],
+        ):
+            if mode == "messages":
+                message = chunk[0] if isinstance(chunk, tuple) else chunk
+                # ToolMessages ride this same channel; RAG hits are trace, not answer.
+                if not isinstance(message, AIMessage):
+                    if isinstance(message, ToolMessage):
+                        # A tool result always separates two model calls, so it is a
+                        # safe place to retire the per-call filters. Verified that
+                        # ChatOllama gives each call a distinct chunk id, but this
+                        # keeps the id-less fallback key from being shared across
+                        # calls, which would let prose in call 1 open the gate for
+                        # the schema JSON in call 2.
+                        for retired in filters.values():
+                            buffer += retired.flush()
+                        filters.clear()
+                    continue
+                key = getattr(message, "id", None) or "default"
+                token_filter = filters.get(key)
+                if token_filter is None:
+                    token_filter = filters[key] = _AnswerTokenFilter()
+                visible = token_filter.feed(_message_text(getattr(message, "content", "")))
+                if visible:
+                    buffer += visible
+                    if len(buffer) >= 20 or any(p in visible for p in ('.', '!', '?', '\n', ' ')):
+                        yield _sse({'type': 'token_chunk', 'content': buffer})
+                        buffer = ""
+            elif mode == "updates":
+                for node, update in (chunk or {}).items():
+                    for line in _tool_activity(node, update):
+                        yield _sse({'type': 'thought', 'content': line})
+            elif mode == "values":
+                final_state = chunk
 
-        agent_response_obj = agent.invoke(
-            agent_input_payload,
-            {"callbacks": [streaming_handler]}
-        )
+        for token_filter in filters.values():
+            buffer += token_filter.flush()
+        if buffer:
+            yield _sse({'type': 'token_chunk', 'content': buffer})
 
-        llm_token_buffer = ""
-        while True:
-            try:
-                event_data = q.get(timeout=10)
-            except queue.Empty:
-                print("Warning: Queue empty on get. Agent might have finished or stalled.")
-                break
-
-            if event_data.get("type") == "token":
-                token_content = event_data["content"]
-                full_streamed_llm_output += token_content
-                llm_token_buffer += token_content
-                if len(llm_token_buffer) >= 20 or any(p in token_content for p in ['.', '!', '?', '\n', ' ']):
-                    if llm_token_buffer:
-                        yield f"data: {json.dumps({'type': 'token_chunk', 'content': llm_token_buffer})}\n\n"
-                        llm_token_buffer = ""
-            elif event_data.get("type") == "thought":
-                yield f"data: {json.dumps({'type': 'thought', 'content': event_data['content']})}\n\n"
-            elif event_data.get("type") == "llm_end":
-                if llm_token_buffer:
-                    yield f"data: {json.dumps({'type': 'token_chunk', 'content': llm_token_buffer})}\n\n"
-                    llm_token_buffer = ""
-                break 
-        
-        if llm_token_buffer: # Final flush
-            yield f"data: {json.dumps({'type': 'token_chunk', 'content': llm_token_buffer})}\n\n"
-
-        agent_output_string = agent_response_obj.get("output", "")
-        # Clean the final agent output string
-        cleaned_agent_output_string = clean_agent_output(agent_output_string)
-        
-        parsed_sections = parse_agent_output_sections(cleaned_agent_output_string)
+        # Preferred route: the schema-enforced sections, from structured_response
+        # (Gemini) or from JSON in the final message content (qwen3:4b). Falls back
+        # to the legacy [CHAT] marker parser when neither is available.
+        parsed_sections = extract_agent_sections(final_state)
+        if parsed_sections is None:
+            messages = (final_state or {}).get("messages") or []
+            agent_output_string = getattr(messages[-1], "content", "") if messages else ""
+            cleaned_agent_output_string = clean_agent_output(_message_text(agent_output_string))
+            parsed_sections = parse_agent_output_sections(cleaned_agent_output_string)
+            if not agent_output_string:
+                print(f"Warning: Agent returned no final message. Full response object: {final_state}")
+            elif not cleaned_agent_output_string:
+                print(f"Warning: Agent output became empty after cleaning. Original: '{agent_output_string}'")
         parsed_chat_response = parsed_sections["chat_response"] if parsed_sections["chat_response"] else "Sorry, I couldn't generate a response."
-        if not agent_output_string: # Log warning based on original output
-             print(f"Warning: Agent returned an empty 'output'. Full response object: {agent_response_obj}")
-        elif not cleaned_agent_output_string and agent_output_string: # Log if cleaning resulted in empty
-             print(f"Warning: Agent output became empty after cleaning. Original: '{agent_output_string}'")
 
-
-        # Save assistant message and update Langchain memory
-        # This needs to be done carefully. If called from GET, user_input might not be in DB yet
-        # if POST hasn't completed or if GET is called directly.
-        # For now, we assume POST has added the user message.
-        # A more robust solution might involve session management or passing a request ID.
         authenticated_user_id = auth.get_current_user_id()
         if authenticated_user_id:
             add_chat_message_to_db(authenticated_user_id, "assistant", parsed_chat_response)
@@ -483,18 +656,17 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
             "report_suggestion": parsed_sections["report_suggestion"],
             "current_draft_processed": current_personal_statement_draft
         }
-        yield f"data: {json.dumps(final_data)}\n\n"
+        yield _sse(final_data)
 
     except Exception as e:
         logging.exception("Error during AI processing stream (_generate_agent_response_stream)")
         error_response_content = "An error occurred while processing your request. Please check server logs."
-        # Potentially add error to DB here as well, associated with the user_input from GET
         authenticated_user_id = auth.get_current_user_id()
         if authenticated_user_id:
             add_chat_message_to_db(authenticated_user_id, "assistant", error_response_content)
-        yield f"data: {json.dumps({'type': 'error', 'content': error_response_content})}\n\n"
+        yield _sse({'type': 'error', 'content': error_response_content})
     finally:
-        yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
+        yield _sse({'type': 'stream_end'})
 
 
 @app.route('/')
@@ -513,15 +685,57 @@ def documents_page():
 def cases_page():
     return render_template('cases.html')
 
+LLM_PROBE_TIMEOUT_SECONDS = 1.0
+
+
+def probe_llm_reachable():
+    """Is the local LLM server actually answering?
+
+    get_chat_model() builds a ChatOllama unconditionally -- no key, no
+    connection -- so llm_configured reports True with Ollama stopped. This is the
+    only field that can tell the difference. Opt-in via ?probe=llm, short timeout,
+    never raises. Returns None when reachability is not something we can answer:
+    the probe was not requested, or the provider is a hosted API we do not ping.
+    """
+    provider = os.getenv("LLM_PROVIDER", "ollama").strip().lower()
+    if provider != "ollama":
+        return None
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    try:
+        response = requests.get(f"{base_url}/api/tags", timeout=LLM_PROBE_TIMEOUT_SECONDS)
+        return response.ok
+    except Exception:
+        return False
+
+
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({
+    llm_available = get_chat_model() is not None
+    payload = {
         "status": "ok",
-        "llm_configured": llm is not None,
-        "agent_configured": llm is not None,
-        "search_configured": bool(os.getenv("SERPAPI_API_KEY")),
+        "llm_configured": llm_available,
+        "agent_configured": llm_available,
         "google_oidc_configured": app.config["GOOGLE_OIDC_CONFIGURED"],
-    })
+        "llm_provider": None,
+        "embedding_provider": None,
+        "collection": None,
+        "llm_reachable": None,
+        # Whether prompts and retrieved document text are being shipped to
+        # LangSmith is an operational fact worth being able to check.
+        "tracing": tracing_status(),
+    }
+
+    # An endpoint whose job is to make misconfiguration visible must not 500 on
+    # misconfiguration: describe_configuration() raises on an unknown provider.
+    try:
+        payload.update(describe_configuration())
+    except Exception as error:
+        payload["configuration_error"] = str(error)
+
+    if request.args.get("probe") == "llm":
+        payload["llm_reachable"] = probe_llm_reachable()
+
+    return jsonify(payload)
 
 @app.route('/chat', methods=['GET', 'POST'])
 def chat():
@@ -620,12 +834,28 @@ def get_similar_chats_route(): # Renamed to avoid conflict with internal var
     return jsonify({"similar_chats": similar_chats})
 
 
+def clear_agent_thread(user_id):
+    """Drop the agent's checkpointed thread when the display history is cleared.
+
+    These two stores are separate, but a user clearing their history means one
+    thing, not two: a user who clears the transcript and then finds the agent still
+    quoting it back would call that a bug, correctly. Failures here are logged and
+    swallowed -- clearing the record the user can see is this endpoint's job, and it
+    must not 500 because the checkpoint store is unhappy.
+    """
+    try:
+        CHECKPOINTER.delete_thread(user_id)
+    except Exception as error:
+        logging.warning(f"Could not clear the agent thread for {user_id}: {error}")
+
+
 @app.route('/clear_chat_history_endpoint', methods=['POST']) # Added specific endpoint name
 def clear_chat_history_endpoint():
     try:
         authenticated_user_id = auth.get_current_user_id()
         if authenticated_user_id:
             clear_chat_history_in_db(authenticated_user_id)
+            clear_agent_thread(authenticated_user_id)
         return jsonify({"message": "Chat history cleared successfully."}), 200
     except Exception as e:
         logging.error(f"Error clearing chat history: {e}")
@@ -720,6 +950,7 @@ def analyze_statistics_route():
         dataframe = load_table(temp_file_path, file_extension)
         analysis = analyze_dataframe(dataframe)
 
+        llm = get_chat_model()
         ai_insight = None
         if llm is not None:
             prompt_text = build_ai_statistics_prompt(filename, analysis, user_question)
@@ -774,9 +1005,10 @@ def process_document_ocr():
         return jsonify({
             "error": "OCR processing requires optional OCR dependencies such as pytesseract."
         }), 503
+    llm = get_chat_model()
     if llm is None:
         return jsonify({
-            "error": "Document analysis requires GOOGLE_API_KEY to be configured in .env."
+            "error": "Document analysis requires an LLM provider to be configured."
         }), 503
 
     if 'file' not in request.files:

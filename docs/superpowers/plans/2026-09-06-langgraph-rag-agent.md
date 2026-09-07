@@ -12,13 +12,15 @@
 
 ---
 
-## Base branch — read before Task 1
+## Base branch — resolved
 
-This plan builds on `feat/google-oidc-user-foundation` (worktree at `.worktrees/google-oidc-user-foundation`, HEAD `ce75d49`), **not `main`**. That branch already replaced the process-global retriever with `build_agent(user_id)` / `build_rag_tool(user_id)` factories, and this plan extends those factories rather than recreating them.
+This plan runs on `feat/langgraph-rag-agent`, branched from `main` at `cb6f629`,
+which merged `feat/google-oidc-user-foundation`. Main now carries both halves this
+plan needs: `auth.py` and the `build_agent(user_id)` factories from the OIDC branch,
+and the `static/lc-*.js` shell that Task 7 targets. Nothing further is needed here.
 
-If that branch is not going to merge soon, stop and rebase this plan onto `main` first — Tasks 5 and 6 assume the factory boundaries exist.
-
-That branch's `requirements.txt` is unpinned and stale against main's pinning work. **Resolve every `requirements.txt` conflict toward main's pinned versions.**
+Audio processing stays removed, per main's `4956524`. Do not reintroduce `llm_stt.py`
+or the `/transcribe_*` routes.
 
 ## Baseline — verify before starting
 
@@ -26,7 +28,9 @@ That branch's `requirements.txt` is unpinned and stale against main's pinning wo
 python -m pytest tests/ -q
 ```
 
-Expected on `main` today: `5 failed, 5 passed`. All five failures come from `load_dotenv()` running at import in `llm_model.py`, which restores `GOOGLE_API_KEY` after the tests deliberately remove it. **Task 2 is what turns them green.** Do not treat them as pre-existing noise to ignore — they are the acceptance signal.
+Expected on this branch today: `3 failed, 39 passed`. All three failures come from `load_dotenv()` running at import in `llm_model.py` and `langchain_config.py`, which restores `GOOGLE_API_KEY` after the tests deliberately remove it. **Task 2 is what turns them green.** Do not treat them as pre-existing noise to ignore — they are the acceptance signal.
+
+Note how this defect hid: the OIDC branch's suite looked fully green only because that worktree's `.env` held an empty `GOOGLE_API_KEY`. A blank key made the "unconfigured" path taken by accident. Verify against a real key.
 
 ---
 
@@ -41,7 +45,7 @@ Expected on `main` today: `5 failed, 5 passed`. All five failures come from `loa
 pip show langgraph langsmith langchain-ollama langgraph-checkpoint-sqlite 2>&1 | grep -E "^(Name|Version)|WARNING"
 ```
 
-Expected: `langgraph 1.2.11`, `langsmith 0.11.0`, `langchain-ollama 1.1.0` present; `langgraph-checkpoint-sqlite` **not found**.
+Expected: `langgraph 1.2.11`, `langsmith 0.11.0`, `langchain-ollama 1.1.0` present; `langgraph-checkpoint-sqlite` **not found**. (`Authlib==1.8.0` and `pypdf==6.16.2` were already pinned and installed during the OIDC merge.)
 
 **Step 2: Install the missing checkpointer**
 

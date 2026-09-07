@@ -87,7 +87,7 @@ LC.DOCS = []; /* /knowledge_base/status 로부터 채워짐 (lc-shell.js LC.sync
 LC.TRACE_FALLBACK = [
   "질의 임베딩 생성",
   "지식베이스 검색 → 상위 청크",
-  "도구 선택: RAG Retriever",
+  "도구 선택: search_documents",
   "업로드 문서 조항 대조",
   "최종 답변 생성"
 ];

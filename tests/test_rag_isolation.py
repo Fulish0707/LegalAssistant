@@ -1,6 +1,7 @@
 import importlib
 import os
 import sys
+import tempfile
 import unittest
 
 
@@ -26,22 +27,37 @@ class FakeVectorStore:
 
 
 class RagIsolationTests(unittest.TestCase):
+    PINNED_ENV = ("EMBEDDING_PROVIDER",)
+
     @classmethod
     def setUpClass(cls):
-        os.environ.pop("GOOGLE_API_KEY", None)
+        # Pin EMBEDDING_PROVIDER so an ambient value cannot make an unpatched
+        # call reach a live service. Setting it here (rather than trusting the
+        # default) also survives app.py's load_dotenv(), which repopulates the
+        # environment from .env partway through the suite.
+        cls.original_env = {name: os.environ.get(name) for name in cls.PINNED_ENV}
+        os.environ["EMBEDDING_PROVIDER"] = "ollama"
         sys.modules.pop("langchain_config", None)
         cls.module = importlib.import_module("langchain_config")
 
+    @classmethod
+    def tearDownClass(cls):
+        for name, value in cls.original_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        sys.modules.pop("langchain_config", None)
+
     def setUp(self):
-        self.original_store = self.module.vector_store
-        self.original_embedding_model = self.module.embedding_model
+        # get_vector_store() is the seam now: every function looks it up on the
+        # module at call time, so replacing the attribute reaches all of them.
+        self.original_get_vector_store = self.module.get_vector_store
         self.store = FakeVectorStore()
-        self.module.vector_store = self.store
-        self.module.embedding_model = object()
+        self.module.get_vector_store = lambda: self.store
 
     def tearDown(self):
-        self.module.vector_store = self.original_store
-        self.module.embedding_model = self.original_embedding_model
+        self.module.get_vector_store = self.original_get_vector_store
 
     def test_retrievers_are_created_with_the_callers_user_filter(self):
         get_user_retriever = getattr(self.module, "get_user_retriever", None)
@@ -72,6 +88,29 @@ class RagIsolationTests(unittest.TestCase):
         self.assertTrue(all(chunk.metadata["user_id"] == "account-a" for chunk in self.store.added_documents))
         self.assertTrue(all(chunk.metadata["document_id"] == result["document_id"] for chunk in self.store.added_documents))
         self.assertTrue(all(chunk.metadata["ingested_at"] == result["ingested_at"] for chunk in self.store.added_documents))
+
+    def test_folder_ingestion_stamps_the_owner_so_the_chunks_are_retrievable(self):
+        """Every read path filters on user_id. Chunks ingested without one are
+        write-only: stored in Chroma and invisible to search and the retriever."""
+        with tempfile.TemporaryDirectory() as source_dir:
+            with open(os.path.join(source_dir, "note.txt"), "w", encoding="utf-8") as handle:
+                handle.write("PS_Agent drafts personal statements and reports.")
+            original_dir = os.environ.get("RAG_DOCUMENTS_DIR")
+            os.environ["RAG_DOCUMENTS_DIR"] = source_dir
+            try:
+                result = self.module.ingest_source_folder(user_id="account-a")
+            finally:
+                if original_dir is None:
+                    os.environ.pop("RAG_DOCUMENTS_DIR", None)
+                else:
+                    os.environ["RAG_DOCUMENTS_DIR"] = original_dir
+
+        self.assertTrue(result["ok"])
+        self.assertGreater(result["chunk_count"], 0)
+        self.assertTrue(self.store.added_documents)
+        self.assertTrue(
+            all(chunk.metadata.get("user_id") == "account-a" for chunk in self.store.added_documents)
+        )
 
 
 if __name__ == "__main__":
