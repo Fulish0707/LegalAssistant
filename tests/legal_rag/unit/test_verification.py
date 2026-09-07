@@ -1,5 +1,5 @@
 from legal_rag.schemas import Citation, CitationKind, Confidence, DocumentType, Evidence, EvidenceBundle, LegalAnswer, VerificationAction
-from legal_rag.verification import VerificationPolicy, Verifier
+from legal_rag.verification import VerificationPolicy, Verifier, backfill_citations
 
 
 def _bundle():
@@ -85,3 +85,24 @@ def test_policy_regenerates_then_strips_then_rejects():
 
 def test_accept_when_ok():
     assert VerificationPolicy().decide(Verifier().verify(_answer(), _bundle()), attempt=0) == VerificationAction.accept
+
+
+def test_user_mentioned_reference_is_exempt_from_not_in_evidence_but_not_from_source_id_checks():
+    ans = _answer(citations=[], analysis="민법 제839조의2는 제공된 근거에서 확인되지 않습니다. 2015다99999 판결도 마찬가지입니다.")
+    assert Verifier().verify(ans, _bundle(), user_refs=["민법 제839조의2", "2015다99999"]).ok
+    assert not Verifier().verify(ans, _bundle()).ok
+    cited = _answer(citations=[Citation(source_id="S1", kind=CitationKind.statute, reference="민법 제839조의2")], analysis="민법 제839조의2 관련")
+    report = Verifier().verify(cited, _bundle(), user_refs=["민법 제839조의2"])
+    assert [i.kind for i in report.issues] == ["source_id_mismatch"]
+
+
+def test_backfill_adds_citations_for_grounded_references_only():
+    ans = _answer(citations=[], analysis="주택임대차보호법 제3조의3 제1항과 민법 제750조에 따르면 그렇습니다. 민법 제839조의2는 확인되지 않습니다. 2019가단12345 판결 참조.")
+    filled = backfill_citations(ans, _bundle())
+    assert [(c.source_id, c.reference, c.kind) for c in filled.citations] == [
+        ("S1", "주택임대차보호법 제3조의3", CitationKind.statute),
+        ("S2", "민법 제750조", CitationKind.case),
+        ("S2", "2019가단12345", CitationKind.case),
+    ]
+    assert backfill_citations(filled, _bundle()) == filled
+    assert backfill_citations(_answer(), _bundle()).citations == _answer().citations
