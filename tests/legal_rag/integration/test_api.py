@@ -1,0 +1,60 @@
+from fastapi.testclient import TestClient
+
+from legal_rag.api import create_app
+from legal_rag.config import load_settings
+from legal_rag.llm import FakeChatModel
+from legal_rag.rag.conversation import InMemoryConversationStore
+from legal_rag.rag.orchestrator import Orchestrator
+from legal_rag.schemas import Confidence, LegalAnswer, QueryAnalysis
+from legal_rag.verification import VerificationPolicy, Verifier
+from tests.legal_rag.integration.test_chat_turn import _answer
+from tests.legal_rag.integration.test_ingest_to_search import indexed  # noqa: F401
+
+
+def _client(indexed, model):
+    settings, _, retriever = indexed
+    orchestrator = Orchestrator.from_components(
+        settings=settings, retriever=retriever, model=model, store=InMemoryConversationStore(), verifier=Verifier(), policy=VerificationPolicy()
+    )
+    return TestClient(create_app(settings=settings, orchestrator=orchestrator, retriever=retriever))
+
+
+def test_health(indexed):
+    body = _client(indexed, FakeChatModel({})).get("/health").json()
+    assert body["status"] == "ok" and body["collection"] == "legal_it_fake_64" and body["chunks"] > 5
+    assert body["llm"] == "ollama:qwen3:4b" and body["embedder"] == "fake:64"
+
+
+def test_search_endpoint(indexed):
+    client = _client(indexed, FakeChatModel({}))
+    body = client.post("/v1/search", json={"query": "민법 제750조", "k": 3}).json()
+    assert body["hits"][0]["chunk"]["metadata"]["article"] == "제750조"
+    filtered = client.post("/v1/search", json={"query": "보증금", "k": 3, "filters": {"document_types": ["court_decision"]}}).json()
+    assert {h["chunk"]["document_type"] for h in filtered["hits"]} == {"court_decision"}
+    assert client.post("/v1/search", json={"query": "", "k": 3}).status_code == 422
+
+
+def test_chat_endpoint_round_trip(indexed):
+    # A citation-free answer verifies against any evidence, so the script cannot run dry
+    # whichever way the verifier decides on the grounded answer.
+    plain = LegalAnswer(summary="일반적인 안내입니다.", analysis="일반적인 절차만 설명합니다.", confidence=Confidence.low)
+    model = FakeChatModel({
+        "QueryAnalysis": [QueryAnalysis(issues=["보증금 반환"], keywords=["임차권등기명령"]), QueryAnalysis()],
+        "LegalAnswer": [_answer(), plain, plain, plain],
+    })
+    client = _client(indexed, model)
+    body = client.post("/v1/chat", json={"message": "임차권등기명령 신청서에 적어야 하는 사항은?"}).json()
+    assert body["kind"] == "answer" and body["conversation_id"]
+    assert body["evidence"]["items"][0]["source_id"] == "S1" and body["verification"]["ok"] is True
+    assert body["answer"]["citations"][0]["source_id"] == "S1"
+    assert "trace" not in body
+    traced = client.post("/v1/chat", json={"message": "후속 질문", "conversation_id": body["conversation_id"], "include_trace": True}).json()
+    assert traced["trace"]["policy_action"] in {"accept", "strip"} and traced["conversation_id"] == body["conversation_id"]
+
+
+def test_chat_validation_error_needs_no_backends():
+    settings = load_settings(profile="default", overrides={"embedding": {"backend": "fake"}, "llm": {"backend": "fake"}})
+    client = TestClient(create_app(settings=settings))
+    assert client.post("/v1/chat", json={}).status_code == 422
+    assert client.post("/v1/chat", json={"message": "x", "extra": 1}).status_code == 422
+    assert client.get("/health").json()["collection"] is None
