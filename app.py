@@ -561,7 +561,7 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
             checkpointer=CHECKPOINTER if thread_user_id else None,
         )
         if agent is None:
-            yield _sse({'type': 'error', 'content': 'AI chat is not configured. Set GOOGLE_API_KEY in .env and restart the app.'})
+            yield _sse({'type': 'error', 'content': 'AI chat is not configured. Set LLM_PROVIDER and start Ollama, then restart the app.'})
             return
 
         quota_result = reserve_ai_request()
@@ -715,7 +715,6 @@ def health():
         "status": "ok",
         "llm_configured": llm_available,
         "agent_configured": llm_available,
-        "search_configured": bool(os.getenv("SERPAPI_API_KEY")),
         "google_oidc_configured": app.config["GOOGLE_OIDC_CONFIGURED"],
         "llm_provider": None,
         "embedding_provider": None,

@@ -27,18 +27,16 @@ class FakeVectorStore:
 
 
 class RagIsolationTests(unittest.TestCase):
-    PINNED_ENV = ("GOOGLE_API_KEY", "EMBEDDING_PROVIDER")
+    PINNED_ENV = ("EMBEDDING_PROVIDER",)
 
     @classmethod
     def setUpClass(cls):
-        # Popping GOOGLE_API_KEY is not enough: any earlier test that imports app
-        # has run load_dotenv(), which repopulates it. Pin it to "" instead, and
-        # pin the provider so an ambient EMBEDDING_PROVIDER cannot make an
-        # unpatched call reach a live service. With both pinned, get_vector_store()
-        # returns None rather than opening Chroma.
+        # Pin EMBEDDING_PROVIDER so an ambient value cannot make an unpatched
+        # call reach a live service. Setting it here (rather than trusting the
+        # default) also survives app.py's load_dotenv(), which repopulates the
+        # environment from .env partway through the suite.
         cls.original_env = {name: os.environ.get(name) for name in cls.PINNED_ENV}
-        os.environ["GOOGLE_API_KEY"] = ""
-        os.environ["EMBEDDING_PROVIDER"] = "google"
+        os.environ["EMBEDDING_PROVIDER"] = "ollama"
         sys.modules.pop("langchain_config", None)
         cls.module = importlib.import_module("langchain_config")
 

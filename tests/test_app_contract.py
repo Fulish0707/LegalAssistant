@@ -19,21 +19,18 @@ class AppContractTests(unittest.TestCase):
             name: sys.modules.get(name)
             for name in cls.MODULE_NAMES
         }
-        # app.py loads .env at startup, so popping GOOGLE_API_KEY is not enough to
-        # keep it unset. python-dotenv skips keys already present in os.environ, and
-        # the connectors treat empty and absent identically, so pin it to "".
-        # LLM_PROVIDER defaults to ollama, which needs no key and would report the
-        # app as configured; these tests exercise the Google-unconfigured path.
+        # Pin both connectors to "none". Ollama needs no credential, so with the
+        # default provider these tests would see a fully configured app; "none" is
+        # the explicit off switch that exercises the unconfigured paths. Pinning
+        # here also survives app.py's load_dotenv() at import.
         cls.original_provider_env = {
             name: os.environ.get(name)
-            for name in ("GOOGLE_API_KEY", "LLM_PROVIDER", "EMBEDDING_PROVIDER")
+            for name in ("LLM_PROVIDER", "EMBEDDING_PROVIDER")
         }
         os.environ["APP_STATE_DB"] = os.path.join(cls.tmpdir.name, "app_state.db")
         os.environ["APP_ENV"] = "testing"
-        os.environ["GOOGLE_API_KEY"] = ""
-        os.environ["LLM_PROVIDER"] = "google"
-        os.environ["EMBEDDING_PROVIDER"] = "google"
-        os.environ.pop("SERPAPI_API_KEY", None)
+        os.environ["LLM_PROVIDER"] = "none"
+        os.environ["EMBEDDING_PROVIDER"] = "none"
 
         for module_name in cls.MODULE_NAMES:
             sys.modules.pop(module_name, None)

@@ -5,7 +5,7 @@
 ## 1. 프로젝트 개요 (Project Overview)
 
 -   본 프로젝트는 사용자의 자기소개서(대학 입학용, 직장 지원용) 작성 및 전문적인 보고서 생성을 돕는 AI 에이전트입니다.
--   기본 엔진은 **Ollama로 서빙하는 로컬 모델 `qwen3:4b`** 이며, Google Gemini는 성능 비교용 기준선(baseline)으로 함께 지원합니다. 공급자는 `LLM_PROVIDER` / `EMBEDDING_PROVIDER` 환경 변수로 전환합니다.
+-   엔진은 **Ollama로 서빙하는 로컬 모델 `qwen3:4b`** 이며, 외부 AI API에 의존하지 않습니다. 공급자는 `LLM_PROVIDER` / `EMBEDDING_PROVIDER` 환경 변수로 전환하며, `none`을 지정하면 AI 기능을 명시적으로 끌 수 있습니다.
 -   에이전트는 **LangGraph 기반 `langchain.agents.create_agent`** 로 구성되며, RAG (Retrieval Augmented Generation) 파이프라인을 통해 문서 기반 질의응답 및 콘텐츠 생성을 지원합니다. 폐기 예정(deprecated)인 `langchain_classic.initialize_agent`는 더 이상 사용하지 않습니다.
 -   다양한 입력 방식(텍스트, 문서 파일)을 지원하여 사용자 편의성을 높였습니다.
 
@@ -17,15 +17,13 @@
     -   **대화 메모리:** LangGraph `SqliteSaver` 체크포인터가 로그인 사용자의 대화 스레드를 유지합니다 (`thread_id` = 인증된 사용자 ID). 비로그인 게스트는 상태를 저장하지 않습니다.
 -   **RAG 기반 문서 질의응답 및 콘텐츠 생성:**
     -   사용자가 제공하는 문서(`documents` 폴더 내 PDF, TXT 파일)를 ChromaDB 벡터 스토어에 저장 및 인덱싱.
-    -   임베딩은 Google `text-embedding-004` 또는 Ollama `nomic-embed-text` 중 선택합니다.
+    -   임베딩은 Ollama `nomic-embed-text`를 사용합니다 (768차원).
     -   `search_documents` 도구가 **한 번만 검색하고, 중복 청크를 제거한 뒤, 출처(`[source: ...]`)를 붙여** 원문 발췌를 그대로 반환합니다. 검색 결과는 항상 `filter={"user_id": ...}` 로 계정 범위가 제한됩니다.
 -   **다중 입력 방식 지원:**
     -   **문서 업로드 및 분석 (OCR):**
         -   PDF, TXT, DOCX, 이미지(PNG, JPG) 파일 업로드 지원.
         -   Tesseract OCR (이미지) 및 pypdf/python-docx (문서)를 통한 텍스트 추출.
         -   추출된 텍스트를 기반으로 LLM을 활용하여 HTML 형식의 보고서 자동 생성 (한국어).
--   **외부 정보 검색:**
-    -   SerpAPI를 연동하여 웹 검색 기능 제공 (`SERPAPI_API_KEY`가 설정된 경우에만 도구가 등록됩니다).
 -   **관측 및 평가:**
     -   LangSmith 추적을 옵트인으로 지원하며, 실행마다 공급자·모델·컬렉션 메타데이터를 남깁니다.
     -   `evals/` 아래에 16개 골든 케이스로 구성된 재현 가능한 평가 하네스를 제공합니다.
@@ -38,8 +36,8 @@
 -   **웹 프레임워크 (Web Framework):** Flask
 -   **LLM 프레임워크 (LLM Framework):** LangChain 1.x + **LangGraph** (`langchain.agents.create_agent`)
 -   **LLM 및 임베딩 (LLM & Embedding):** `llm_model.py`의 `get_chat_model()` / `get_embedding_model()` 커넥터가 담당하며, 공급자 이름은 이 모듈 밖에 등장하지 않습니다.
-    -   채팅 (`LLM_PROVIDER`): `ollama` (기본값, `qwen3:4b`) 또는 `google` (`gemini-2.0-flash`)
-    -   임베딩 (`EMBEDDING_PROVIDER`): `google` (기본값, `models/text-embedding-004`) 또는 `ollama` (`nomic-embed-text`)
+    -   채팅 (`LLM_PROVIDER`): `ollama` (기본값, `qwen3:4b`) 또는 `none` (비활성화)
+    -   임베딩 (`EMBEDDING_PROVIDER`): `ollama` (기본값, `nomic-embed-text`) 또는 `none` (비활성화)
 -   **에이전트 메모리 (Memory):** `langgraph-checkpoint-sqlite`의 `SqliteSaver`
 -   **벡터 데이터베이스 (Vector Database):** ChromaDB (임베딩 공급자별 컬렉션 분리)
 -   **관측성 (Observability):** LangSmith (옵트인 추적) 및 `evals/` 평가 하네스
@@ -48,7 +46,7 @@
     -   PDF: pypdf
     -   DOCX: python-docx
 -   **데이터베이스 (Database):** SQLite
--   **기타 (Others):** SerpAPI (웹 검색), `dotenv` (환경변수 관리)
+-   **기타 (Others):** `dotenv` (환경변수 관리)
 
 ## 4. 시스템 아키텍처 및 작동 방식 (System Architecture & How it Works)
 
@@ -72,15 +70,14 @@ graph TD
         A_Prefix["AGENT_PREFIX 시스템 프롬프트: 항상 먼저 검색"]
         A_Schema["response_format=AgentSections + extract_agent_sections"]
         A_RAG["도구: search_documents — user_id 가 있을 때만 등록"]
-        A_Serp["도구: Search / SerpAPI — SERPAPI_API_KEY 가 있을 때만 등록"]
         A_Guest["게스트: 체크포인터도 RAG 도구도 없음 — 무상태"]
         A_Stream["agent.stream: stream_mode = messages, updates, values"]
     end
 
     subgraph Models["모델 커넥터: llm_model.py"]
-        M_Chat["get_chat_model(): LLM_PROVIDER = ollama 또는 google"]
-        M_Embed["get_embedding_model(): EMBEDDING_PROVIDER = google 또는 ollama"]
-        M_Coll["get_collection_name(): docs_google_te004 또는 docs_ollama_nomic"]
+        M_Chat["get_chat_model(): LLM_PROVIDER = ollama 또는 none"]
+        M_Embed["get_embedding_model(): EMBEDDING_PROVIDER = ollama 또는 none"]
+        M_Coll["get_collection_name(): docs_ollama_nomic"]
     end
 
     subgraph DataStorage["데이터 저장소"]
@@ -92,7 +89,7 @@ graph TD
 
     subgraph Obs["관측성"]
         O_Trace["LangSmith: 옵트인, thread_id/provider/model/collection 태그"]
-        O_Eval["evals/run_eval.py --provider ollama 또는 google"]
+        O_Eval["evals/run_eval.py --provider ollama"]
     end
 
     UI_Text --> W_Flask
@@ -104,7 +101,6 @@ graph TD
     A_Prefix --> A_Create
     A_Schema --> A_Create
     A_RAG --> A_Create
-    A_Serp --> A_Create
 
     A_Create -- "로그인 사용자만: thread_id = 계정 ID" --> DS_Ckpt
     A_Create --> A_Stream
@@ -128,21 +124,20 @@ graph TD
     -   **OCR:** 사용자가 업로드한 이미지/PDF/DOCX 파일에서 텍스트가 추출됩니다.
 2.  **임베딩 및 벡터 저장 (Embedding & Vector Storage - RAG Core):**
     -   분할된 청크들은 활성 임베딩 공급자의 모델로 임베딩되어 ChromaDB에 저장됩니다.
-    -   컬렉션 이름은 `get_collection_name()`이 임베딩 공급자와 모델로부터 생성합니다 (`docs_google_te004`, `docs_ollama_nomic`). 같은 모델의 다른 표기(`models/` 접두사, `:latest` 접미사)는 하나로 정규화되므로, 하나의 임베딩 공간이 두 컬렉션으로 쪼개지지 않습니다.
+    -   컬렉션 이름은 `get_collection_name()`이 임베딩 공급자와 모델로부터 생성합니다 (`docs_ollama_nomic`). 같은 모델의 다른 표기(`models/` 접두사, `:latest` 접미사)는 하나로 정규화되므로, 하나의 임베딩 공간이 두 컬렉션으로 쪼개지지 않습니다.
 3.  **사용자 질의 및 컨텍스트 검색 (User Query & Context Retrieval - RAG Core):**
     -   에이전트는 `search_documents` 도구를 호출하고, 이 도구는 **한 번만** 유사도 검색을 수행합니다 (`filter={"user_id": ...}`).
     -   중복 본문을 제거한 뒤 `[source: 파일명]` 머리말을 붙인 원문 발췌를 그대로 반환합니다. 이 경로에는 모델의 판단이 개입하지 않으므로, 4B 모델이 틀릴 여지 자체가 없습니다.
 4.  **LLM을 통한 답변/콘텐츠 생성 (Response/Content Generation via LLM):**
     -   LangGraph 런타임이 도구 호출 루프를 돌리고, `AGENT_PREFIX` 시스템 프롬프트에 따라 **답변 전에 항상 먼저 검색**합니다.
     -   최종 답변의 네 개 섹션은 `extract_agent_sections()`가 추출합니다: `structured_response` → 메시지 본문의 JSON → 레거시 `[CHAT]` 마커 순서입니다.
-    -   필요시 SerpAPI를 통해 외부 정보를 검색하여 답변을 보강합니다.
 5.  **결과 제공 (Output):**
     -   `agent.stream(..., stream_mode=["messages", "updates", "values"])`가 생성한 이벤트를 `thought` / `token_chunk` SSE 이벤트로 변환해 전달합니다. 전송 규약(wire contract)은 변경되지 않았으므로 `static/lc-chat.js`는 수정되지 않았습니다.
     -   생성된 텍스트 답변, HTML 보고서 등이 Flask 웹 인터페이스를 통해 사용자에게 제공됩니다.
 
 ### 임베딩 공급자를 바꾸면 반드시 재수집(re-ingestion)해야 합니다
 
--   `text-embedding-004`와 `nomic-embed-text`는 **둘 다 768차원**입니다. Chroma는 차원만 검사하므로, 두 공급자의 벡터를 하나의 컬렉션에 **오류 없이 조용히** 받아들인 뒤 서로 무관한 임베딩 공간끼리 비교합니다. 결과는 예외가 아니라 **엉뚱한 이웃 문서**입니다.
+-   임베딩 모델을 바꾸면 차원이 같더라도 임베딩 공간이 달라집니다. Chroma는 차원만 검사하므로 서로 무관한 벡터를 하나의 컬렉션에 **오류 없이 조용히** 받아들인 뒤 비교합니다. 결과는 예외가 아니라 **엉뚱한 이웃 문서**입니다. 과거 `text-embedding-004`(768차원)와 `nomic-embed-text`(768차원)가 정확히 이 충돌을 일으켰습니다.
 -   이 조용한 충돌을 막기 위해 컬렉션 이름에 공급자와 모델을 인코딩했습니다. 따라서 `EMBEDDING_PROVIDER`를 바꾸면 **새 컬렉션**이 만들어집니다.
 -   그 결과 **기존 지식 베이스는 재수집 전까지 비어 있는 것처럼 보입니다.** 실패도 경고도 없이 검색 결과가 0건일 뿐입니다.
 -   마이그레이션 이전의 레거시 `langchain` 컬렉션은 디스크에 그대로 남아 있으며, 옮겨지지 않은 채 어디에서도 참조되지 않습니다. 필요한 문서는 다시 수집해야 합니다.
@@ -180,7 +175,7 @@ graph TD
     -   `ProviderStrategy`도 시도했으나 폐기했습니다. `structured_response`는 안정적으로 채워지지만, Ollama의 `format=json_schema`가 모든 생성을 스키마로 강제하는 탓에 **모델이 도구 호출을 낼 수 없게 되어 RAG 도구 자체가 도달 불가능**해집니다.
 -   **`ChatOllama`의 `reasoning`은 설정하지 않은 채로 두어야 합니다.** `reasoning=True`는 구조화 출력 도구 호출을 3/3 억제했고, `reasoning=False`는 사고 과정 산문이 `content`로 새어 나옵니다. 추적에서 사고 과정을 보고 싶다면 `OLLAMA_REASONING=true`로 구조화 출력과 맞바꿀 수 있습니다.
 -   **`qwen3`에서는 `token_chunk` SSE 이벤트가 한 번도 발생하지 않았습니다.** 원시 스트림이 항상 스키마 JSON이기 때문입니다. `token_chunk` 분기는 `app.py`에 그대로 존재하지만 qwen3 경로에서는 조건이 성립하지 않습니다. 진행 중 UI는 `thought` 이벤트가 담당합니다.
--   평가 하네스는 **실패한 케이스가 있으면 0이 아닌 종료 코드**를 반환하고(CI에 그대로 붙일 수 있습니다), 실행 동안 `SERPAPI_API_KEY`를 환경에서 제거해 웹 검색이 결과를 오염시키지 않도록 합니다. 픽스처는 임시 `RAG_PERSIST_DIR`에 전용 `user_id`로 수집되고 종료 시 삭제되므로, 실제 지식 베이스는 건드리지 않습니다.
+-   평가 하네스는 **실패한 케이스가 있으면 0이 아닌 종료 코드**를 반환하고(CI에 그대로 붙일 수 있습니다), 픽스처는 임시 `RAG_PERSIST_DIR`에 전용 `user_id`로 수집되고 종료 시 삭제되므로, 실제 지식 베이스는 건드리지 않습니다.
 
 ## 6. 주요 코드 파일 설명 (Key Code Files)
 
@@ -210,16 +205,13 @@ graph TD
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `ollama` | 채팅 모델 공급자. `ollama` 또는 `google`. |
-| `EMBEDDING_PROVIDER` | `google` | 임베딩 공급자. `google` 또는 `ollama`. **변경 시 재수집 필요** (4장 참고). |
+| `LLM_PROVIDER` | `ollama` | 채팅 모델 공급자. `ollama` 또는 `none`. |
+| `EMBEDDING_PROVIDER` | `ollama` | 임베딩 공급자. `ollama` 또는 `none`. **변경 시 재수집 필요** (4장 참고). |
 | `OLLAMA_MODEL` | `qwen3:4b` | Ollama 채팅 모델. |
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Ollama 임베딩 모델. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama 서버 주소. |
 | `OLLAMA_TEMPERATURE` | `0.7` | Qwen3는 greedy 디코딩(0)에서 품질이 떨어지고 같은 말을 반복합니다. 0으로 두지 마세요. |
 | `OLLAMA_REASONING` | (미설정) | 설정하지 않는 것이 기본입니다. `true`로 두면 추적 가시성을 얻는 대신 구조화 출력을 잃습니다. |
-| `GOOGLE_CHAT_MODEL` | `gemini-2.0-flash` | Google 채팅 모델. |
-| `GOOGLE_EMBED_MODEL` | `models/text-embedding-004` | Google 임베딩 모델. |
-| `GOOGLE_API_KEY` | — | `google` 공급자를 쓸 때 필수. 없으면 커넥터가 `None`을 반환합니다. |
 
 **저장소 및 애플리케이션 (Storage & app)**
 
@@ -229,7 +221,6 @@ graph TD
 | `AGENT_CHECKPOINT_DB` | `sqlite_db/checkpoints.db` | LangGraph 체크포인터 DB. 애플리케이션 상태 DB와 스키마가 다르므로 분리되어 있습니다. |
 | `RAG_PERSIST_DIR` | `./chroma_db` | ChromaDB 영속 디렉터리. |
 | `RAG_DOCUMENTS_DIR` | `./documents` | RAG 원본 문서 폴더. |
-| `SERPAPI_API_KEY` | — | 설정된 경우에만 웹 검색 도구가 등록됩니다. |
 | `SECRET_KEY` | — | Flask 세션 키. 운영 환경에서는 장기 보관되는 긴 난수를 사용합니다. |
 | `GOOGLE_OIDC_CLIENT_ID` / `GOOGLE_OIDC_CLIENT_SECRET` / `GOOGLE_OIDC_REDIRECT_URI` | — | Google 로그인 설정. 리디렉션 URI 기본값은 `http://localhost:5005/auth/callback`. |
 | `QUOTA_IP_SALT` | — | 게스트 할당량 계산용 IP 해시 솔트. |
@@ -268,9 +259,7 @@ ollama pull nomic-embed-text    # 로컬 임베딩 (EMBEDDING_PROVIDER=ollama �
 ollama serve                    # http://localhost:11434
 ```
 
-`LLM_PROVIDER=google`로 Gemini 기준선을 사용할 경우 Ollama는 필요하지 않습니다.
-
-> **기본 설정은 채팅만 로컬입니다.** `LLM_PROVIDER=ollama` + `EMBEDDING_PROVIDER=google`가 기본값이므로, Ollama 모델을 모두 내려받아도 임베딩에는 여전히 `GOOGLE_API_KEY`가 필요합니다. 키 없이 완전히 로컬로 실행하려면 `EMBEDDING_PROVIDER=ollama`를 설정하십시오 (기존 지식 베이스가 있다면 재수집이 필요합니다).
+> **기본 설정은 완전히 로컬입니다.** 채팅과 임베딩 모두 Ollama를 사용하므로 외부 AI API 키가 필요하지 않습니다. Google OIDC 로그인만 별도의 자격 증명을 사용합니다.
 
 ### 7.4 문서 준비 (RAG용)
 
@@ -288,7 +277,6 @@ python app.py
 
 ```bash
 python -m evals.run_eval --provider ollama     # 로컬 qwen3:4b
-python -m evals.run_eval --provider google     # Gemini 기준선
 
 python -m evals.run_eval --provider ollama --no-judge   # 모델 판정 근거성 생략 (빠름)
 python -m evals.run_eval --provider ollama --limit 3    # 앞 N개 케이스만
