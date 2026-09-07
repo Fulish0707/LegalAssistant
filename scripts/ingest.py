@@ -26,6 +26,8 @@ def main(
 ) -> None:
     settings = settings_from_options(profile=profile, root=root, raw_dir=raw_dir, corpus_version=corpus_version)
     report = run_ingestion(settings)
+    if report.documents == 0:
+        typer.echo(f"warning: no documents produced from {settings.raw_dir()}", err=True)
     typer.echo(
         f"documents={report.documents} chunks={report.chunks} deduplicated={report.deduplicated} "
         f"unrecognized={report.unrecognized} output={report.output_dir}"
