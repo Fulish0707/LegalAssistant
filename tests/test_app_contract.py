@@ -19,10 +19,18 @@ class AppContractTests(unittest.TestCase):
             name: sys.modules.get(name)
             for name in cls.MODULE_NAMES
         }
+        # Pin both connectors to "none". Ollama needs no credential, so with the
+        # default provider these tests would see a fully configured app; "none" is
+        # the explicit off switch that exercises the unconfigured paths. Pinning
+        # here also survives app.py's load_dotenv() at import.
+        cls.original_provider_env = {
+            name: os.environ.get(name)
+            for name in ("LLM_PROVIDER", "EMBEDDING_PROVIDER")
+        }
         os.environ["APP_STATE_DB"] = os.path.join(cls.tmpdir.name, "app_state.db")
         os.environ["APP_ENV"] = "testing"
-        os.environ.pop("GOOGLE_API_KEY", None)
-        os.environ.pop("SERPAPI_API_KEY", None)
+        os.environ["LLM_PROVIDER"] = "none"
+        os.environ["EMBEDDING_PROVIDER"] = "none"
 
         for module_name in cls.MODULE_NAMES:
             sys.modules.pop(module_name, None)
@@ -45,6 +53,11 @@ class AppContractTests(unittest.TestCase):
             os.environ.pop("APP_ENV", None)
         else:
             os.environ["APP_ENV"] = cls.original_app_env
+        for name, value in cls.original_provider_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
         cls.tmpdir.cleanup()
 
     def test_health_reports_unconfigured_services(self):
@@ -147,7 +160,7 @@ class AppContractTests(unittest.TestCase):
                     reserve_daily_quota(
                         self.app_module.get_db(), "guest_ip", guest_identity
                     )
-            self.app_module.build_agent = lambda user_id: object()
+            self.app_module.build_agent = lambda user_id, checkpointer=None: object()
 
             response = self.app_module.app.test_client().get("/chat?message=hello")
         finally:
@@ -180,11 +193,11 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(response.json, {"error": "authentication_required"})
 
     def test_failed_ocr_extraction_does_not_consume_account_quota(self):
-        original_llm = self.app_module.llm
+        original_get_chat_model = self.app_module.get_chat_model
         original_extract = self.app_module.llm_ocr.extract_text_from_document
         account_id = "failed-ocr-account"
         try:
-            self.app_module.llm = object()
+            self.app_module.get_chat_model = lambda: object()
             self.app_module.llm_ocr.extract_text_from_document = lambda *args: ({"error": "unreadable"}, 400)
             with self.client.session_transaction() as flask_session:
                 flask_session["authenticated_user_id"] = account_id
@@ -200,14 +213,14 @@ class AppContractTests(unittest.TestCase):
                     (account_id,),
                 ).fetchone()
         finally:
-            self.app_module.llm = original_llm
+            self.app_module.get_chat_model = original_get_chat_model
             self.app_module.llm_ocr.extract_text_from_document = original_extract
 
         self.assertEqual(response.status_code, 400)
         self.assertIsNone(row)
 
     def test_ocr_returns_json_429_when_account_quota_is_exhausted(self):
-        original_llm = self.app_module.llm
+        original_get_chat_model = self.app_module.get_chat_model
         account_id = "quota-exhausted-ocr-account"
         try:
             with self.app_module.app.app_context():
@@ -215,7 +228,7 @@ class AppContractTests(unittest.TestCase):
                     reserve_daily_quota(self.app_module.get_db(), "user", account_id)
             with self.client.session_transaction() as flask_session:
                 flask_session["authenticated_user_id"] = account_id
-            self.app_module.llm = object()
+            self.app_module.get_chat_model = lambda: object()
 
             response = self.client.post(
                 "/process_document_ocr",
@@ -223,13 +236,13 @@ class AppContractTests(unittest.TestCase):
                 content_type="multipart/form-data",
             )
         finally:
-            self.app_module.llm = original_llm
+            self.app_module.get_chat_model = original_get_chat_model
 
         self.assertEqual(response.status_code, 429)
         self.assertEqual(response.json["error"], "daily_ai_quota_exceeded")
 
     def test_statistics_returns_json_429_when_account_quota_is_exhausted(self):
-        original_llm = self.app_module.llm
+        original_get_chat_model = self.app_module.get_chat_model
         account_id = "quota-exhausted-account"
         try:
             with self.app_module.app.app_context():
@@ -237,7 +250,7 @@ class AppContractTests(unittest.TestCase):
                     reserve_daily_quota(self.app_module.get_db(), "user", account_id)
             with self.client.session_transaction() as flask_session:
                 flask_session["authenticated_user_id"] = account_id
-            self.app_module.llm = object()
+            self.app_module.get_chat_model = lambda: object()
 
             response = self.client.post(
                 "/statistics/analyze",
@@ -245,14 +258,14 @@ class AppContractTests(unittest.TestCase):
                 content_type="multipart/form-data",
             )
         finally:
-            self.app_module.llm = original_llm
+            self.app_module.get_chat_model = original_get_chat_model
 
         self.assertEqual(response.status_code, 429)
         self.assertEqual(response.json["error"], "daily_ai_quota_exceeded")
         self.assertEqual(response.json["limit"], 20)
 
     def test_document_upload_can_save_mocked_analysis_to_knowledge_base(self):
-        original_llm = self.app_module.llm
+        original_get_chat_model = self.app_module.get_chat_model
         original_analyze_document = self.app_module.llm_ocr.analyze_document
         original_ingest = self.app_module.ingest_text_to_vector_store
         captured = {}
@@ -276,7 +289,7 @@ class AppContractTests(unittest.TestCase):
         try:
             with self.client.session_transaction() as flask_session:
                 flask_session["authenticated_user_id"] = "document-account"
-            self.app_module.llm = object()
+            self.app_module.get_chat_model = lambda: object()
             self.app_module.llm_ocr.analyze_document = fake_analyze_document
             self.app_module.ingest_text_to_vector_store = fake_ingest_text_to_vector_store
 
@@ -290,7 +303,7 @@ class AppContractTests(unittest.TestCase):
                 content_type="multipart/form-data",
             )
         finally:
-            self.app_module.llm = original_llm
+            self.app_module.get_chat_model = original_get_chat_model
             self.app_module.llm_ocr.analyze_document = original_analyze_document
             self.app_module.ingest_text_to_vector_store = original_ingest
 

@@ -154,7 +154,7 @@ def render_statistics_html(filename, analysis, ai_insight=None, ai_enabled=False
         parts.append("</section>")
     elif not ai_enabled:
         parts.append(
-            "<p class='text-muted'>Add GOOGLE_API_KEY in .env to unlock AI interpretation. "
+            "<p class='text-muted'>Configure a local model (LLM_PROVIDER=ollama) to unlock AI interpretation. "
             "The statistical tables below are computed locally.</p>"
         )
 

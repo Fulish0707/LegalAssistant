@@ -1,29 +1,112 @@
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain_chroma import Chroma
-from langchain_community.agent_toolkits.load_tools import load_tools
-from langchain_classic.agents import initialize_agent
-from langchain_classic.chains import RetrievalQA
-from langchain_classic.chains.question_answering import load_qa_chain
 from langchain_core.documents import Document
-from llm_model import embedding_model, llm
+from llm_model import (
+    get_chat_descriptor,
+    get_chat_model,
+    get_collection_name,
+    get_embedding_descriptor,
+    get_embedding_model,
+)
+import json
 import os
+import re
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from langchain_core.tools import Tool
-from dotenv import load_dotenv
+from typing import Optional
+from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
-load_dotenv() # Load variables from .env file
+# Define directories. Resolved at call time, never at import: importing this
+# module must not touch disk or construct a client.
+PERSIST_DIRECTORY = "./chroma_db"
 
-# Define directories
-persis_directory = "./chroma_db"
-doc_folder = os.getenv("RAG_DOCUMENTS_DIR", "./documents")
 
-# Create documents directory if it doesn't exist
-if not os.path.exists(doc_folder):
-    os.makedirs(doc_folder)
-    print(f"Created documents directory at {doc_folder}")
+def get_persist_directory():
+    """Where Chroma lives. Env-overridable so the eval harness can be sandboxed.
+
+    evals/run_eval.py must not write its fixture vectors into the real user
+    knowledge base, and deleting them afterwards by id is a weaker guarantee
+    than never sharing the store. RAG_PERSIST_DIR points it at a temporary
+    directory instead; unset, nothing changes.
+    """
+    return os.getenv("RAG_PERSIST_DIR", PERSIST_DIRECTORY)
+
+# --- LangSmith tracing ---------------------------------------------------
+#
+# Off unless LANGSMITH_TRACING is explicitly truthy. Tracing ships the full
+# prompt, the retrieved document text and the model's answer to LangSmith, and
+# this app holds users' personal statements -- so it is opt-in, per deployment,
+# and never the default.
+
+TRUTHY = ("1", "true", "yes", "on")
+
+
+def tracing_enabled():
+    """True only when tracing was deliberately switched on.
+
+    Empty string counts as off: .env.example ships `LANGSMITH_TRACING=` and
+    load_dotenv() puts that empty value into the environment, so a plain
+    presence check would enable tracing for anyone who copied the file.
+    """
+    return os.getenv("LANGSMITH_TRACING", "").strip().lower() in TRUTHY
+
+
+def tracing_status():
+    """What /health and startup logging can say without leaking the API key."""
+    return {
+        "enabled": tracing_enabled(),
+        "project": os.getenv("LANGSMITH_PROJECT", "") or "default",
+        "api_key_present": bool(os.getenv("LANGSMITH_API_KEY", "").strip()),
+    }
+
+
+def run_metadata(user_id=None):
+    """Metadata attached to every agent run, for LangSmith run comparison.
+
+    Provider and model are the whole point: a trace that does not say whether it
+    came from gemini-2.0-flash or qwen3:4b cannot answer the question this
+    migration exists to answer. Guests have no thread, so they are tagged
+    "guest" rather than dropped -- an untagged run is an unattributable run.
+    """
+    llm_provider, llm_model = get_chat_descriptor()
+    embedding_provider, embedding_model = get_embedding_descriptor()
+    return {
+        "thread_id": user_id or "guest",
+        "llm_provider": llm_provider,
+        "llm_model": llm_model,
+        "embedding_provider": embedding_provider,
+        "embedding_model": embedding_model,
+        "collection": get_collection_name(),
+    }
+
+
+def run_tags(user_id=None):
+    """Tags are what a LangSmith comparison view filters and groups on."""
+    llm_provider, llm_model = get_chat_descriptor()
+    return [f"provider:{llm_provider}", f"model:{llm_model}"]
+
+
+def build_run_config(user_id=None, extra=None):
+    """The runnable config for one agent run: thread, metadata and tags.
+
+    Built in one place so agent.stream() and any future agent.invoke() cannot
+    drift apart on what a run is tagged with.
+    """
+    config = {"metadata": run_metadata(user_id), "tags": run_tags(user_id)}
+    if user_id:
+        config["configurable"] = {"thread_id": user_id}
+    if extra:
+        config.update(extra)
+    return config
+
+
+
+def get_documents_dir():
+    return os.getenv("RAG_DOCUMENTS_DIR", "./documents")
+
 
 def load_rag_documents(source_folder):
     supported_loaders = {
@@ -45,6 +128,7 @@ def load_rag_documents(source_folder):
     return loaded_documents
 
 def get_document_source_folder():
+    doc_folder = get_documents_dir()
     if os.path.exists(doc_folder) and any(os.scandir(doc_folder)):
         return doc_folder
     legacy_doc_folder = "./doc_folder"
@@ -53,57 +137,76 @@ def get_document_source_folder():
         return legacy_doc_folder
     return doc_folder
 
-# Check if the vector store already exists
-if embedding_model is None:
-    print("Embedding model is unavailable. RAG vector store is disabled until GOOGLE_API_KEY is configured.")
-    vector_store = None
-elif os.path.exists(persis_directory):
-    print(f"Loading existing vector store from {persis_directory}")
-    vector_store = Chroma(
-        persist_directory = persis_directory,
-        embedding_function = embedding_model
+def get_vector_store():
+    """Build the Chroma handle on demand. Never at import.
+
+    collection_name is the only thing keeping providers apart. text-embedding-004
+    and nomic-embed-text are both 768-dimensional, so Chroma would accept vectors
+    from either into one collection and then compute neighbours across two
+    unrelated embedding spaces -- wrong results, no exception. A bare Chroma(...)
+    would land in the legacy `langchain` collection, which is Google-embedded.
+    """
+    embedding_model = get_embedding_model()
+    if embedding_model is None:
+        return None
+    return Chroma(
+        collection_name=get_collection_name(),
+        persist_directory=get_persist_directory(),
+        embedding_function=embedding_model,
     )
-else:
-    print(f"Creating new vector store in {persis_directory}")
-    
-    try:
-        source_folder = get_document_source_folder()
-        documents = load_rag_documents(source_folder)
-        print(f"Loaded {len(documents)} documents from {source_folder}")
 
-        if len(documents) == 0:
-            print(f"Warning: No supported RAG documents found in {source_folder}")
-            vector_store = None
-        else:
-            # Split documents into chunks
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=200
-            )
-            chunks = text_splitter.split_documents(documents)
-            print(f"Split into {len(chunks)} chunks")
 
-            # Create and persist vector store
-            vector_store = Chroma.from_documents(
-                documents=chunks,
-                embedding=embedding_model,
-                persist_directory=persis_directory
-            )
-            if hasattr(vector_store, "persist"):
-                vector_store.persist()
-            print(f"Vector store created and persisted in {persis_directory}")
+def ingest_source_folder(user_id=None):
+    """Ingest ./documents into the provider-scoped collection.
 
-    except Exception as e:
-        print(f"An error occurred during vector store creation: {e}")
-        vector_store = None
+    Explicit by design: this used to run at import, which made the collection a
+    function of import order. Callers invoke it when they actually want ingestion.
+
+    user_id is what makes the result reachable. Every read path -- search,
+    status, the per-account retriever -- filters on user_id, so chunks ingested
+    without one are write-only: stored in Chroma and invisible to the app. The
+    old import-time block never stamped it either.
+
+    Not idempotent. The old block ran only when chroma_db/ was absent; calling
+    this twice ingests the same files twice.
+    """
+    vector_store = get_vector_store()
+    if vector_store is None:
+        return {"ok": False, "message": "Embedding model is not configured.", "chunk_count": 0}
+
+    doc_folder = get_documents_dir()
+    if not os.path.exists(doc_folder):
+        os.makedirs(doc_folder)
+        print(f"Created documents directory at {doc_folder}")
+
+    source_folder = get_document_source_folder()
+    documents = load_rag_documents(source_folder)
+    print(f"Loaded {len(documents)} documents from {source_folder}")
+    if not documents:
+        return {"ok": False, "message": f"No supported RAG documents found in {source_folder}.", "chunk_count": 0}
+
+    if user_id:
+        for document in documents:
+            document.metadata = {**(document.metadata or {}), "user_id": user_id}
+
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    chunks = text_splitter.split_documents(documents)
+    if not chunks:
+        return {"ok": False, "message": "Documents could not be split into chunks.", "chunk_count": 0}
+
+    vector_store.add_documents(chunks)
+    if hasattr(vector_store, "persist"):
+        vector_store.persist()
+    print(f"Ingested {len(chunks)} chunks into {get_collection_name()}")
+    return {"ok": True, "message": f"Ingested {len(chunks)} chunks.", "chunk_count": len(chunks)}
+
 
 def ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
     """Add extracted document text to the persistent RAG store for later chat follow-up."""
-    global vector_store
-
     if not user_id:
         return {"ok": False, "message": "user_id is required.", "chunk_count": 0}
-    if embedding_model is None:
+    vector_store = get_vector_store()
+    if vector_store is None:
         return {"ok": False, "message": "Embedding model is not configured.", "chunk_count": 0}
 
     if not text or not text.strip():
@@ -133,14 +236,7 @@ def ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
     if not chunks:
         return {"ok": False, "message": "Document text could not be split into chunks.", "chunk_count": 0}
 
-    if vector_store is None:
-        vector_store = Chroma.from_documents(
-            documents=chunks,
-            embedding=embedding_model,
-            persist_directory=persis_directory
-        )
-    else:
-        vector_store.add_documents(chunks)
+    vector_store.add_documents(chunks)
 
     if hasattr(vector_store, "persist"):
         vector_store.persist()
@@ -155,6 +251,7 @@ def ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
 
 def get_knowledge_base_status(user_id):
     """Return a compact summary of documents currently stored in Chroma."""
+    vector_store = get_vector_store()
     if vector_store is None:
         return {
             "available": False,
@@ -194,7 +291,7 @@ def get_knowledge_base_status(user_id):
 
 def clear_knowledge_base(user_id):
     """Remove all chunks from the active Chroma collection without deleting files manually."""
-
+    vector_store = get_vector_store()
     if vector_store is None:
         return {"ok": True, "message": "Knowledge base is already empty.", "deleted_count": 0}
 
@@ -211,6 +308,7 @@ def clear_knowledge_base(user_id):
 
 def search_knowledge_base(user_id, query, k=6):
     """Similarity search over the user's chunks. Returns a list of {source, score, quote, chunk_index}."""
+    vector_store = get_vector_store()
     if vector_store is None or not user_id or not query or not query.strip():
         return {"ok": vector_store is not None, "results": []}
     try:
@@ -232,6 +330,7 @@ def search_knowledge_base(user_id, query, k=6):
 
 def delete_knowledge_base_source(user_id, source):
     """Remove every chunk that belongs to one uploaded file for this user."""
+    vector_store = get_vector_store()
     if vector_store is None:
         return {"ok": True, "deleted_count": 0}
     if not user_id or not source:
@@ -249,57 +348,51 @@ def delete_knowledge_base_source(user_id, source):
 
 def get_user_retriever(user_id):
     """Build a retriever for one account without mutating process-global state."""
+    vector_store = get_vector_store()
     if vector_store is None or not user_id:
         return None
     return vector_store.as_retriever(search_kwargs={"k": 3, "filter": {"user_id": user_id}})
 
 
+def retrieve_for_user(user_id, query, k=4):
+    """Similarity search scoped to one account. Seam for tests."""
+    store = get_vector_store()
+    if store is None or not user_id:
+        return []
+    return store.similarity_search(query, k=k, filter={"user_id": user_id})
+
+
 def build_rag_tool(user_id):
-    """Create a RAG tool whose retrieval is permanently scoped to one account."""
-    def rag_tool_func(query):
-        retriever = get_user_retriever(user_id)
-        if not retriever:
-            return "RAG가 현재 사용 불가능합니다."
-        try:
-            # 1. 기본 검색
-            docs = retriever.invoke(query)
-            basic_results = "\n".join([doc.page_content for doc in docs])
-            
-            # 2. RetrievalQA 체인 생성
-            qa_chain = load_qa_chain(
-                llm = llm,
-                chain_type="stuff"
-            )
+    """A deterministic retrieval tool scoped to one account.
 
-            qa = RetrievalQA(
-                combine_documents_chain=qa_chain,
-                retriever=retriever,
-                return_source_documents=True
-            )
-            
-            # 3. 질의응답 실행
-            qa_result = qa({"query": query})
-            
-            # 4. 결과 결합
-            combined_response = f"""
-관련 문서:
-{basic_results}
+    Every step here is code, not model judgement. That matters more with a 4B
+    model: what the model cannot decide, it cannot get wrong. The old version
+    retrieved twice per call -- once directly, then again inside the QA chain --
+    and spent an extra LLM call summarising what the agent was about to read
+    anyway. This retrieves once and hands back the passages.
+    """
 
-질문에 대한 답변:
-{qa_result['result']}
+    @tool("search_documents")
+    def search_documents(query: str) -> str:
+        """Search the signed-in user's uploaded documents. Returns excerpts with sources."""
+        documents = retrieve_for_user(user_id, query)
+        if not documents:
+            return "No matching passages were found in the user's documents."
 
-참고한 문서 수: {len(qa_result['source_documents'])}
-"""
-            return combined_response
-        except Exception as e:
-            print(f"RAG 처리 중 오류 발생: {e}")
-            return "RAG 처리 중 오류가 발생했습니다."
+        seen = set()
+        blocks = []
+        for document in documents:
+            body = (document.page_content or "").strip()
+            if not body or body in seen:
+                continue
+            seen.add(body)
+            source = (document.metadata or {}).get("source") or "Unknown source"
+            blocks.append(f"[source: {source}]\n{body}")
 
-    return Tool(
-        name="RAG Retriever",
-        func=rag_tool_func,
-        description="Use this tool to search the signed-in user's internal document database and get detailed answers to questions.",
-    )
+        return "\n\n".join(blocks)
+
+    return search_documents
+
 
 AGENT_PREFIX = """You are PS_Agent, a practical AI work companion for students and professionals.
 
@@ -307,51 +400,128 @@ Your main jobs are:
 - Help users draft and improve university personal statements, job application statements, and professional reports.
 - Summarize uploaded or retrieved documents clearly.
 - Answer general questions in a ChatGPT-like way.
-- Use Search when the user asks for current, external, or broadly factual information.
-- Use RAG Retriever when the user asks about the local document database or source documents.
+ALWAYS call search_documents before answering any question about facts, figures,
+policies, dates, names, requirements, or anything that could plausibly appear in the
+user's uploaded documents. Do this even when the user does not mention documents.
+Search first, then answer from what you find.
+Only say you do not have the information AFTER search_documents has returned no
+matching passages. Never refuse without searching.
 
-When the task is about writing, return useful sections when relevant:
-[CHAT] for the conversational answer.
-[STATEMENT_SUGGESTION] for university personal statement improvements.
-[JOB_STATEMENT_SUGGESTION] for job application statement improvements.
-[REPORT_SUGGESTION] for report structure, clarity, and business/audience improvements.
+Your final answer is returned as a structured object, not as free text with markers:
+- chat_response: the conversational answer. Never leave this empty.
+- statement_suggestion: university personal statement improvements, when relevant.
+- job_statement_suggestion: job application statement improvements, when relevant.
+- report_suggestion: report structure, clarity, and business/audience improvements, when relevant.
+Leave a suggestion field as an empty string when it does not apply. Do not write
+section markers such as [CHAT] into any field.
 
 Follow the user's language. Prefer Korean when the user writes in Korean; otherwise use English."""
 
-# Load SerpAPI tool only when configured so the app can still run locally without web search.
-serpapi_api_key = os.getenv("SERPAPI_API_KEY")
-serpapi_tools = []
-if serpapi_api_key and llm is not None:
-    try:
-        serpapi_tools = load_tools(
-            tool_names=["serpapi"],
-            serpapi_api_key=serpapi_api_key
-        )
-    except Exception as e:
-        print(f"Search tool could not be initialized: {e}")
-else:
-    print("SERPAPI_API_KEY not found. Web search is disabled until it is configured.")
+@dataclass
+class AgentContext:
+    """Typed request context. Replaces closure-captured globals."""
 
-def build_agent(user_id=None):
-    """Create a request-scoped agent and only expose RAG to signed-in accounts."""
-    if llm is None:
+    user_id: Optional[str] = None
+
+
+class AgentSections(BaseModel):
+    """Schema-enforced replacement for the [CHAT]/[STATEMENT_SUGGESTION] markers.
+
+    A 4B model follows freeform marker conventions far less reliably than Gemini,
+    so the contract is enforced by schema instead of recovered by regex.
+    """
+
+    chat_response: str = Field(description="The conversational answer.")
+    statement_suggestion: str = Field(default="", description="University personal statement improvements.")
+    job_statement_suggestion: str = Field(default="", description="Job application statement improvements.")
+    report_suggestion: str = Field(default="", description="Report structure and clarity improvements.")
+
+
+SECTION_FIELDS = (
+    "chat_response",
+    "statement_suggestion",
+    "job_statement_suggestion",
+    "report_suggestion",
+)
+
+
+def extract_agent_sections(result):
+    """Pull the four answer sections out of a create_agent result, or None.
+
+    Two routes, because the two providers behave differently. Gemini emits the
+    schema as a structured-output tool call, so `structured_response` arrives as
+    an AgentSections instance. qwen3:4b (verified over repeated runs) writes the
+    same JSON into the final message content and never routes it through the tool
+    call, leaving `structured_response` as None -- so the content is parsed here.
+
+    Returns None when neither route yields sections, which is the caller's signal
+    to fall back to the legacy [CHAT] marker parser.
+    """
+    if not isinstance(result, dict):
         return None
 
-    tools = list(serpapi_tools)
-    if user_id:
-        tools.insert(0, build_rag_tool(user_id))
-    return initialize_agent(
+    structured = result.get("structured_response")
+    if structured is not None:
+        if isinstance(structured, BaseModel):
+            structured = structured.model_dump()
+        if isinstance(structured, dict) and structured.get("chat_response"):
+            return {field: str(structured.get(field) or "").strip() for field in SECTION_FIELDS}
+
+    messages = result.get("messages") or []
+    content = ""
+    for message in reversed(messages):
+        text = getattr(message, "content", None)
+        if isinstance(text, str) and text.strip():
+            content = text.strip()
+            break
+    if not content:
+        return None
+
+    # Parse the raw content before any cleaning. clean_agent_output() unwraps code
+    # fences and rewrites text, which can break otherwise valid JSON.
+    fenced = re.match(r"^```(?:json)?\s*\n(.*?)\n?```$", content, re.DOTALL)
+    if fenced:
+        content = fenced.group(1).strip()
+    if not content.startswith("{"):
+        return None
+    try:
+        payload = json.loads(content)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict) or not payload.get("chat_response"):
+        return None
+    return {field: str(payload.get(field) or "").strip() for field in SECTION_FIELDS}
+
+
+def build_agent(user_id=None, checkpointer=None):
+    """Create a request-scoped agent and only expose RAG to signed-in accounts."""
+    # Imported here, not at module scope: importing langchain_config must stay
+    # cheap and inert, and langgraph is a heavy import.
+    from langchain.agents import create_agent
+
+    model = get_chat_model()
+    if model is None:
+        return None
+
+    if not hasattr(model, "bind_tools"):
+        # Verified: qwen3:4b via ChatOllama does support bind_tools. Reaching this
+        # branch means the configured provider cannot run a tool loop at all, so a
+        # RAG agent is not what would come back. Fail loudly rather than quietly
+        # serving a different, worse product under the same name.
+        raise RuntimeError(
+            f"LLM_PROVIDER={os.getenv('LLM_PROVIDER')} returned a model without "
+            "bind_tools; create_agent cannot run a tool loop with it."
+        )
+
+    # search_documents is the entire tool budget. Web search was removed with the
+    # SerpAPI wiring, and a 4B degrades quickly as the tool count grows anyway.
+    tools = [build_rag_tool(user_id)] if user_id else []
+
+    return create_agent(
+        model,
         tools=tools,
-        llm = llm,
-        agent="conversational-react-description",
-        streaming = True,
-        callbacks = [StreamingStdOutCallbackHandler()],
-        verbose = True,
-        handle_parsing_errors = True,
-        temperature = 0.0,
-        agent_kwargs={"prefix": AGENT_PREFIX}
+        system_prompt=AGENT_PREFIX,
+        response_format=AgentSections,
+        context_schema=AgentContext,
+        checkpointer=checkpointer,
     )
-
-
-if llm is None:
-    print("LLM is unavailable. Chat agent is disabled until GOOGLE_API_KEY is configured.")
