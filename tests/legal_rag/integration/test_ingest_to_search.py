@@ -22,22 +22,30 @@ def fixture_settings(root: Path, corpus_version: str):
 
 @pytest.fixture(scope="module")
 def indexed(tmp_path_factory):
+    """Ingest + index the fixtures once, and open the single retriever the module shares.
+
+    Embedded Qdrant allows one client per storage path (design risk R6), so every test
+    that needs retrieval must reuse this retriever instead of opening another.
+    """
     root = tmp_path_factory.mktemp("idx")
     settings = fixture_settings(root, "it")
     run_ingestion(settings)
     report = build_index(settings)
-    return settings, report
+    retriever = build_hybrid_retriever(settings)
+    yield settings, report, retriever
+    for leg in retriever.legs:
+        leg.store.close()
+        break
 
 
 def test_index_report(indexed):
-    settings, report = indexed
+    settings, report, _ = indexed
     assert report.chunks > 5 and report.collection == "legal_it_fake_64"
     assert (settings.index_corpus_dir() / "bm25.json").exists() and (settings.index_corpus_dir() / "index.json").exists()
 
 
 def test_hybrid_search_finds_the_right_units(indexed):
-    settings, _ = indexed
-    retriever = build_hybrid_retriever(settings)
+    _, _, retriever = indexed
     hits = retriever.retrieve("임차권등기명령 신청서에 적어야 하는 사항", k=3)
     assert any(h.chunk.path == "art:제3조의3/para:제2항" for h in hits)
     hits = retriever.retrieve("민법 제750조", k=3)
