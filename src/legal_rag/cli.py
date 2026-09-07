@@ -18,9 +18,9 @@ def settings_from_options(
 ) -> Settings:
     overrides: dict[str, Any] = {}
     if root is not None:
-        overrides.setdefault("paths", {})["root"] = str(root)
+        overrides.setdefault("paths", {})["root"] = str(Path(root).resolve())
     if raw_dir is not None:
-        overrides.setdefault("paths", {})["raw_dir"] = str(raw_dir)
+        overrides.setdefault("paths", {})["raw_dir"] = str(Path(raw_dir).resolve())  # CLI paths are relative to the shell, not to root
     if corpus_version is not None:
         overrides["corpus"] = {"version": corpus_version}
     if extra:
