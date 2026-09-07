@@ -52,11 +52,13 @@ class BuildAgentTests(unittest.TestCase):
                 langchain_config.build_agent("user-1")
                 rag.assert_called_once_with("user-1")
 
-    def test_search_tools_are_built_lazily_not_at_import(self):
+    def test_web_search_wiring_is_gone(self):
+        """SerpAPI was removed. search_documents is the whole tool budget, and a
+        leftover module-level tool list would also break import inertness."""
         import langchain_config
 
-        self.assertTrue(callable(langchain_config.get_search_tools))
         self.assertFalse(hasattr(langchain_config, "serpapi_tools"))
+        self.assertFalse(hasattr(langchain_config, "get_search_tools"))
 
 
 class ExtractAgentSectionsTests(unittest.TestCase):

@@ -11,7 +11,7 @@ class VectorStoreScopeTests(unittest.TestCase):
     def setUp(self):
         self._saved = {
             name: os.environ.get(name)
-            for name in ("EMBEDDING_PROVIDER", "GOOGLE_EMBED_MODEL", "OLLAMA_EMBED_MODEL")
+            for name in ("EMBEDDING_PROVIDER", "OLLAMA_EMBED_MODEL")
         }
 
     def tearDown(self):
@@ -25,13 +25,13 @@ class VectorStoreScopeTests(unittest.TestCase):
         """768-dim collision: nomic-embed-text and text-embedding-004 are both 768,
         so Chroma would accept both into one collection and silently return
         neighbours computed across two unrelated embedding spaces."""
-        os.environ["EMBEDDING_PROVIDER"] = "google"
-        google = get_collection_name()
+        os.environ["EMBEDDING_PROVIDER"] = "none"
+        disabled = get_collection_name()
         os.environ["EMBEDDING_PROVIDER"] = "ollama"
         ollama = get_collection_name()
 
-        self.assertNotEqual(google, ollama)
-        self.assertNotEqual(google, "langchain")
+        self.assertNotEqual(disabled, ollama)
+        self.assertNotEqual(ollama, "")
         self.assertNotEqual(ollama, "langchain")
 
     def test_vector_store_is_opened_on_the_provider_scoped_collection(self):
@@ -40,7 +40,7 @@ class VectorStoreScopeTests(unittest.TestCase):
         vectors from another provider."""
         import langchain_config
 
-        os.environ["EMBEDDING_PROVIDER"] = "google"
+        os.environ["EMBEDDING_PROVIDER"] = "ollama"
         recorded = {}
 
         original_chroma = langchain_config.Chroma
@@ -70,9 +70,7 @@ class VectorStoreScopeTests(unittest.TestCase):
             environment["PYTHONPATH"] = os.pathsep.join(
                 filter(None, [project_root, environment.get("PYTHONPATH")])
             )
-            environment["EMBEDDING_PROVIDER"] = "google"
-            environment["GOOGLE_API_KEY"] = ""
-            environment.pop("SERPAPI_API_KEY", None)
+            environment["EMBEDDING_PROVIDER"] = "ollama"
 
             probe = (
                 "import os, langchain_config as m;"

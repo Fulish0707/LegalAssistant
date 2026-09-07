@@ -1,7 +1,6 @@
 """Run the golden set against the RAG agent for one provider.
 
     python -m evals.run_eval --provider ollama
-    python -m evals.run_eval --provider google
 
 Why a script and not a notebook: this has to be runnable in CI, diffable, and
 comparable across providers. The notebook it replaces could not be any of those.
@@ -111,20 +110,15 @@ def load_fixtures():
 
 
 def configure_provider(provider):
-    """Pin both providers before anything constructs a client.
+    """Pin both connectors before anything constructs a client.
 
-    Setting only LLM_PROVIDER would leave EMBEDDING_PROVIDER at its default of
-    google, so an `--provider ollama` run would still need a Google key to
-    ingest and would fail in a way that looks like a bug in this harness.
+    Setting only LLM_PROVIDER would leave EMBEDDING_PROVIDER free to differ, and
+    a mismatched pair opens a different Chroma collection than the one the
+    fixtures were ingested into.
     """
     os.environ["LLM_PROVIDER"] = provider
     os.environ["EMBEDDING_PROVIDER"] = provider
-    # Web search is removed for the duration of the run. This measures retrieval
-    # over the fixtures; leaving SerpAPI in the tool list lets the agent answer a
-    # fixture question from the open web -- and, with the key in this .env being
-    # rejected, it spent its turn relaying a SerpAPI error instead of answering.
-    os.environ.pop("SERPAPI_API_KEY", None)
-
+    
 
 def preflight(provider):
     """Prove the provider actually works before spending minutes on the set.
@@ -138,7 +132,7 @@ def preflight(provider):
 
     embeddings = get_embedding_model()
     if embeddings is None:
-        return f"embedding provider {provider!r} is not configured (missing API key)."
+        return f"embedding provider {provider!r} returned no model (is the provider set to none?)."
     try:
         embeddings.embed_query("preflight")
     except Exception as error:
@@ -146,7 +140,7 @@ def preflight(provider):
 
     model = get_chat_model()
     if model is None:
-        return f"chat provider {provider!r} is not configured (missing API key)."
+        return f"chat provider {provider!r} returned no model (is the provider set to none?)."
     try:
         model.invoke("Reply with the single word OK.")
     except Exception as error:
@@ -307,7 +301,7 @@ def report(provider, rows, elapsed):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Run the RAG golden set against one provider.")
-    parser.add_argument("--provider", choices=("ollama", "google"), default="ollama")
+    parser.add_argument("--provider", choices=("ollama",), default="ollama")
     parser.add_argument("--no-judge", action="store_true", help="Skip the model-judged groundedness call.")
     parser.add_argument("--limit", type=int, default=0, help="Run only the first N cases.")
     args = parser.parse_args(argv)

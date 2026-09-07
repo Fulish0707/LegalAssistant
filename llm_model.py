@@ -3,7 +3,7 @@
 import os
 
 DEFAULT_LLM_PROVIDER = "ollama"
-DEFAULT_EMBEDDING_PROVIDER = "google"
+DEFAULT_EMBEDDING_PROVIDER = "ollama"
 
 # Chroma is dimension-locked per collection. Two providers at the same dimension
 # (text-embedding-004 and nomic-embed-text are both 768) will be silently accepted
@@ -11,9 +11,13 @@ DEFAULT_EMBEDDING_PROVIDER = "google"
 # produces wrong neighbours with no error. The collection name therefore encodes
 # the provider and model, so switching connectors creates a new collection.
 COLLECTION_NAMES = {
-    ("google", "models/text-embedding-004"): "docs_google_te004",
     ("ollama", "nomic-embed-text"): "docs_ollama_nomic",
 }
+
+# "none" disables a connector explicitly and is not an error. Ollama needs no
+# credential, so without it there would be no way to run the app with AI turned
+# off — and the graceful-degradation paths that behaviour feeds still exist.
+DISABLED = "none"
 
 
 def _llm_provider():
@@ -25,8 +29,11 @@ def _embedding_provider():
 
 
 def get_chat_model():
-    """Return a chat model, or None when the provider is not configured."""
+    """Return a chat model, or None when the provider is disabled."""
     provider = _llm_provider()
+
+    if provider == DISABLED:
+        return None
 
     if provider == "ollama":
         from langchain_ollama import ChatOllama
@@ -62,16 +69,6 @@ def get_chat_model():
             options["reasoning"] = reasoning.strip().lower() in ("1", "true", "yes")
         return ChatOllama(**options)
 
-    if provider == "google":
-        if not os.getenv("GOOGLE_API_KEY"):
-            return None
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
-        return ChatGoogleGenerativeAI(
-            model=os.getenv("GOOGLE_CHAT_MODEL", "gemini-2.0-flash"),
-            temperature=0,
-        )
-
     raise ValueError(f"Unknown LLM_PROVIDER: {provider!r}")
 
 
@@ -85,14 +82,17 @@ def get_chat_descriptor():
     provider = _llm_provider()
     if provider == "ollama":
         return provider, os.getenv("OLLAMA_MODEL", "qwen3:4b")
-    if provider == "google":
-        return provider, os.getenv("GOOGLE_CHAT_MODEL", "gemini-2.0-flash")
+    if provider == DISABLED:
+        return provider, ""
     raise ValueError(f"Unknown LLM_PROVIDER: {provider!r}")
 
 
 def get_embedding_model():
-    """Return an embedding model, or None when the provider is not configured."""
+    """Return an embedding model, or None when the provider is disabled."""
     provider = _embedding_provider()
+
+    if provider == DISABLED:
+        return None
 
     if provider == "ollama":
         from langchain_ollama import OllamaEmbeddings
@@ -102,15 +102,6 @@ def get_embedding_model():
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         )
 
-    if provider == "google":
-        if not os.getenv("GOOGLE_API_KEY"):
-            return None
-        from langchain_google_genai import GoogleGenerativeAIEmbeddings
-
-        return GoogleGenerativeAIEmbeddings(
-            model=os.getenv("GOOGLE_EMBED_MODEL", "models/text-embedding-004")
-        )
-
     raise ValueError(f"Unknown EMBEDDING_PROVIDER: {provider!r}")
 
 
@@ -118,8 +109,8 @@ def get_embedding_descriptor():
     provider = _embedding_provider()
     if provider == "ollama":
         return provider, os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
-    if provider == "google":
-        return provider, os.getenv("GOOGLE_EMBED_MODEL", "models/text-embedding-004")
+    if provider == DISABLED:
+        return provider, ""
     raise ValueError(f"Unknown EMBEDDING_PROVIDER: {provider!r}")
 
 
@@ -144,6 +135,8 @@ def _normalise_model_id(model):
 def get_collection_name():
     """Chroma collection dedicated to the active embedding provider and model."""
     provider, model = get_embedding_descriptor()
+    if provider == DISABLED:
+        return ""
     model = _normalise_model_id(model)
     for (table_provider, table_model), name in COLLECTION_NAMES.items():
         if table_provider == provider and _normalise_model_id(table_model) == model:

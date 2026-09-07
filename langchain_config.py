@@ -406,7 +406,6 @@ user's uploaded documents. Do this even when the user does not mention documents
 Search first, then answer from what you find.
 Only say you do not have the information AFTER search_documents has returned no
 matching passages. Never refuse without searching.
-Use Search for current or external information that is not in the user's documents.
 
 Your final answer is returned as a structured object, not as free text with markers:
 - chat_response: the conversational answer. Never leave this empty.
@@ -494,24 +493,6 @@ def extract_agent_sections(result):
     return {field: str(payload.get(field) or "").strip() for field in SECTION_FIELDS}
 
 
-def get_search_tools():
-    """Build the SerpAPI tool on demand, or return nothing when unconfigured.
-
-    This used to run at import, which read the environment before the process had
-    finished configuring it and printed to stdout on every import.
-    """
-    serpapi_api_key = os.getenv("SERPAPI_API_KEY")
-    if not serpapi_api_key:
-        return []
-    try:
-        from langchain_community.agent_toolkits.load_tools import load_tools
-
-        return load_tools(tool_names=["serpapi"], serpapi_api_key=serpapi_api_key)
-    except Exception as e:
-        print(f"Search tool could not be initialized: {e}")
-        return []
-
-
 def build_agent(user_id=None, checkpointer=None):
     """Create a request-scoped agent and only expose RAG to signed-in accounts."""
     # Imported here, not at module scope: importing langchain_config must stay
@@ -532,11 +513,9 @@ def build_agent(user_id=None, checkpointer=None):
             "bind_tools; create_agent cannot run a tool loop with it."
         )
 
-    # Keep the tool list small. A 4B degrades quickly as tool count grows:
-    # search_documents plus optional web search is the whole budget.
-    tools = list(get_search_tools())
-    if user_id:
-        tools.insert(0, build_rag_tool(user_id))
+    # search_documents is the entire tool budget. Web search was removed with the
+    # SerpAPI wiring, and a 4B degrades quickly as the tool count grows anyway.
+    tools = [build_rag_tool(user_id)] if user_id else []
 
     return create_agent(
         model,

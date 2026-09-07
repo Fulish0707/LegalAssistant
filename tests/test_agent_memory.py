@@ -166,15 +166,14 @@ class AppCheckpointerWiringTests(unittest.TestCase):
         cls.tmpdir = tempfile.TemporaryDirectory()
         cls.saved_env = {
             name: os.environ.get(name)
-            for name in ("APP_STATE_DB", "AGENT_CHECKPOINT_DB", "APP_ENV", "GOOGLE_API_KEY", "LLM_PROVIDER", "EMBEDDING_PROVIDER")
+            for name in ("APP_STATE_DB", "AGENT_CHECKPOINT_DB", "APP_ENV", "LLM_PROVIDER", "EMBEDDING_PROVIDER")
         }
         cls.saved_modules = {name: sys.modules.get(name) for name in cls.MODULE_NAMES}
         os.environ["APP_STATE_DB"] = os.path.join(cls.tmpdir.name, "app_state.db")
         os.environ["AGENT_CHECKPOINT_DB"] = os.path.join(cls.tmpdir.name, "checkpoints.db")
         os.environ["APP_ENV"] = "testing"
-        os.environ["GOOGLE_API_KEY"] = ""
-        os.environ["LLM_PROVIDER"] = "google"
-        os.environ["EMBEDDING_PROVIDER"] = "google"
+        os.environ["LLM_PROVIDER"] = "none"
+        os.environ["EMBEDDING_PROVIDER"] = "none"
         for name in cls.MODULE_NAMES:
             sys.modules.pop(name, None)
         cls.app_module = importlib.import_module("app")
@@ -327,7 +326,7 @@ class AgentMemoryLiveTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self._saved = {name: os.environ.get(name) for name in ("LLM_PROVIDER", "SERPAPI_API_KEY")}
+        self._saved = {name: os.environ.get(name) for name in ("LLM_PROVIDER",)}
         models = _installed_models()
         if models is None:
             self.skipTest(f"Ollama is not reachable at {OLLAMA_BASE_URL}")
@@ -335,7 +334,6 @@ class AgentMemoryLiveTests(unittest.TestCase):
             self.skipTest(f"Ollama model {CHAT_MODEL} is not pulled (have: {models})")
         os.environ["LLM_PROVIDER"] = "ollama"
         # Keep the turn off the network beyond Ollama itself.
-        os.environ.pop("SERPAPI_API_KEY", None)
 
     def tearDown(self):
         for name, value in self._saved.items():

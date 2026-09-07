@@ -19,8 +19,6 @@ class ImportSmokeTests(unittest.TestCase):
             environment = os.environ.copy()
             environment["APP_STATE_DB"] = os.path.join(temp_dir, "app_state.db")
             environment["APP_ENV"] = "testing"
-            environment.pop("GOOGLE_API_KEY", None)
-            environment.pop("SERPAPI_API_KEY", None)
             environment["PYTHONPATH"] = os.pathsep.join(
                 filter(
                     None,

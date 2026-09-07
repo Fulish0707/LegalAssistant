@@ -34,7 +34,7 @@ The chat agent moved off the deprecated `langchain_classic.initialize_agent` ont
   agent was about to read anyway.
 - **Evaluation.** `evals/dataset.py` defines 16 golden cases (14 answerable, 2
   unanswerable) over 3 synthetic fixtures; `evals/run_eval.py --provider
-  ollama|google` runs them and exits non-zero when cases fail. It replaces
+  ollama` runs them and exits non-zero when cases fail. It replaces
   `langsmith_eval.ipynb`, which was neither diffable nor runnable in CI and has
   been deleted.
 - **Observability.** LangSmith tracing is opt-in and off by default; runs carry
@@ -79,10 +79,30 @@ history, and the history was already pushed to the origin remote.
 > **Outstanding user action — not fixed by any code change in this work:**
 > every credential that was previously committed in `.env` and pushed to origin
 > must be treated as disclosed and **rotated at its provider**. That covers every
-> secret the app reads — the Google API key, the SerpAPI key, the Google OIDC
-> client secret, the Flask `SECRET_KEY`, and `QUOTA_IP_SALT` — for whichever of
-> them the committed file actually contained. Rotating them is the only remedy;
+> secret the file contained — the Google API key, the SerpAPI key, the Google
+> OIDC client secret, the Flask `SECRET_KEY`, and `QUOTA_IP_SALT`. The Google
+> API and SerpAPI wiring has since been removed, so those two keys are no longer
+> read by anything; they were still disclosed and should still be revoked at
+> their provider rather than merely abandoned. Rotating them is the only remedy;
 > purging history is optional cleanup and is not a substitute.
+
+
+## Google API and SerpAPI removal
+
+The Gemini chat/embedding connector and the SerpAPI web-search tool were removed
+after the migration. The app now runs entirely on local Ollama models and reads
+no third-party AI credential.
+
+- `llm_model.py` supports `ollama` and `none`. `none` is an explicit off switch,
+  added because Ollama needs no credential and would otherwise leave no way to
+  run with AI disabled — a state the app's degradation paths and tests rely on.
+- `EMBEDDING_PROVIDER` now defaults to `ollama`, so the active collection is
+  `docs_ollama_nomic`. An existing Google-embedded knowledge base is not migrated
+  and reads as empty until re-ingested.
+- `search_documents` is the entire tool budget; there is no web search.
+- `langchain-google-genai` and `google-search-results` were dropped from
+  `requirements.txt`.
+- Google OIDC sign-in is unaffected — it is authentication, not an AI API.
 
 ## Next steps
 
