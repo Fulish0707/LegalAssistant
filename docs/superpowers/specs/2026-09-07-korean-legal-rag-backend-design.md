@@ -483,6 +483,11 @@ Checks in V0.3 (all deterministic, `verification/verifier.py`):
 3. `statute_not_in_evidence`: any `<law> 제N조` pattern in `analysis` or `summary` whose article is not in any evidence header or text.
 4. `case_not_in_evidence`: any case-number pattern in the answer text not present in the evidence.
 
+Two deterministic refinements were added after the first live run with `qwen3:4b`:
+
+- **Citation backfill** (`verification/backfill.py`): when the answer prose names an article or case number that an evidence block contains, a citation pointing at that block is added before verification. Nothing outside the bundle is ever added; this only restores traceability the model dropped.
+- **User-mentioned references are exempt from the not-in-evidence checks.** If the user wrote `민법 제839조의2` in the question, the answer may repeat it to say it could not be confirmed. Citing it with a source id is still checked against that block (`source_id_mismatch`).
+
 V0.5 adds `temporal_mismatch` (cited version not effective on the event date) and `unsupported_claim` (sentence-level entailment against the cited block).
 
 **Q11 (failed verification):** `VerificationPolicy.decide(report, attempt)`:
@@ -564,7 +569,7 @@ Loading order: `configs/default.yaml` → `configs/<profile>.yaml` (profile from
 | R3 | Qwen3 4B fails to emit valid `LegalAnswer` JSON | Generation errors | Ollama JSON-schema `format`, one repair retry with the validation error, `think` disabled |
 | R4 | 8 GB VRAM shared between LLM, embedder, and reranker | OOM or slow turns | Embedder via Ollama shares the runtime; reranker optional and CPU-capable; V0.4 training unloads serving models |
 | R5 | Statute article parsing edge cases (`제3조의2`, 삭제 조문, 부칙) | Wrong chunk boundaries | Regex covered by unit tests; unknown structures fall back to sentence-window chunking with `path="fallback:n"` |
-| R6 | Embedded Qdrant cannot be shared by two processes | API and index build collide | Index build is a separate step; API opens the index read-only after build; server mode for concurrent use |
+| R6 | Embedded Qdrant allows one client per storage path, even inside one process | API and index build collide; tests that open a second retriever fail | Index build is a separate step and closes its client; the API builds one retriever lazily; integration tests share a single module-scoped retriever; server mode for concurrent use |
 | R7 | Verification strips too aggressively and empties answers | Unhelpful responses | Reject only when no citations remain and evidence was required; trace records every strip for tuning |
 | R8 | Docker socket unavailable in this session | Cannot validate server mode | Embedded mode is the tested path; server mode is covered by a live test to run on the host |
 
