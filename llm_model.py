@@ -5,11 +5,7 @@ import os
 DEFAULT_LLM_PROVIDER = "ollama"
 DEFAULT_EMBEDDING_PROVIDER = "ollama"
 
-# Chroma is dimension-locked per collection. Two providers at the same dimension
-# (text-embedding-004 and nomic-embed-text are both 768) will be silently accepted
-# into one collection and then compared across unrelated embedding spaces, which
-# produces wrong neighbours with no error. The collection name therefore encodes
-# the provider and model, so switching connectors creates a new collection.
+# Keep embedding spaces in separate collections, even when dimensions match.
 COLLECTION_NAMES = {
     ("ollama", "nomic-embed-text"): "docs_ollama_nomic",
 }
@@ -38,28 +34,12 @@ def get_chat_model():
     if provider == "ollama":
         from langchain_ollama import ChatOllama
 
-        # The `reasoning` kwarg is deliberately left unset. All three settings were
-        # measured on qwen3:4b, and each one trades away something:
-        #
-        #   reasoning=False  thinking prose leaks into `content` with the <think>
-        #                    tags stripped, so nothing downstream can recognise it.
-        #   reasoning=True   `content` stays clean and thinking is isolated in
-        #                    additional_kwargs["reasoning_content"] — but it
-        #                    suppressed the structured-output tool call in 3 of 3
-        #                    create_agent runs, so `structured_response` was never
-        #                    populated.
-        #   unset            `content` stays clean, thinking is dropped, and
-        #                    `structured_response` populated in 2 of 3 runs.
-        #
-        # Unset is the only setting where the structured-output path works at all,
-        # so it wins. That 2-of-3 is also why extract_agent_sections() in
-        # langchain_config.py must keep its JSON fallback: a 4B does not honour a
-        # response schema reliably enough to depend on. Set OLLAMA_REASONING=true
-        # to trade structured output for thinking visibility in traces.
+        # Keep provider reasoning defaults unless explicitly overridden.
+        # Response parsing supports both structured output and JSON text.
         options = {
             "model": os.getenv("OLLAMA_MODEL", "qwen3:4b"),
             "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-            # Qwen3 degrades and repeats under greedy decoding. Do not use 0.
+            # Sampling settings can be overridden for the configured model.
             "temperature": float(os.getenv("OLLAMA_TEMPERATURE", "0.7")),
             "top_p": 0.8,
             "top_k": 20,
@@ -73,12 +53,7 @@ def get_chat_model():
 
 
 def get_chat_descriptor():
-    """(provider, model) for the active chat model, without constructing one.
-
-    Symmetric with get_embedding_descriptor(), and the reason tracing metadata
-    can name the model: provider alone does not identify a run, since qwen3:4b
-    and qwen3:8b are the same provider and a different experiment.
-    """
+    """Return provider and model identifiers without constructing a client."""
     provider = _llm_provider()
     if provider == "ollama":
         return provider, os.getenv("OLLAMA_MODEL", "qwen3:4b")
@@ -115,18 +90,8 @@ def get_embedding_descriptor():
 
 
 def _normalise_model_id(model):
-    """Collapse the spellings of one model onto a single key.
-
-    Google accepts both `models/text-embedding-004` and `text-embedding-004`, and
-    Ollama accepts both `nomic-embed-text` and `nomic-embed-text:latest`. They are
-    the same embedding space each time, so they must not produce two collections:
-    that would silently re-embed and hide everything ingested under the other
-    spelling. Lookup path only. get_embedding_descriptor() keeps reporting the raw
-    spelling, because that is what is handed to the SDK.
-    """
+    """Normalize the default Ollama tag for collection lookup only."""
     model = model.strip()
-    if model.startswith("models/"):
-        model = model[len("models/"):]
     if model.endswith(":latest"):
         model = model[: -len(":latest")]
     return model

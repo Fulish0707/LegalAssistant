@@ -15,7 +15,7 @@ class FakeVectorStore:
 
 class SearchDocumentsToolTests(unittest.TestCase):
     def test_tool_name_is_function_call_safe(self):
-        """Gemini and Qwen3 both require ^[a-zA-Z0-9_-]+$. 'RAG Retriever' fails."""
+        """Tool names must match ^[a-zA-Z0-9_-]+$ for provider compatibility."""
         import langchain_config
 
         tool = langchain_config.build_rag_tool("user-1")

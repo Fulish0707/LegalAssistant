@@ -1,9 +1,7 @@
 """Live check of the Ollama embedding connector.
 
 Skips cleanly when Ollama is not running or the model is not pulled, so the suite
-stays green on machines without it. This is the test that would catch a broken
-collection scheme: nomic-embed-text and text-embedding-004 are both 768, so the
-dimension alone can never tell the two embedding spaces apart at runtime.
+stays green on machines without it. Checks the default embedding dimensions and explicit collection selection.
 """
 
 import os
@@ -57,8 +55,7 @@ class OllamaConnectorLiveTests(unittest.TestCase):
         vector = embedding_model.embed_query("A short probe sentence.")
 
         self.assertEqual(len(vector), 768)
-        # 768 is also text-embedding-004's width. The dimension cannot separate
-        # the two spaces, so the collection name has to.
+        # Matching dimensions do not imply matching embedding spaces.
         self.assertNotEqual(get_collection_name(), "langchain")
         self.assertEqual(get_collection_name(), "docs_ollama_nomic")
 

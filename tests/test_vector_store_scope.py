@@ -21,10 +21,8 @@ class VectorStoreScopeTests(unittest.TestCase):
             else:
                 os.environ[name] = value
 
-    def test_google_and_ollama_never_share_a_collection(self):
-        """768-dim collision: nomic-embed-text and text-embedding-004 are both 768,
-        so Chroma would accept both into one collection and silently return
-        neighbours computed across two unrelated embedding spaces."""
+    def test_disabled_and_ollama_use_distinct_collection_names(self):
+        """The active connector must use a nonempty, explicitly scoped collection."""
         os.environ["EMBEDDING_PROVIDER"] = "none"
         disabled = get_collection_name()
         os.environ["EMBEDDING_PROVIDER"] = "ollama"
@@ -35,9 +33,7 @@ class VectorStoreScopeTests(unittest.TestCase):
         self.assertNotEqual(ollama, "langchain")
 
     def test_vector_store_is_opened_on_the_provider_scoped_collection(self):
-        """A Chroma handle built without collection_name lands in the legacy
-        `langchain` collection, which is Google-embedded and must never receive
-        vectors from another provider."""
+        """Chroma must receive the configured collection instead of its default."""
         import langchain_config
 
         os.environ["EMBEDDING_PROVIDER"] = "ollama"

@@ -33,7 +33,7 @@ class TracingMetadataTests(unittest.TestCase):
                 os.environ[name] = value
 
     def test_run_metadata_identifies_the_model_provider(self):
-        """Provider tagging is what makes Gemini vs Qwen3 comparable in LangSmith."""
+        """Provider tagging identifies the connector used for each traced run."""
         import langchain_config
 
         os.environ["LLM_PROVIDER"] = "ollama"

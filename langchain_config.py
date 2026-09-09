@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 from langchain_core.tools import tool
+from llm_prompt import KOREAN_LEGAL_POLICY, CHAT_OUTPUT_INSTRUCTIONS
 from pydantic import BaseModel, Field
 
 # Define directories. Resolved at call time, never at import: importing this
@@ -38,7 +39,7 @@ def get_persist_directory():
 #
 # Off unless LANGSMITH_TRACING is explicitly truthy. Tracing ships the full
 # prompt, the retrieved document text and the model's answer to LangSmith, and
-# this app holds users' personal statements -- so it is opt-in, per deployment,
+# this app holds users' legal documents -- so it is opt-in, per deployment,
 # and never the default.
 
 TRUTHY = ("1", "true", "yes", "on")
@@ -64,13 +65,7 @@ def tracing_status():
 
 
 def run_metadata(user_id=None):
-    """Metadata attached to every agent run, for LangSmith run comparison.
-
-    Provider and model are the whole point: a trace that does not say whether it
-    came from gemini-2.0-flash or qwen3:4b cannot answer the question this
-    migration exists to answer. Guests have no thread, so they are tagged
-    "guest" rather than dropped -- an untagged run is an unattributable run.
-    """
+    """Attach provider, model, collection, and account identifiers to each run."""
     llm_provider, llm_model = get_chat_descriptor()
     embedding_provider, embedding_model = get_embedding_descriptor()
     return {
@@ -138,14 +133,7 @@ def get_document_source_folder():
     return doc_folder
 
 def get_vector_store():
-    """Build the Chroma handle on demand. Never at import.
-
-    collection_name is the only thing keeping providers apart. text-embedding-004
-    and nomic-embed-text are both 768-dimensional, so Chroma would accept vectors
-    from either into one collection and then compute neighbours across two
-    unrelated embedding spaces -- wrong results, no exception. A bare Chroma(...)
-    would land in the legacy `langchain` collection, which is Google-embedded.
-    """
+    """Build Chroma on demand with a collection scoped to the embedding model."""
     embedding_model = get_embedding_model()
     if embedding_model is None:
         return None
@@ -363,14 +351,7 @@ def retrieve_for_user(user_id, query, k=4):
 
 
 def build_rag_tool(user_id):
-    """A deterministic retrieval tool scoped to one account.
-
-    Every step here is code, not model judgement. That matters more with a 4B
-    model: what the model cannot decide, it cannot get wrong. The old version
-    retrieved twice per call -- once directly, then again inside the QA chain --
-    and spent an extra LLM call summarising what the agent was about to read
-    anyway. This retrieves once and hands back the passages.
-    """
+    """Build an account-scoped tool returning document excerpts and source names."""
 
     @tool("search_documents")
     def search_documents(query: str) -> str:
@@ -394,28 +375,7 @@ def build_rag_tool(user_id):
     return search_documents
 
 
-AGENT_PREFIX = """You are PS_Agent, a practical AI work companion for students and professionals.
-
-Your main jobs are:
-- Help users draft and improve university personal statements, job application statements, and professional reports.
-- Summarize uploaded or retrieved documents clearly.
-- Answer general questions in a ChatGPT-like way.
-ALWAYS call search_documents before answering any question about facts, figures,
-policies, dates, names, requirements, or anything that could plausibly appear in the
-user's uploaded documents. Do this even when the user does not mention documents.
-Search first, then answer from what you find.
-Only say you do not have the information AFTER search_documents has returned no
-matching passages. Never refuse without searching.
-
-Your final answer is returned as a structured object, not as free text with markers:
-- chat_response: the conversational answer. Never leave this empty.
-- statement_suggestion: university personal statement improvements, when relevant.
-- job_statement_suggestion: job application statement improvements, when relevant.
-- report_suggestion: report structure, clarity, and business/audience improvements, when relevant.
-Leave a suggestion field as an empty string when it does not apply. Do not write
-section markers such as [CHAT] into any field.
-
-Follow the user's language. Prefer Korean when the user writes in Korean; otherwise use English."""
+AGENT_PREFIX = KOREAN_LEGAL_POLICY + CHAT_OUTPUT_INSTRUCTIONS
 
 @dataclass
 class AgentContext:
@@ -425,16 +385,12 @@ class AgentContext:
 
 
 class AgentSections(BaseModel):
-    """Schema-enforced replacement for the [CHAT]/[STATEMENT_SUGGESTION] markers.
+    """Structured legal answer fields consumed by the frontend."""
 
-    A 4B model follows freeform marker conventions far less reliably than Gemini,
-    so the contract is enforced by schema instead of recovered by regex.
-    """
-
-    chat_response: str = Field(description="The conversational answer.")
-    statement_suggestion: str = Field(default="", description="University personal statement improvements.")
-    job_statement_suggestion: str = Field(default="", description="Job application statement improvements.")
-    report_suggestion: str = Field(default="", description="Report structure and clarity improvements.")
+    chat_response: str = Field(description="The nonempty Korean-law conversational answer with sources and material caveats.")
+    statement_suggestion: str = Field(default="", description="Legal document drafts or revisions (서류 초안 제안), such as 내용증명 or agreements.")
+    job_statement_suggestion: str = Field(default="", description="Legal application or filing drafts (신청서 제안).")
+    report_suggestion: str = Field(default="", description="Legal document review, clause risks, and proposed revisions (검토 의견 제안).")
 
 
 SECTION_FIELDS = (
@@ -446,17 +402,7 @@ SECTION_FIELDS = (
 
 
 def extract_agent_sections(result):
-    """Pull the four answer sections out of a create_agent result, or None.
-
-    Two routes, because the two providers behave differently. Gemini emits the
-    schema as a structured-output tool call, so `structured_response` arrives as
-    an AgentSections instance. qwen3:4b (verified over repeated runs) writes the
-    same JSON into the final message content and never routes it through the tool
-    call, leaving `structured_response` as None -- so the content is parsed here.
-
-    Returns None when neither route yields sections, which is the caller's signal
-    to fall back to the legacy [CHAT] marker parser.
-    """
+    """Read schema output or JSON message content; return None for marker-parser fallback."""
     if not isinstance(result, dict):
         return None
 
@@ -504,17 +450,13 @@ def build_agent(user_id=None, checkpointer=None):
         return None
 
     if not hasattr(model, "bind_tools"):
-        # Verified: qwen3:4b via ChatOllama does support bind_tools. Reaching this
-        # branch means the configured provider cannot run a tool loop at all, so a
-        # RAG agent is not what would come back. Fail loudly rather than quietly
-        # serving a different, worse product under the same name.
+        # The agent requires a model that supports tool binding.
         raise RuntimeError(
             f"LLM_PROVIDER={os.getenv('LLM_PROVIDER')} returned a model without "
             "bind_tools; create_agent cannot run a tool loop with it."
         )
 
-    # search_documents is the entire tool budget. Web search was removed with the
-    # SerpAPI wiring, and a 4B degrades quickly as the tool count grows anyway.
+    # Document retrieval is available only to signed-in accounts.
     tools = [build_rag_tool(user_id)] if user_id else []
 
     return create_agent(

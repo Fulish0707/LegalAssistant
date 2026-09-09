@@ -1,9 +1,9 @@
 import pytesseract
 from PIL import Image
 import os
-import pypdf # Added for PDF processing
-import re # Added for improved post-processing
-import docx # Added for DOCX processing
+import pypdf
+import re
+import docx
 from html_sanitizer import sanitize_report_html
 
 DOCUMENT_ANALYSIS_MODES = {
@@ -17,8 +17,8 @@ Include:
 - Suggested follow-up questions""",
     },
     "report": {
-        "label": "Professional Report",
-        "instruction": """Create a polished professional report for a boss or business client.
+        "label": "Legal Document Review",
+        "instruction": """Create a Korean-law document review identifying obligations, disputed facts, clause risks, and proposed revisions.
 Include:
 - Clear title
 - Executive summary
@@ -170,7 +170,7 @@ def build_document_analysis_prompt(extracted_text, user_instructions, analysis_m
     mode_config = DOCUMENT_ANALYSIS_MODES.get(analysis_mode, DOCUMENT_ANALYSIS_MODES["report"])
     prompt_user_instructions = user_instructions if user_instructions else "No extra instructions provided."
     prompt_question = question if question else "No specific question provided."
-    return f"""Analyze the following document as a work companion.
+    return f"""Analyze the following extracted document as a Korean-law legal assistant.
 
 Mode: {mode_config["label"]}
 Mode instructions:
@@ -190,33 +190,14 @@ User question for Q&A mode:
 The final answer must be in clean HTML format only.
 Write in Korean unless the user instructions explicitly request another language.
 
-Please adhere to the following HTML styling for the report:
-- Heading elements (e.g., <h1>, <h2>).
-- Subheading elements (e.g., <h3>, <h4>).
-- Main body text elements (e.g., <p>, <li>, general text).
-- Apply 1.5 line spacing for text content where appropriate.
-- Use 'Nanum Gothic' font for Korean text and 'Times New Roman' for English text, if specified in the overall system prompt.
-These styles should be embedded within the HTML, for example, using inline CSS (e.g., style="font-size: 20pt;") or a <style> block.
+Use semantic HTML headings, paragraphs, lists, and HTML tables for tabular data.
+Do not use Markdown tables, code fences, scripts, styles, or chat JSON.
+Preserve legally meaningful dates, amounts, names, clause numbers, and negations.
+Identify unreadable or ambiguous OCR text instead of guessing. Cite available
+page or clause identifiers; do not invent them. Separate document statements from
+legal conclusions and flag legal authorities requiring external verification.
+The response should begin directly with an HTML heading or paragraph.
 
-You are an intelligent OCR assistant. Extract all readable content from the attached image and return it in a clean, structured report format. Use the following rules:
-
-- Bold section titles
-- Use bullet points for lists
-- Use tables (Markdown format) for any tabular data
-- Correct formatting inconsistencies
-- Remove any image noise, page numbers, or irrelevant artifacts
-The result should look like a clean text report ready for review.
-
-[Image]
-
-Please write the report in Korean.
-
-The final output must be *only* the HTML content itself.
-- Do NOT include any markdown-style code block wrappers around the HTML (e.g., do not start with ```html or '''html and end with ``` or ''').
-- Do NOT include ```tool_code```.
-- Do NOT include ```Action```.
-- Do NOT include any LLM-specific logging, thoughts, or chat-like prefixes (e.g., "Thought:", "[chat]", "Okay, here is the HTML report:").
-The response should begin directly with <html> or a similar top-level HTML tag.
 """
 
 def analyze_document(file_path, file_extension, user_instructions, llm, prompt_template, logger, analysis_mode="report", question="", include_extracted_text=False, quota_reserver=None):
@@ -271,24 +252,3 @@ def analyze_document(file_path, file_extension, user_instructions, llm, prompt_t
     except Exception as e:
         logger.error(f"Unhandled error in analyze_document for {file_path}: {str(e)}", exc_info=True)
         return ({"error": f"An unexpected server error occurred during report generation: {str(e)}"}, 500)
-
-def generate_report_from_document(file_path, file_extension, user_instructions, llm, prompt_template, logger):
-    return analyze_document(
-        file_path=file_path,
-        file_extension=file_extension,
-        user_instructions=user_instructions,
-        llm=llm,
-        prompt_template=prompt_template,
-        logger=logger,
-        analysis_mode="report",
-    )
-
-
-if __name__ == '__main__':
-    # This block is for testing the script directly.
-    # print("llm_ocr.py script is being run directly for testing.")
-    # ... (rest of the __main__ block remains unchanged from previous version)
-    
-    print("\nllm_ocr.py loaded. Functions detect_text and generate_report_from_document are available.")
-    print("Ensure Tesseract OCR is installed and 'pytesseract', 'Pillow', 'pypdf', 'python-docx' Python packages are installed.")
-    print("To test generate_report_from_document, you would need to call it with LLM, prompt_template, and logger instances.")
