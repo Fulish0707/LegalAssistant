@@ -1,0 +1,5 @@
+# Google Colab. Mount Drive and point paths at it; Qdrant stays embedded.
+paths:
+  root: /content/drive/MyDrive/legal_rag
+embedding:
+  batch_size: 64

@@ -14,6 +14,7 @@ This tracker records the integration status and implementation order for product
 | 8 | Reproducible dependencies and CI | Not started | Pin dependencies, define Python support, and add test/lint/security workflows. |
 | 9 | Test expansion | Partially integrated | Add authentication, quota, upload-defense, RAG-isolation, and failure-path coverage. |
 | 10 | STT parameter bug | Not applicable | Audio processing was removed from `main`; this bug now belongs to `feat/local-audio-document`. |
+| 11 | Korean legal RAG backend (`src/legal_rag`) | V0.1–V0.3 integrated | Data foundation, hybrid retrieval with evaluation, verified RAG chat over CLI and FastAPI are on `main` with 106 offline tests. Next: V0.4 QLoRA (SFT dataset, Transformers backend) and V0.5 temporal and claim-level verification. See `superpowers/specs/2026-09-07-korean-legal-rag-backend-design.md`. |
 
 ## Completed foundation work
 
