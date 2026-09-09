@@ -26,11 +26,10 @@ What is scored, and by what:
                  fabricated specifics the case forbids.
   groundedness   MODEL-JUDGED, and the only model-judged number here. One extra
                  LLM call per answerable case asks whether every claim in the
-                 answer is supported by the retrieved passages. A 4B judging its
+                 answer is supported by the retrieved passages. A model judging its
                  own output is weak evidence; treat it as a smell test, not a
                  score, and pass --no-judge to skip it.
-  parse failure  DETERMINISTIC. qwen3:4b populates `structured_response` only
-                 sometimes, so a run where the sections cannot be extracted is
+  parse failure  DETERMINISTIC. Models may return JSON text instead of `structured_response`, so a run where the sections cannot be extracted is
                  counted and reported on its own rather than scored as a wrong
                  answer.
 

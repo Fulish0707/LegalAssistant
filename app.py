@@ -16,15 +16,13 @@ from langchain_config import (
     delete_knowledge_base_source,
     build_run_config,
     tracing_status,
-) # Assuming these are correctly configured
-import time # Needed for a brief pause
+)
 import logging
 import sqlite3
 import json
-import re # Added for cleaning output
+import re
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 import os
-import sys
 import secrets
 from werkzeug.utils import secure_filename
 import tempfile
@@ -39,7 +37,6 @@ from quota import (
 )
 
 
-# Assuming llm_ocr.py is in the same directory or accessible via PYTHONPATH
 try:
     import llm_ocr
 except ModuleNotFoundError:
@@ -397,11 +394,9 @@ class _AnswerTokenFilter:
     """Decide once, per model call, whether a message stream is visible answer.
 
     Two things must never reach the browser as answer tokens. Reasoning, which
-    qwen3 emits inline as <think>...</think>, is stripped wherever it appears.
-    And the response_format schema JSON: a 4B rarely routes the answer through
-    the structured-output tool call, so the final message content *is* the JSON,
-    and the old token callback streamed `"job_statement_suggestion"` and `"}"`
-    to users verbatim.
+    some models emit inline as <think>...</think>, is stripped wherever it appears.
+    Schema JSON can appear in message content instead of a structured tool call;
+    its field names and delimiters must not reach users as answer tokens.
 
     The gate is deliberately decide-once rather than an incremental JSON parser.
     The frontend overwrites the streamed text with final_response.chat_response
@@ -500,7 +495,7 @@ def _draft_is_already_in_thread(agent, run_config, draft):
 
     The draft used to be appended to every user message. That was harmless while
     turns were stateless, but the thread is persisted now, so turn N carried N
-    copies of the draft into a 4B's context window. The fix keeps the draft in
+    copies of the draft into the model's context window. The fix keeps the draft in
     the message (the model needs it inline; the system prompt is static and the
     typed context is not interpolated into it) but sends it only when it changed.
 
@@ -572,7 +567,7 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
         # Metadata and tags ride on the runnable config, which is how LangChain
         # gets them onto the LangSmith run. Attached unconditionally: a guest
         # turn is still a run whose provider and model must be identifiable, and
-        # comparing qwen3:4b against Gemini needs every run labelled, not most.
+        # model comparisons require every run to be labelled.
         run_config = build_run_config(thread_user_id)
 
         # Only the new turn goes in. The checkpointer replays the thread's earlier
@@ -630,7 +625,7 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
             yield _sse({'type': 'token_chunk', 'content': buffer})
 
         # Preferred route: the schema-enforced sections, from structured_response
-        # (Gemini) or from JSON in the final message content (qwen3:4b). Falls back
+        # or from JSON in the final message content. Falls back
         # to the legacy [CHAT] marker parser when neither is available.
         parsed_sections = extract_agent_sections(final_state)
         if parsed_sections is None:
@@ -1071,7 +1066,7 @@ def process_document_ocr():
 
     except Exception as e:
         # This catch block is for errors during file handling in app.py itself, 
-        # before calling generate_report_from_document.
+        # before calling analyze_document.
         app.logger.error(f"Unhandled error in process_document_ocr (file handling stage) for {filename if 'filename' in locals() else 'unknown file'}: {str(e)}", exc_info=True)
         return jsonify({"error": f"An unexpected server error occurred during file preparation: {str(e)}"}), 500
     finally:
