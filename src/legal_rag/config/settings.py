@@ -1,0 +1,148 @@
+"""Typed settings for the legal RAG backend.
+
+Precedence, highest first: environment variables (``LEGAL_RAG__SECTION__KEY``),
+YAML profile values passed as init kwargs by :func:`legal_rag.config.load_settings`,
+then the defaults declared here.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class _Section(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class PathsSettings(_Section):
+    root: Path = Path(".")
+    raw_dir: Path = Path("data/raw")
+    processed_dir: Path = Path("data/processed")
+    index_dir: Path = Path("data/indexes")
+    eval_dir: Path = Path("data/eval")
+
+
+class CorpusSettings(_Section):
+    version: str = "v1"
+
+
+class EmbeddingSettings(_Section):
+    backend: Literal["ollama", "fake"] = "ollama"
+    model: str = "bge-m3"
+    base_url: str = "http://localhost:11434"
+    batch_size: int = 16
+    fake_dimension: int = 64
+    timeout_seconds: float = 120.0
+
+
+class SparseSettings(_Section):
+    tokenizer: Literal["regex", "kiwi"] = "regex"
+    k1: float = 1.2
+    b: float = 0.75
+
+
+class QdrantSettings(_Section):
+    mode: Literal["embedded", "server"] = "embedded"
+    path: Path | None = None  # defaults to <index_dir>/<corpus_version>/qdrant
+    url: str = "http://localhost:6333"
+    api_key: SecretStr | None = None  # environment only, never YAML
+
+
+class RetrievalSettings(_Section):
+    k_dense: int = 20
+    k_sparse: int = 20
+    k_fused: int = 20
+    k_final: int = 5
+    rrf_k: int = 60
+    dense_weight: float = 1.0
+    sparse_weight: float = 1.0
+
+
+class RerankSettings(_Section):
+    backend: Literal["noop", "cross_encoder"] = "noop"
+    model: str = "BAAI/bge-reranker-v2-m3"
+    device: str = "cpu"
+
+
+class LLMSettings(_Section):
+    backend: Literal["ollama", "fake", "transformers"] = "ollama"
+    model: str = "qwen3:4b"
+    base_url: str = "http://localhost:11434"
+    temperature: float = 0.2
+    max_tokens: int = 1024
+    adapter: str | None = None
+    timeout_seconds: float = 120.0
+
+
+class RagSettings(_Section):
+    allow_clarification: bool = True
+    llm_rewrite: bool = False
+    history_turns: int = 4
+    max_regenerations: int = 1
+    max_evidence_chars: int = 1500
+
+
+class ApiSettings(_Section):
+    host: str = "127.0.0.1"
+    port: int = 8000
+
+
+class TraceSettings(_Section):
+    include_text: bool = False
+    path: Path | None = None
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="LEGAL_RAG__",
+        env_nested_delimiter="__",
+        extra="forbid",
+        frozen=True,
+    )
+
+    paths: PathsSettings = Field(default_factory=PathsSettings)
+    corpus: CorpusSettings = Field(default_factory=CorpusSettings)
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    sparse: SparseSettings = Field(default_factory=SparseSettings)
+    qdrant: QdrantSettings = Field(default_factory=QdrantSettings)
+    retrieval: RetrievalSettings = Field(default_factory=RetrievalSettings)
+    rerank: RerankSettings = Field(default_factory=RerankSettings)
+    llm: LLMSettings = Field(default_factory=LLMSettings)
+    rag: RagSettings = Field(default_factory=RagSettings)
+    api: ApiSettings = Field(default_factory=ApiSettings)
+    trace: TraceSettings = Field(default_factory=TraceSettings)
+
+    @classmethod
+    def settings_customise_sources(
+        cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+    ):
+        # Environment beats YAML (which arrives as init kwargs), which beats defaults.
+        return (env_settings, init_settings)
+
+    # Derived paths -----------------------------------------------------------------
+    def resolve(self, path: Path) -> Path:
+        return path if path.is_absolute() else self.paths.root / path
+
+    def raw_dir(self) -> Path:
+        return self.resolve(self.paths.raw_dir)
+
+    def processed_corpus_dir(self) -> Path:
+        return self.resolve(self.paths.processed_dir) / self.corpus.version
+
+    def index_corpus_dir(self) -> Path:
+        return self.resolve(self.paths.index_dir) / self.corpus.version
+
+    def qdrant_path(self) -> Path:
+        return self.resolve(self.qdrant.path) if self.qdrant.path else self.index_corpus_dir() / "qdrant"
+
+    def hash(self) -> str:
+        """Stable digest of the non-secret configuration, recorded in corpus manifests."""
+        payload = self.model_dump(mode="json", exclude={"qdrant": {"api_key"}})
+        encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()[:16]

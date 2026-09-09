@@ -1,0 +1,3 @@
+{"id": "q1", "query": "집주인이 보증금을 돌려주지 않습니다", "relevant_document_ids": ["statute:98c0da777ea51037", "court_decision:f2ab898848914a75", "admin_interpretation:10fe05c8405cf674"]}
+{"id": "q2", "query": "민법 제750조 불법행위 손해배상", "relevant_document_ids": ["statute:732fa17eaabfbf01", "court_decision:89d208f831cd9d57"]}
+{"id": "q3", "query": "임차권등기명령 신청서에 적어야 하는 사항", "relevant_document_ids": ["statute:98c0da777ea51037"], "filters": {"document_types": ["statute"]}}
