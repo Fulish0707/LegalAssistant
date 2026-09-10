@@ -27,7 +27,6 @@ import secrets
 from werkzeug.utils import secure_filename
 import tempfile
 import requests
-import auth
 from quota import (
     DAILY_AI_REQUEST_LIMIT,
     QuotaResult,
@@ -72,28 +71,37 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=not is_local_environment,
-    GOOGLE_OIDC_CLIENT_ID=os.getenv("GOOGLE_OIDC_CLIENT_ID"),
-    GOOGLE_OIDC_CLIENT_SECRET=os.getenv("GOOGLE_OIDC_CLIENT_SECRET"),
-    GOOGLE_OIDC_REDIRECT_URI=os.getenv("GOOGLE_OIDC_REDIRECT_URI"),
     QUOTA_IP_SALT=os.getenv("QUOTA_IP_SALT"),
     DAILY_AI_REQUEST_LIMIT=int(os.getenv("DAILY_AI_REQUEST_LIMIT", str(DAILY_AI_REQUEST_LIMIT))),
 )
 app.config["QUOTA_IP_SALT"] = app.config["QUOTA_IP_SALT"] or secret_key
-app.config["GOOGLE_OIDC_CONFIGURED"] = all(
-    app.config[name]
-    for name in (
-        "GOOGLE_OIDC_CLIENT_ID",
-        "GOOGLE_OIDC_CLIENT_SECRET",
-        "GOOGLE_OIDC_REDIRECT_URI",
-    )
-)
-auth.init_oauth(app)
 
 
 @app.before_request
 def establish_anonymous_user():
+    """Give every browser one opaque workspace id, carried in the signed cookie.
+
+    This is the only identity in the app: SQL rows, vector filters, the agent's
+    context and its checkpoint thread all key on it. Nothing submitted by the
+    client -- query string, JSON, headers, or the old account cookie keys --
+    can pick a different owner.
+    """
     if "user_id" not in session:
         session["user_id"] = secrets.token_urlsafe(32)
+    # Obsolete keys from the removed Google sign-in are dropped rather than
+    # honoured: an old account cookie never recovers that account's records.
+    for key in ("authenticated_user_id", "account_email", "auth_next", "oidc_nonce"):
+        session.pop(key, None)
+    # Drafts used to live in the cookie itself. Migrate one once, without
+    # overwriting a draft the workspace has already saved server-side.
+    legacy_draft = session.pop("guest_draft", None)
+    if isinstance(legacy_draft, str):
+        connection = get_db()
+        connection.execute(
+            "INSERT OR IGNORE INTO personal_statement (user_id, draft) VALUES (?, ?)",
+            (session["user_id"], legacy_draft),
+        )
+        connection.commit()
 
 DB_FILE = os.getenv("APP_STATE_DB", "sqlite_db/app_state.db") # Define DB_FILE before use
 db_dir = os.path.dirname(DB_FILE)
@@ -141,15 +149,10 @@ def ensure_database_schema(conn):
     cursor.execute("CREATE TABLE IF NOT EXISTS personal_statement (user_id TEXT PRIMARY KEY, draft TEXT NOT NULL DEFAULT '')")
     cursor.execute("CREATE TABLE IF NOT EXISTS chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_user_id_id ON chat_history(user_id, id)")
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
-            google_subject TEXT NOT NULL UNIQUE,
-            email TEXT,
-            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            last_login_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+    # The Google-era users table is no longer created. Existing installs keep
+    # theirs untouched; nothing in the app reads it any more.
+    # daily_ai_quota keeps the legacy 'user' kind so old rows stay valid; the app
+    # itself only reserves 'guest_ip' entries now.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS daily_ai_quota (
             identity_kind TEXT NOT NULL CHECK(identity_kind IN ('user', 'guest_ip')),
@@ -201,17 +204,6 @@ def init_db():
         # but since we used `with app.app_context()`, `close_connection` will be triggered.
 
 
-auth.register_auth_routes(app)
-app.auth = auth
-
-
-@app.context_processor
-def inject_authenticated_account():
-    return {
-        "authenticated_account_email": auth.get_current_user_email(),
-        "authenticated_user_id": auth.get_current_user_id(),
-    }
-
 def get_personal_statement_from_db(user_id):
     conn = get_db()
     c = conn.cursor()
@@ -243,22 +235,16 @@ def clear_chat_history_in_db(user_id):
     c = conn.cursor()
     c.execute('DELETE FROM chat_history WHERE user_id=?', (user_id,))
     conn.commit()
-    print("Chat history cleared for the active anonymous session.")
+    print("Chat history cleared for the active browser workspace.")
 
 
 def reserve_ai_request():
-    """Reserve one daily AI request for the current account or anonymous client."""
-    user_id = auth.get_current_user_id()
-    if user_id:
-        identity_kind, identity_value = "user", user_id
-    else:
-        client_ip = client_ip_from_request(request)
-        identity_kind = "guest_ip"
-        identity_value = guest_ip_identity(client_ip, app.config["QUOTA_IP_SALT"])
+    """Reserve one daily AI request for the direct peer's salted IP identity."""
+    client_ip = client_ip_from_request(request)
     return reserve_daily_quota(
         get_db(),
-        identity_kind,
-        identity_value,
+        "guest_ip",
+        guest_ip_identity(client_ip, app.config["QUOTA_IP_SALT"]),
         limit=app.config["DAILY_AI_REQUEST_LIMIT"],
     )
 
@@ -500,9 +486,8 @@ def _draft_is_already_in_thread(agent, run_config, draft):
     typed context is not interpolated into it) but sends it only when it changed.
 
     The thread itself is the source of truth, not a process-local cache: multiple
-    workers would each hold a different one. Guests have no checkpointer, so
-    nothing accumulates for them and get_state has nothing to read -- they always
-    get the draft.
+    workers would each hold a different one. A workspace whose thread has no
+    state yet (its first turn) always gets the draft.
     """
     if not draft:
         return True
@@ -543,18 +528,12 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
     replaces both.
     """
     try:
-        # thread_id is the authenticated account id and nothing else. A guest's only
-        # identity is a random token in a signed cookie, with no lifecycle, no
-        # deletion path and no owner to attribute the stored turns to, so guests get
-        # no checkpointer and no thread: they are stateless between turns, exactly
-        # as their chat history already is (add_chat_message_to_db is
-        # authenticated-only). That also makes it impossible for two guests, or a
-        # guest and an account, to land in one thread.
-        thread_user_id = auth.get_current_user_id()
-        agent = build_agent(
-            thread_user_id,
-            checkpointer=CHECKPOINTER if thread_user_id else None,
-        )
+        # thread_id is the browser's own workspace id and nothing else: the same
+        # opaque session token that owns its SQL rows and vector chunks. Two
+        # browsers therefore cannot land in one thread, and one browser always
+        # returns to its own.
+        thread_user_id = session["user_id"]
+        agent = build_agent(thread_user_id, checkpointer=CHECKPOINTER)
         if agent is None:
             yield _sse({'type': 'error', 'content': 'AI chat is not configured. Set LLM_PROVIDER and start Ollama, then restart the app.'})
             return
@@ -565,9 +544,8 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
             return
 
         # Metadata and tags ride on the runnable config, which is how LangChain
-        # gets them onto the LangSmith run. Attached unconditionally: a guest
-        # turn is still a run whose provider and model must be identifiable, and
-        # model comparisons require every run to be labelled.
+        # gets them onto the LangSmith run, and configurable.thread_id is what
+        # the checkpointer keys on.
         run_config = build_run_config(thread_user_id)
 
         # Only the new turn goes in. The checkpointer replays the thread's earlier
@@ -639,9 +617,7 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
                 print(f"Warning: Agent output became empty after cleaning. Original: '{agent_output_string}'")
         parsed_chat_response = parsed_sections["chat_response"] if parsed_sections["chat_response"] else "Sorry, I couldn't generate a response."
 
-        authenticated_user_id = auth.get_current_user_id()
-        if authenticated_user_id:
-            add_chat_message_to_db(authenticated_user_id, "assistant", parsed_chat_response)
+        add_chat_message_to_db(thread_user_id, "assistant", parsed_chat_response)
 
         final_data = {
             "type": "final_response",
@@ -656,9 +632,7 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
     except Exception as e:
         logging.exception("Error during AI processing stream (_generate_agent_response_stream)")
         error_response_content = "An error occurred while processing your request. Please check server logs."
-        authenticated_user_id = auth.get_current_user_id()
-        if authenticated_user_id:
-            add_chat_message_to_db(authenticated_user_id, "assistant", error_response_content)
+        add_chat_message_to_db(session["user_id"], "assistant", error_response_content)
         yield _sse({'type': 'error', 'content': error_response_content})
     finally:
         yield _sse({'type': 'stream_end'})
@@ -710,7 +684,6 @@ def health():
         "status": "ok",
         "llm_configured": llm_available,
         "agent_configured": llm_available,
-        "google_oidc_configured": app.config["GOOGLE_OIDC_CONFIGURED"],
         "llm_provider": None,
         "embedding_provider": None,
         "collection": None,
@@ -742,9 +715,7 @@ def chat():
         if not user_input:
             return jsonify({"error": "No message provided"}), 400
 
-        authenticated_user_id = auth.get_current_user_id()
-        if authenticated_user_id:
-            add_chat_message_to_db(authenticated_user_id, "user", user_input)
+        add_chat_message_to_db(session["user_id"], "user", user_input)
         # The POST request now just acknowledges receipt.
         # The actual processing and streaming will be triggered by the frontend's GET request.
         return jsonify({"status": "message_received_ok", "message": "Proceed to connect to SSE for response."})
@@ -773,15 +744,10 @@ def chat():
 
 @app.route('/get_initial_state', methods=['GET'])
 def get_initial_state():
-    authenticated_user_id = auth.get_current_user_id()
-    if not authenticated_user_id:
-        return jsonify({
-            "personal_statement_draft": session.get("guest_draft", ""),
-            "chat_history": [],
-        })
+    user_id = session["user_id"]
     return jsonify({
-        "personal_statement_draft": get_personal_statement_from_db(authenticated_user_id),
-        "chat_history": get_chat_history_from_db(authenticated_user_id)
+        "personal_statement_draft": get_personal_statement_from_db(user_id),
+        "chat_history": get_chat_history_from_db(user_id)
     })
 
 @app.route('/update_statement', methods=['POST'])
@@ -792,11 +758,7 @@ def update_statement():
         return jsonify({"error": "No personal_statement_draft provided"}), 400
     
     try:
-        authenticated_user_id = auth.get_current_user_id()
-        if authenticated_user_id:
-            set_personal_statement_in_db(authenticated_user_id, new_draft)
-        else:
-            session["guest_draft"] = new_draft
+        set_personal_statement_in_db(session["user_id"], new_draft)
         return jsonify({"message": "Personal statement updated successfully."}), 200
     except Exception as e:
         logging.exception("Error updating personal statement in DB")
@@ -809,10 +771,7 @@ def get_similar_chats_route(): # Renamed to avoid conflict with internal var
     if not query:
         return jsonify({"error": "No query provided"}), 400
 
-    authenticated_user_id = auth.get_current_user_id()
-    if not authenticated_user_id:
-        return jsonify({"similar_chats": []})
-
+    user_id = session["user_id"]
     conn = get_db()
     c = conn.cursor()
     # Example: find chats containing the query text, excluding very recent ones to avoid self-match
@@ -822,7 +781,7 @@ def get_similar_chats_route(): # Renamed to avoid conflict with internal var
         WHERE user_id=? AND content LIKE ? AND timestamp < datetime('now', '-5 seconds')
         ORDER BY timestamp DESC
         LIMIT 5
-    ''', (authenticated_user_id, f'%{query}%'))
+    ''', (user_id, f'%{query}%'))
     similar_chats = [{"role": row["role"], "content": row["content"], "timestamp": row["timestamp"]}
                      for row in c.fetchall()]
 
@@ -847,24 +806,21 @@ def clear_agent_thread(user_id):
 @app.route('/clear_chat_history_endpoint', methods=['POST']) # Added specific endpoint name
 def clear_chat_history_endpoint():
     try:
-        authenticated_user_id = auth.get_current_user_id()
-        if authenticated_user_id:
-            clear_chat_history_in_db(authenticated_user_id)
-            clear_agent_thread(authenticated_user_id)
+        user_id = session["user_id"]
+        clear_chat_history_in_db(user_id)
+        clear_agent_thread(user_id)
         return jsonify({"message": "Chat history cleared successfully."}), 200
     except Exception as e:
         logging.error(f"Error clearing chat history: {e}")
         return jsonify({"error": "Failed to clear chat history."}), 500
 
 @app.route('/knowledge_base/status', methods=['GET'])
-@auth.login_required
 def knowledge_base_status_route():
-    return jsonify(get_knowledge_base_status(auth.get_current_user_id()))
+    return jsonify(get_knowledge_base_status(session["user_id"]))
 
 @app.route('/knowledge_base/clear', methods=['POST'])
-@auth.login_required
 def clear_knowledge_base_route():
-    result = clear_knowledge_base(auth.get_current_user_id())
+    result = clear_knowledge_base(session["user_id"])
     return jsonify(result), 200 if result.get("ok") else 500
 
 @app.route('/knowledge_base/search', methods=['POST'])
@@ -915,7 +871,6 @@ def allowed_file(filename, allowed_extensions):
 
 
 @app.route('/statistics/analyze', methods=['POST'])
-@auth.login_required
 def analyze_statistics_route():
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
@@ -976,7 +931,7 @@ def analyze_statistics_route():
                 metadata={
                     "analysis_type": "statistics",
                     "uploaded_via": "statistics_workspace",
-                }, user_id=auth.get_current_user_id(),
+                }, user_id=session["user_id"],
             )
 
         return jsonify(response_payload), 200
@@ -994,7 +949,6 @@ def analyze_statistics_route():
 
 # --- OCR Processing Route (Existing) ---
 @app.route('/process_document_ocr', methods=['POST'])
-@auth.login_required
 def process_document_ocr():
     if llm_ocr is None:
         return jsonify({
@@ -1058,7 +1012,7 @@ def process_document_ocr():
                 metadata={
                     "analysis_mode": analysis_mode,
                     "uploaded_via": "document_workspace",
-                }, user_id=auth.get_current_user_id()
+                }, user_id=session["user_id"]
             )
             result_dict["knowledge_base"] = ingestion_result
         

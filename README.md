@@ -14,11 +14,11 @@
 -   **AI 기반 채팅 상담:**
     -   자기소개서 및 보고서 작성 관련 일반적인 질문에 대한 답변 및 가이드 제공.
     -   LangGraph 에이전트를 통한 대화형 상호작용.
-    -   **대화 메모리:** LangGraph `SqliteSaver` 체크포인터가 로그인 사용자의 대화 스레드를 유지합니다 (`thread_id` = 인증된 사용자 ID). 비로그인 게스트는 상태를 저장하지 않습니다.
+    -   **대화 메모리:** LangGraph `SqliteSaver` 체크포인터가 브라우저 작업공간별 대화 스레드를 유지합니다 (`thread_id` = 세션 쿠키의 작업공간 ID). 로그인은 없습니다.
 -   **RAG 기반 문서 질의응답 및 콘텐츠 생성:**
     -   사용자가 제공하는 문서(`documents` 폴더 내 PDF, TXT 파일)를 ChromaDB 벡터 스토어에 저장 및 인덱싱.
     -   임베딩은 Ollama `nomic-embed-text`를 사용합니다 (768차원).
-    -   `search_documents` 도구가 **한 번만 검색하고, 중복 청크를 제거한 뒤, 출처(`[source: ...]`)를 붙여** 원문 발췌를 그대로 반환합니다. 검색 결과는 항상 `filter={"user_id": ...}` 로 계정 범위가 제한됩니다.
+    -   `search_documents` 도구가 **한 번만 검색하고, 중복 청크를 제거한 뒤, 출처(`[source: ...]`)를 붙여** 원문 발췌를 그대로 반환합니다. 검색 결과는 항상 `filter={"user_id": ...}` 로 브라우저 작업공간 범위가 제한됩니다.
 -   **다중 입력 방식 지원:**
     -   **문서 업로드 및 분석 (OCR):**
         -   PDF, TXT, DOCX, 이미지(PNG, JPG) 파일 업로드 지원.
@@ -59,7 +59,7 @@ graph TD
 
     subgraph Web["웹 계층"]
         W_Flask["Flask App: app.py"]
-        W_Auth["Google OIDC 인증: auth.py"]
+        W_Session["브라우저 작업공간 세션: 서명된 쿠키의 user_id"]
         W_OCR["OCR + 보고서 생성: llm_ocr.py"]
         W_JS["브라우저 SSE 클라이언트: static/lc-chat.js"]
     end
@@ -69,8 +69,7 @@ graph TD
         A_Create["create_agent: LangGraph 런타임"]
         A_Prefix["AGENT_PREFIX 시스템 프롬프트: 항상 먼저 검색"]
         A_Schema["response_format=AgentSections + extract_agent_sections"]
-        A_RAG["도구: search_documents — user_id 가 있을 때만 등록"]
-        A_Guest["게스트: 체크포인터도 RAG 도구도 없음 — 무상태"]
+        A_RAG["도구: search_documents — 작업공간 user_id 로 필터"]
         A_Stream["agent.stream: stream_mode = messages, updates, values"]
     end
 
@@ -82,7 +81,7 @@ graph TD
 
     subgraph DataStorage["데이터 저장소"]
         DS_Chroma["ChromaDB: 공급자별 컬렉션, user_id 메타데이터"]
-        DS_Ckpt["SqliteSaver: AGENT_CHECKPOINT_DB, thread_id=사용자 ID"]
+        DS_Ckpt["SqliteSaver: AGENT_CHECKPOINT_DB, thread_id=작업공간 ID"]
         DS_SQLite["SQLite: 채팅 내역, 초안 (APP_STATE_DB)"]
         DS_Docs["./documents: RAG 원본 문서"]
     end
@@ -94,7 +93,7 @@ graph TD
 
     UI_Text --> W_Flask
     UI_DocUpload --> W_OCR --> W_Flask
-    W_Auth -- "user_id" --> W_Flask
+    W_Session -- "user_id" --> W_Flask
 
     W_Flask --> A_Build
     A_Build --> A_Create
@@ -102,7 +101,7 @@ graph TD
     A_Schema --> A_Create
     A_RAG --> A_Create
 
-    A_Create -- "로그인 사용자만: thread_id = 계정 ID" --> DS_Ckpt
+    A_Create -- "thread_id = 작업공간 ID" --> DS_Ckpt
     A_Create --> A_Stream
     A_Stream -- "thought / token_chunk SSE" --> W_JS
 
@@ -112,15 +111,13 @@ graph TD
     M_Coll -- "컬렉션 선택" --> DS_Chroma
     DS_Docs -- "수집(ingest)" --> DS_Chroma
 
-    A_Build -- "user_id 없음" --> A_Guest
-    A_Guest --> A_Create
     W_Flask -- "저장/조회" --> DS_SQLite
     A_Create -.-> O_Trace
     O_Eval -.-> A_Create
 ```
 
 1.  **데이터 수집 및 전처리 (Data Ingestion & Preprocessing):**
-    -   **문서:** `./documents` (또는 `RAG_DOCUMENTS_DIR`) 폴더의 PDF, TXT 파일들이 로드되어 텍스트로 변환되고 청크(chunk) 단위로 분할됩니다. 각 청크에는 소유 계정을 나타내는 `user_id` 메타데이터가 기록됩니다.
+    -   **문서:** `./documents` (또는 `RAG_DOCUMENTS_DIR`) 폴더의 PDF, TXT 파일들이 로드되어 텍스트로 변환되고 청크(chunk) 단위로 분할됩니다. 각 청크에는 소유 작업공간을 나타내는 `user_id` 메타데이터가 기록됩니다.
     -   **OCR:** 사용자가 업로드한 이미지/PDF/DOCX 파일에서 텍스트가 추출됩니다.
 2.  **임베딩 및 벡터 저장 (Embedding & Vector Storage - RAG Core):**
     -   분할된 청크들은 활성 임베딩 공급자의 모델로 임베딩되어 ChromaDB에 저장됩니다.
@@ -184,7 +181,7 @@ graph TD
 -   `llm_model.py`: 공급자 기반 모델 커넥터(`get_chat_model`, `get_embedding_model`)와 임베딩 공급자별 컬렉션 이름(`get_collection_name`). 공급자 이름이 등장하는 유일한 모듈입니다.
 -   `llm_prompt.py`: **레거시 프롬프트.** 채팅 에이전트의 시스템 프롬프트는 `langchain_config.py`의 `AGENT_PREFIX`로 대체되었으며, 이 파일은 현재 `llm_ocr.analyze_document()`의 문서 분석 경로에서만 사용됩니다.
 -   `llm_ocr.py`: 이미지, PDF, DOCX 파일에서 텍스트를 추출하고, LLM을 이용해 HTML 보고서 생성.
--   `auth.py` / `quota.py`: Google OIDC 로그인, 계정/게스트 경계, 일일 AI 요청 할당량.
+-   `quota.py`: 솔트된 IP 해시 기준 일일 AI 요청 할당량 (원자적 예약, UTC 일자 롤오버).
 -   `html_sanitizer.py`: 생성된 보고서 HTML의 Bleach 허용 목록 기반 정제.
 -   `evals/dataset.py`: 16개 골든 케이스(순수 데이터, import 없음).
 -   `evals/run_eval.py`: 공급자별 평가 실행기.
@@ -221,9 +218,8 @@ graph TD
 | `AGENT_CHECKPOINT_DB` | `sqlite_db/checkpoints.db` | LangGraph 체크포인터 DB. 애플리케이션 상태 DB와 스키마가 다르므로 분리되어 있습니다. |
 | `RAG_PERSIST_DIR` | `./chroma_db` | ChromaDB 영속 디렉터리. |
 | `RAG_DOCUMENTS_DIR` | `./documents` | RAG 원본 문서 폴더. |
-| `SECRET_KEY` | — | Flask 세션 키. 운영 환경에서는 장기 보관되는 긴 난수를 사용합니다. |
-| `GOOGLE_OIDC_CLIENT_ID` / `GOOGLE_OIDC_CLIENT_SECRET` / `GOOGLE_OIDC_REDIRECT_URI` | — | Google 로그인 설정. 리디렉션 URI 기본값은 `http://localhost:5005/auth/callback`. |
-| `QUOTA_IP_SALT` | — | 게스트 할당량 계산용 IP 해시 솔트. |
+| `SECRET_KEY` | — | Flask 세션 키. **운영 환경에서는 필수**이며, 세션 쿠키가 곧 작업공간 접근 권한이므로 장기 보관되는 긴 난수를 사용합니다. 키가 바뀌면 모든 브라우저가 새 작업공간을 받습니다. |
+| `QUOTA_IP_SALT` | — | 할당량 계산용 IP 해시 솔트. 원본 IP는 저장되지 않습니다. |
 | `DAILY_AI_REQUEST_LIMIT` | `20` | 일일 AI 요청 한도. |
 
 **LangSmith 추적 (기본 비활성)**
@@ -238,9 +234,17 @@ graph TD
 
 > **개인정보 주의:** 추적을 켜면 전체 프롬프트, 검색된 문서 원문, 모델 답변이 LangSmith로 업로드됩니다. 이 애플리케이션은 사용자의 자기소개서와 업로드 파일을 다루므로, 제3자에게 개인정보를 전송해도 되는 환경에서만 활성화하십시오.
 
-Google 계정과 계정별 문서 작업공간을 사용하려면 Google Cloud Console에서 OAuth 동의 화면과 Web application 클라이언트를 설정한 뒤, 승인된 리디렉션 URI에 `http://localhost:5005/auth/callback`을 등록합니다. 운영 환경에서는 HTTPS 리디렉션 URI가 필요합니다.
+**브라우저 작업공간 (로그인 없음)**
 
-로그인하지 않은 사용자는 세션 안에서만 초안을 유지하고 AI 요청은 하루 20회로 제한되며, RAG 도구와 대화 메모리가 제공되지 않습니다. Google 로그인 사용자는 자신의 SQLite 초안·채팅 기록과 Chroma 문서만 사용할 수 있으며, 다른 계정의 문서는 검색하거나 삭제할 수 없습니다.
+이 Flask 앱에는 로그인이 없습니다. 브라우저가 처음 접속하면 서명된 세션 쿠키에 무작위 작업공간 ID(`user_id`)가 발급되고, 초안·채팅 기록(SQLite), 업로드 문서(Chroma), 에이전트 대화 메모리(체크포인터 `thread_id`)가 모두 그 ID로만 저장·조회됩니다. 다른 브라우저의 초안이나 문서는 검색·삭제·조회할 수 없습니다.
+
+-   **쿠키가 곧 연속성입니다.** 같은 브라우저에서 쿠키가 유지되는 동안 같은 작업공간으로 돌아옵니다. 계정 복구나 기기 간 동기화는 없습니다.
+-   **쿠키를 지우면 새 작업공간이 시작됩니다.** 서버의 기존 데이터는 삭제되지 않고 남아 있지만, 새 브라우저 세션에서는 접근할 수 없습니다. 자동 정리 작업은 없습니다.
+-   **이전 Google 계정 데이터는 보존되지만 접근되지 않습니다.** 과거 계정 ID로 저장된 행·벡터·체크포인트는 그대로 두며, 익명 작업공간으로 이관하거나 노출하지 않습니다. 이전 로그인 쿠키 키는 무시되고 제거됩니다.
+-   **일일 AI 요청 한도는 IP 기준입니다.** 직접 연결된 피어 IP를 솔트 해시하여 하루 `DAILY_AI_REQUEST_LIMIT`(기본 20회)을 적용합니다. 같은 IP를 공유하는 사용자는 한도를 함께 씁니다. 리버스 프록시 뒤에서는 프록시 IP가 집계되므로 별도 구성이 필요합니다. `X-Forwarded-For`는 신뢰하지 않습니다.
+-   **`SECRET_KEY`는 운영 환경에서 여전히 필수입니다.** 세션 쿠키 서명이 작업공간 접근 통제의 전부이므로 HTTPS와 함께 안전한 키를 사용하십시오.
+
+`src/legal_rag`의 FastAPI 법률 RAG 백엔드는 이 Flask 앱과 독립된 서비스이며, 위 세션·할당량 정책은 그 백엔드에 적용되지 않습니다.
 
 ### 7.2 필수 라이브러리 설치
 
@@ -259,11 +263,11 @@ ollama pull nomic-embed-text    # 로컬 임베딩 (EMBEDDING_PROVIDER=ollama �
 ollama serve                    # http://localhost:11434
 ```
 
-> **기본 설정은 완전히 로컬입니다.** 채팅과 임베딩 모두 Ollama를 사용하므로 외부 AI API 키가 필요하지 않습니다. Google OIDC 로그인만 별도의 자격 증명을 사용합니다.
+> **기본 설정은 완전히 로컬입니다.** 채팅과 임베딩 모두 Ollama를 사용하므로 외부 AI API 키가 필요하지 않으며, 로그인용 외부 자격 증명도 없습니다.
 
 ### 7.4 문서 준비 (RAG용)
 
-`documents` 폴더에 RAG에서 참조할 PDF 또는 TXT 파일을 넣습니다. 로그인 후 웹 UI의 업로드 기능으로도 지식 베이스에 문서를 추가할 수 있습니다.
+`documents` 폴더에 RAG에서 참조할 PDF 또는 TXT 파일을 넣습니다. 웹 UI의 업로드 기능으로도 현재 브라우저 작업공간의 지식 베이스에 문서를 추가할 수 있습니다.
 
 ### 7.5 애플리케이션 실행
 
