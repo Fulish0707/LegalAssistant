@@ -71,12 +71,14 @@ class ChatStreamBase(unittest.TestCase):
         cls.tmpdir = tempfile.TemporaryDirectory()
         cls.saved_env = {
             name: os.environ.get(name)
-            for name in ("APP_STATE_DB", "AGENT_CHECKPOINT_DB", "APP_ENV")
+            for name in ("APP_STATE_DB", "AGENT_CHECKPOINT_DB", "RAG_PERSIST_DIR", "APP_ENV", "LANGSMITH_TRACING")
         }
         cls.saved_modules = {name: sys.modules.get(name) for name in cls.MODULE_NAMES}
         os.environ["APP_STATE_DB"] = os.path.join(cls.tmpdir.name, "app_state.db")
         os.environ["AGENT_CHECKPOINT_DB"] = os.path.join(cls.tmpdir.name, "checkpoints.db")
+        os.environ["RAG_PERSIST_DIR"] = os.path.join(cls.tmpdir.name, "chroma")
         os.environ["APP_ENV"] = "testing"
+        os.environ["LANGSMITH_TRACING"] = "false"
         for name in cls.MODULE_NAMES:
             sys.modules.pop(name, None)
         cls.app_module = importlib.import_module("app")
@@ -94,6 +96,11 @@ class ChatStreamBase(unittest.TestCase):
             else:
                 os.environ[name] = value
         cls.tmpdir.cleanup()
+
+    def as_browser(self, user_id):
+        """Pin the class client's workspace id, the way a returning browser has one."""
+        with self.client.session_transaction() as flask_session:
+            flask_session["user_id"] = user_id
 
     def collect(self, agent, query="message=hello"):
         with mock.patch.object(self.app_module, "build_agent", return_value=agent):
@@ -183,7 +190,7 @@ class ChatStreamingTests(ChatStreamBase):
         self.assertIn("최종 답변입니다.", streamed)
         self.assertTrue([e for e in events if e["type"] == "thought"])
 
-    def test_guest_stream_has_no_thread_id_and_still_terminates(self):
+    def test_stream_is_threaded_on_the_browsers_workspace_and_terminates(self):
         agent = StubAgent(
             ai_chunks("안녕하세요.")
             + [("values", {"messages": [AIMessage(content="안녕하세요.")]})]
@@ -191,8 +198,11 @@ class ChatStreamingTests(ChatStreamBase):
         events = self.collect(agent)
 
         self.assertEqual(events[-1]["type"], "stream_end")
-        _payload, config, _kwargs = agent.stream_calls[0]
-        self.assertNotIn("thread_id", (config or {}).get("configurable", {}))
+        _payload, config, kwargs = agent.stream_calls[0]
+        with self.client.session_transaction() as flask_session:
+            browser_id = flask_session["user_id"]
+        self.assertEqual(config["configurable"]["thread_id"], browser_id)
+        self.assertEqual(kwargs["context"].user_id, browser_id)
 
     def test_missing_message_still_ends_the_stream(self):
         response = self.client.get("/chat")
@@ -208,7 +218,9 @@ class ChatStreamingTests(ChatStreamBase):
 class DraftContextTests(ChatStreamBase):
     """The draft must not accumulate into every turn of a persisted thread."""
 
-    def test_guest_turn_carries_the_draft(self):
+    def test_a_first_turn_carries_the_draft(self):
+        """StubAgent.get_state raises when no thread state exists: a new
+        workspace's first turn, where nothing has carried the draft yet."""
         agent = StubAgent([("values", {"messages": [AIMessage(content="ok")]})])
         self.collect(agent, "message=hi&personal_statement_draft=MY_DRAFT")
         payload, _config, _kwargs = agent.stream_calls[0]
@@ -220,8 +232,8 @@ class DraftContextTests(ChatStreamBase):
             [("values", {"messages": [AIMessage(content="ok")]})],
             state_messages=[prior, AIMessage(content="ok")],
         )
-        with mock.patch.object(self.app_module.auth, "get_current_user_id", return_value="u1"):
-            self.collect(agent, "message=hi+again&personal_statement_draft=MY_DRAFT")
+        self.as_browser("u1")
+        self.collect(agent, "message=hi+again&personal_statement_draft=MY_DRAFT")
         payload, config, _kwargs = agent.stream_calls[0]
         self.assertNotIn("MY_DRAFT", payload["messages"][0][1])
         self.assertEqual(config["configurable"]["thread_id"], "u1")
@@ -238,8 +250,8 @@ class DraftContextTests(ChatStreamBase):
                 AIMessage(content="ok"),
             ],
         )
-        with mock.patch.object(self.app_module.auth, "get_current_user_id", return_value="u3"):
-            self.collect(agent, "message=turn+three&personal_statement_draft=MY_DRAFT")
+        self.as_browser("u3")
+        self.collect(agent, "message=turn+three&personal_statement_draft=MY_DRAFT")
         payload, _config, _kwargs = agent.stream_calls[0]
         self.assertNotIn("MY_DRAFT", payload["messages"][0][1])
 
@@ -249,8 +261,8 @@ class DraftContextTests(ChatStreamBase):
             [("values", {"messages": [AIMessage(content="ok")]})],
             state_messages=[prior, AIMessage(content="ok")],
         )
-        with mock.patch.object(self.app_module.auth, "get_current_user_id", return_value="u2"):
-            self.collect(agent, "message=hi+again&personal_statement_draft=NEW_DRAFT")
+        self.as_browser("u2")
+        self.collect(agent, "message=hi+again&personal_statement_draft=NEW_DRAFT")
         payload, _config, _kwargs = agent.stream_calls[0]
         self.assertIn("NEW_DRAFT", payload["messages"][0][1])
 

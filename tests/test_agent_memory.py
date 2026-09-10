@@ -150,30 +150,37 @@ class RecordingAgent:
 
 
 class AppCheckpointerWiringTests(unittest.TestCase):
-    """thread_id must be the authenticated account id, and nothing else.
+    """thread_id must be the browser's own workspace id, and nothing else.
 
-    Guests get no checkpointer and no thread_id: their only identity is a random
-    cookie-backed session token with no lifecycle or deletion story, and the display
-    record (chat_history) is already authenticated-only. A guest is stateless
-    between turns by design, which is also the only way two guests provably cannot
-    land in one thread.
+    Every visitor owns one opaque session-cookie user_id. That single id is what
+    build_agent receives, what the run config threads on, and what AgentContext
+    carries, so two browsers provably never land in one thread and one browser
+    always returns to its own.
     """
 
     MODULE_NAMES = ("app", "langchain_config", "llm_model")
+    PINNED_ENV = (
+        "APP_STATE_DB",
+        "AGENT_CHECKPOINT_DB",
+        "RAG_PERSIST_DIR",
+        "APP_ENV",
+        "LLM_PROVIDER",
+        "EMBEDDING_PROVIDER",
+        "LANGSMITH_TRACING",
+    )
 
     @classmethod
     def setUpClass(cls):
         cls.tmpdir = tempfile.TemporaryDirectory()
-        cls.saved_env = {
-            name: os.environ.get(name)
-            for name in ("APP_STATE_DB", "AGENT_CHECKPOINT_DB", "APP_ENV", "LLM_PROVIDER", "EMBEDDING_PROVIDER")
-        }
+        cls.saved_env = {name: os.environ.get(name) for name in cls.PINNED_ENV}
         cls.saved_modules = {name: sys.modules.get(name) for name in cls.MODULE_NAMES}
         os.environ["APP_STATE_DB"] = os.path.join(cls.tmpdir.name, "app_state.db")
         os.environ["AGENT_CHECKPOINT_DB"] = os.path.join(cls.tmpdir.name, "checkpoints.db")
+        os.environ["RAG_PERSIST_DIR"] = os.path.join(cls.tmpdir.name, "chroma")
         os.environ["APP_ENV"] = "testing"
         os.environ["LLM_PROVIDER"] = "none"
         os.environ["EMBEDDING_PROVIDER"] = "none"
+        os.environ["LANGSMITH_TRACING"] = "false"
         for name in cls.MODULE_NAMES:
             sys.modules.pop(name, None)
         cls.app_module = importlib.import_module("app")
@@ -191,7 +198,20 @@ class AppCheckpointerWiringTests(unittest.TestCase):
                 os.environ[name] = value
         cls.tmpdir.cleanup()
 
-    def drive_chat(self, authenticated_user_id):
+    def browser(self):
+        """A test client with an established workspace, and that workspace's id."""
+        client = self.app_module.app.test_client()
+        client.get("/health")
+        with client.session_transaction() as flask_session:
+            return client, flask_session["user_id"]
+
+    def drive_chat(self, client=None):
+        """Stream one turn as a normal browser; return its id and what the app wired."""
+        if client is None:
+            client, browser_id = self.browser()
+        else:
+            with client.session_transaction() as flask_session:
+                browser_id = flask_session["user_id"]
         agent = RecordingAgent()
         recorded = {}
 
@@ -200,67 +220,57 @@ class AppCheckpointerWiringTests(unittest.TestCase):
             recorded["checkpointer"] = checkpointer
             return agent
 
-        client = self.app_module.app.test_client()
-        if authenticated_user_id:
-            with client.session_transaction() as flask_session:
-                flask_session["authenticated_user_id"] = authenticated_user_id
-
         with patch.object(self.app_module, "build_agent", fake_build_agent):
             client.get("/chat?message=hello").get_data()
 
         self.assertTrue(agent.calls, "the agent was never invoked")
-        return recorded, agent.calls[0]
+        return browser_id, recorded, agent.calls[0]
 
-    def test_signed_in_callers_get_a_checkpointer_threaded_on_their_account_id(self):
-        recorded, call = self.drive_chat("account-one")
+    def test_every_browser_gets_a_checkpointer_threaded_on_its_own_id(self):
+        browser_id, recorded, call = self.drive_chat()
 
-        self.assertEqual(recorded["user_id"], "account-one")
-        self.assertIsNotNone(recorded["checkpointer"])
+        self.assertTrue(browser_id)
+        self.assertEqual(recorded["user_id"], browser_id)
         self.assertIs(recorded["checkpointer"], self.app_module.CHECKPOINTER)
-        self.assertEqual(call["config"]["configurable"]["thread_id"], "account-one")
+        self.assertEqual(call["config"]["configurable"]["thread_id"], browser_id)
+        context = call["kwargs"].get("context")
+        self.assertIsNotNone(context, "stream() was called without context=AgentContext(...)")
+        self.assertEqual(context.user_id, browser_id)
 
-    def test_two_accounts_never_share_a_thread(self):
-        _, first_call = self.drive_chat("account-one")
-        _, second_call = self.drive_chat("account-two")
+    def test_two_browsers_never_share_a_thread(self):
+        first_id, _, first_call = self.drive_chat()
+        second_id, _, second_call = self.drive_chat()
 
+        self.assertNotEqual(first_id, second_id)
         self.assertNotEqual(
             first_call["config"]["configurable"]["thread_id"],
             second_call["config"]["configurable"]["thread_id"],
         )
 
-    def test_guests_get_no_checkpointer_and_no_thread_id(self):
-        recorded, call = self.drive_chat(None)
+    def test_the_same_browser_returns_to_the_same_thread(self):
+        client, browser_id = self.browser()
 
-        self.assertIsNone(recorded["user_id"])
-        self.assertIsNone(recorded["checkpointer"])
-        self.assertNotIn("thread_id", (call["config"] or {}).get("configurable", {}))
+        _, _, first_call = self.drive_chat(client)
+        _, _, second_call = self.drive_chat(client)
 
-    def test_the_request_context_carries_the_user_id(self):
-        _, call = self.drive_chat("account-one")
-
-        context = call["kwargs"].get("context")
-        self.assertIsNotNone(context, "stream() was called without context=AgentContext(...)")
-        self.assertEqual(context.user_id, "account-one")
+        self.assertEqual(first_call["config"]["configurable"]["thread_id"], browser_id)
+        self.assertEqual(second_call["config"]["configurable"]["thread_id"], browser_id)
 
     def test_clearing_chat_history_also_clears_the_agents_thread(self):
         """A user who clears their history and then finds the agent still
         remembering would reasonably call that a bug."""
-        client = self.app_module.app.test_client()
-        with client.session_transaction() as flask_session:
-            flask_session["authenticated_user_id"] = "account-clear"
+        client, browser_id = self.browser()
 
         deleted = []
         with patch.object(self.app_module.CHECKPOINTER, "delete_thread", deleted.append):
             response = client.post("/clear_chat_history_endpoint")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(deleted, ["account-clear"])
+        self.assertEqual(deleted, [browser_id])
 
     def test_clearing_still_succeeds_when_the_checkpointer_fails(self):
         """Clearing the display record is the endpoint's primary job."""
-        client = self.app_module.app.test_client()
-        with client.session_transaction() as flask_session:
-            flask_session["authenticated_user_id"] = "account-clear-2"
+        client, _ = self.browser()
         client.post("/chat", json={"message": "remember this"})
 
         def explode(thread_id):
@@ -281,20 +291,18 @@ class AppCheckpointerWiringTests(unittest.TestCase):
         app's actual instance, and it checks that clearing the display history
         leaves the thread genuinely empty rather than merely calling delete_thread.
         """
-        agent = build_fake_agent("account-mem", self.app_module.CHECKPOINTER)
-        config = {"configurable": {"thread_id": "account-mem"}}
+        client, browser_id = self.browser()
+        agent = build_fake_agent(browser_id, self.app_module.CHECKPOINTER)
+        config = {"configurable": {"thread_id": browser_id}}
 
         agent.invoke({"messages": [("user", "My name is Ada.")]}, config)
         second = agent.invoke({"messages": [("user", "What is my name?")]}, config)
         self.assertIn("My name is Ada.", [m.content for m in second["messages"]])
 
-        client = self.app_module.app.test_client()
-        with client.session_transaction() as flask_session:
-            flask_session["authenticated_user_id"] = "account-mem"
         response = client.post("/clear_chat_history_endpoint")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(thread_texts(agent, "account-mem"), [])
+        self.assertEqual(thread_texts(agent, browser_id), [])
 
     def test_the_checkpoint_database_is_configurable_and_separate_from_app_state(self):
         self.assertEqual(
