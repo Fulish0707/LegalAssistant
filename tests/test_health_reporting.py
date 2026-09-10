@@ -9,6 +9,8 @@ class HealthReportingTests(unittest.TestCase):
     MODULE_NAMES = ("app", "langchain_config", "llm_model")
     PINNED_ENV = (
         "APP_STATE_DB",
+        "AGENT_CHECKPOINT_DB",
+        "RAG_PERSIST_DIR",
         "APP_ENV",
         "LLM_PROVIDER",
         "EMBEDDING_PROVIDER",
@@ -21,6 +23,8 @@ class HealthReportingTests(unittest.TestCase):
         cls.original_env = {name: os.environ.get(name) for name in cls.PINNED_ENV}
         cls.original_modules = {name: sys.modules.get(name) for name in cls.MODULE_NAMES}
         os.environ["APP_STATE_DB"] = os.path.join(cls.tmpdir.name, "app_state.db")
+        os.environ["AGENT_CHECKPOINT_DB"] = os.path.join(cls.tmpdir.name, "checkpoints.db")
+        os.environ["RAG_PERSIST_DIR"] = os.path.join(cls.tmpdir.name, "chroma")
         os.environ["APP_ENV"] = "testing"
         # Pinned to ollama on purpose. Pinning google would make "no probe by
         # default" trivially true and the assertion would prove nothing.
