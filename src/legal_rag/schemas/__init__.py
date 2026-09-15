@@ -1,4 +1,4 @@
-from .answer import Citation, CitationKind, Confidence, LegalAnswer
+from .answer import Citation, CitationKind, Confidence, LegalAnswer, citation_kind, document_types_for
 from .chunks import Chunk, ChunkMetadata, ScoredChunk
 from .conversation import Conversation, Turn
 from .documents import (
@@ -29,5 +29,6 @@ __all__ = [
     "Evidence", "EvidenceBundle", "GenerationExample", "LegalAnswer", "LegalDocument", "LegalDocumentBase",
     "QueryAnalysis", "RetrievalExample", "RetrievalFilters", "RewrittenQueries", "ScoredChunk", "SourceRef",
     "StageTiming", "Statute", "StatuteArticle", "StatuteItem", "StatuteParagraph", "Trace", "Turn",
-    "VerificationAction", "VerificationIssue", "VerificationReport", "make_document_id",
+    "VerificationAction", "VerificationIssue", "VerificationReport", "citation_kind", "document_types_for",
+    "make_document_id",
 ]
