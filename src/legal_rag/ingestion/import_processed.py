@@ -10,7 +10,7 @@ from pathlib import Path
 import tempfile
 
 from legal_rag.config import Settings
-from legal_rag.schemas import Chunk, ChunkMetadata, DocumentType, SourceRef
+from legal_rag.schemas import Chunk, ChunkMetadata, CitationKind, DocumentType, SourceRef, citation_kind
 from legal_rag.schemas.documents import ImportedDocument
 from .manifest import Manifest, RawFileEntry
 
@@ -85,7 +85,7 @@ def _chunk(record: dict, dataset: str, version: str) -> Chunk:
         metadata=ChunkMetadata(
             dataset=dataset, corpus_version=version, legal_domain=_text(record, 'legal_domain'),
             authority=record.get('authority'),
-            court=record.get('authority') if kind in {DocumentType.judgment, DocumentType.court_decision} else None,
+            court=record.get('authority') if citation_kind(kind) is CitationKind.case else None,
             case_number=original_metadata.get('case_number'),
             law_name=record.get('title') if kind == DocumentType.statute else None,
             decision_date=_date(original_metadata.get('decision_date')),
