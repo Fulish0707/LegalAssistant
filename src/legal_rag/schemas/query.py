@@ -6,6 +6,7 @@ from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .answer import CitationKind
 from .documents import DocumentType
 
 
@@ -31,6 +32,7 @@ class QueryAnalysis(_Frozen):
 
 class RetrievalFilters(_Frozen):
     document_types: list[DocumentType] | None = None
+    citation_kind: CitationKind | None = None  # coarse facet; expands to document_types
     legal_domain: str | None = None
     court: str | None = None
     law_name: str | None = None

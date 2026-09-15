@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from legal_rag.schemas import RetrievalFilters
+from legal_rag.schemas import RetrievalFilters, document_types_for
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,8 @@ def to_conditions(filters: RetrievalFilters | None) -> list[Condition]:
     conditions: list[Condition] = []
     if filters.document_types:
         conditions.append(MatchAny("document_type", [dt.value for dt in filters.document_types]))
+    elif filters.citation_kind:
+        conditions.append(MatchAny("document_type", [dt.value for dt in document_types_for(filters.citation_kind)]))
     if filters.legal_domain:
         conditions.append(MatchAny("metadata.legal_domain", [filters.legal_domain]))
     if filters.court:
