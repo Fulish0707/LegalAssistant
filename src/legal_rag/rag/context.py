@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from legal_rag.schemas import DocumentType, Evidence, EvidenceBundle, ScoredChunk
+from legal_rag.schemas import CitationKind, Evidence, EvidenceBundle, ScoredChunk, citation_kind
 
 
 class ContextBuilder:
@@ -14,7 +14,8 @@ class ContextBuilder:
         for n, hit in enumerate(hits, start=1):
             chunk = hit.chunk
             m = chunk.metadata
-            if chunk.document_type == DocumentType.statute:
+            kind = citation_kind(chunk.document_type)
+            if kind is CitationKind.statute:
                 header = {
                     "Type": "Statute",
                     "Law": m.law_name or chunk.title,
@@ -22,7 +23,7 @@ class ContextBuilder:
                     "Paragraph": m.paragraph or "",
                     "Effective date": m.effective_date.isoformat() if m.effective_date else "",
                 }
-            elif chunk.document_type == DocumentType.court_decision:
+            elif kind is CitationKind.case:
                 header = {
                     "Type": "Case",
                     "Court": m.court or "",
