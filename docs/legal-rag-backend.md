@@ -276,3 +276,29 @@ harder unfiltered task.
 
 Recall@k here is document-level: a hit counts when any retrieved chunk belongs to the
 question's source document.
+
+## Index compatibility
+
+BM25 splits its state across index time and query time. `document_vector` encodes stored
+vectors with the indexing tokenizer and the corpus `avg_len`; `query_vector` tokenizes the
+query now and looks each term up in the document-frequency map, keeping only terms it
+finds. Analyze a query differently than the index was analyzed and nearly every term
+misses, so the sparse leg returns nothing while dense retrieval keeps returning plausible
+hits and hides the failure.
+
+`build_hybrid_retriever` therefore validates the current settings against `index.json`
+before returning a retriever, and fails closed:
+
+```
+IndexCompatibilityError: index at data/indexes/ip-v1 does not match the current settings:
+  tokenizer: index built with 'regex', settings say 'kiwi'
+Restore the recorded settings, or rebuild with scripts/build_index.py.
+```
+
+Every mismatch is reported at once. The embedder is checked too, though it is already
+partly self-protecting: it appears in the collection name, so a different embedder reads a
+different collection rather than corrupting one.
+
+Note that `sparse.k1` and `sparse.b` take effect only at index time. `BM25Stats.load` reads
+them back from `bm25.json`, so editing them in configuration changes nothing until the
+index is rebuilt.
