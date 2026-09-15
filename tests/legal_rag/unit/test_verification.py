@@ -1,5 +1,6 @@
 from legal_rag.schemas import Citation, CitationKind, Confidence, DocumentType, Evidence, EvidenceBundle, LegalAnswer, VerificationAction
 from legal_rag.verification import VerificationPolicy, Verifier, backfill_citations
+from legal_rag.verification.backfill import _kind
 
 
 def _bundle():
@@ -106,3 +107,12 @@ def test_backfill_adds_citations_for_grounded_references_only():
     ]
     assert backfill_citations(filled, _bundle()) == filled
     assert backfill_citations(_answer(), _bundle()).citations == _answer().citations
+
+
+def test_backfilled_citation_kind_follows_document_type():
+    for document_type in (DocumentType.judgment, DocumentType.patent_trial_decision,
+                          DocumentType.constitutional_decision, DocumentType.decision):
+        evidence = Evidence(source_id="S1", chunk_id="c", document_id="d",
+                            document_type=document_type, header={"Type": "Case"},
+                            text="대법원 2018다12345 판결", score=1.0)
+        assert _kind(evidence) is CitationKind.case
