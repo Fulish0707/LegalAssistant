@@ -8,17 +8,13 @@ references already grounded in the bundle are added.
 
 from __future__ import annotations
 
-from legal_rag.schemas import Citation, CitationKind, DocumentType, Evidence, EvidenceBundle, LegalAnswer
+from legal_rag.schemas import Citation, CitationKind, Evidence, EvidenceBundle, LegalAnswer, citation_kind
 
 from .citations import answer_text, extract_case_refs, extract_statute_refs
 
 
 def _kind(evidence: Evidence) -> CitationKind:
-    if evidence.document_type == DocumentType.statute:
-        return CitationKind.statute
-    if evidence.document_type == DocumentType.court_decision:
-        return CitationKind.case
-    return CitationKind.interpretation
+    return citation_kind(evidence.document_type)
 
 
 def _statute_block(bundle: EvidenceBundle, law_name: str | None, article: str) -> Evidence | None:
