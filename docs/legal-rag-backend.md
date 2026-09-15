@@ -302,3 +302,40 @@ different collection rather than corrupting one.
 Note that `sparse.k1` and `sparse.b` take effect only at index time. `BM25Stats.load` reads
 them back from `bm25.json`, so editing them in configuration changes nothing until the
 index is rebuilt.
+
+## Multi-corpus fan-out
+
+Each corpus is its own collection with its own BM25 statistics, because BM25 is
+corpus-global. To answer one question from several corpora, name them:
+
+```yaml
+retrieval:
+  corpora: [criminal-v1, civil-v1, administrative-v1, ip-v1]
+  corpus_weights: {ip-v1: 0.5}   # absent corpora weigh 1.0
+  k_fused: 50                    # raise this when fanning out
+```
+
+`build_hybrid_retriever` then builds a dense and a sparse leg per corpus, named
+`<corpus>:dense` and `<corpus>:sparse`, and fuses all of them in one weighted RRF pass.
+`HybridRetriever` already accepted an arbitrary list of legs, so nothing else changed —
+the orchestrator, the API, `search.py`, and `eval_retrieval.py` are untouched. An empty
+`corpora` keeps single-corpus behaviour.
+
+Each corpus's sparse leg uses only its own `bm25.json`. A term absent from one corpus's
+document frequencies yields nothing from that corpus while the corpus that knows the term
+still answers — which is correct, and is precisely what a single shared collection would
+get wrong.
+
+**Weights exist because rank fusion has no notion of relevance.** Every list contributes
+`1/(k + rank)`, so each corpus's top hit outranks the relevant corpus's second hit no
+matter how poor it is. Fanning out therefore trades precision for recall. Weights mitigate
+it; a cross-encoder reranker is the real fix and is not built yet — `rerank.backend` is
+`noop`, and `legal_rag.reranking.cross_encoder` does not exist. Measure Recall@k with
+`corpora: []` and again with all four before concluding anything about fusion quality.
+
+`k_fused` defaults to 20, which is tight when eight lists feed the fuser rather than two.
+
+Diagnostics: `eval_retrieval.py --leg sparse` now means every sparse leg across every
+corpus, fused, and the report header records which leg it measured. Use `close_legs(retriever)`
+to release stores — fan-out opens one per corpus, and in embedded mode each holds an
+exclusive lock on its index directory, which is why server mode is preferred for fan-out.
