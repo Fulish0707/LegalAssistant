@@ -40,3 +40,13 @@ def test_ollama_embedder_batches_and_parses():
 
 def test_slug():
     assert slug("ollama:bge-m3") == "ollama_bge_m3" and slug("fake:64") == "fake_64"
+
+
+def test_ollama_refuses_silent_truncation():
+    def handler(request):
+        payload = json.loads(request.read())
+        assert payload['truncate'] is False
+        return httpx.Response(200, json={'embeddings': [[0.1, 0.2]]})
+
+    embedder = OllamaEmbedder(model='bge-m3', base_url='http://test', transport=httpx.MockTransport(handler))
+    assert embedder.embed_query('원문 전체') == [0.1, 0.2]

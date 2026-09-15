@@ -29,7 +29,7 @@ class OllamaEmbedder:
         return self._call([text])[0]
 
     def _call(self, inputs: list[str]) -> list[list[float]]:
-        response = self._client.post("/api/embed", json={"model": self.model, "input": inputs})
+        response = self._client.post("/api/embed", json={"model": self.model, "input": inputs, "truncate": False})
         response.raise_for_status()
         embeddings = response.json()["embeddings"]
         if self._dimension is None and embeddings:
