@@ -13,7 +13,7 @@ import typer
 
 from legal_rag.cli import settings_from_options
 from legal_rag.evaluation import load_retrieval_examples, run_retrieval_eval
-from legal_rag.factory import build_hybrid_retriever
+from legal_rag.factory import build_hybrid_retriever, select_legs
 
 app = typer.Typer(add_completion=False)
 
@@ -31,7 +31,7 @@ def main(
     extra = {"embedding": {"backend": embedding_backend}} if embedding_backend else None
     settings = settings_from_options(profile=profile, root=root, corpus_version=corpus_version, extra=extra)
     hybrid = build_hybrid_retriever(settings)
-    retriever = hybrid if leg == "hybrid" else next(l for l in hybrid.legs if l.name == leg)
+    retriever = select_legs(hybrid, leg)
     report = run_retrieval_eval(retriever, load_retrieval_examples(dataset))
     typer.echo(report.table())
     if json_out:
