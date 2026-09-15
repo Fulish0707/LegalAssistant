@@ -19,9 +19,11 @@
 ### Task 1: Derive CitationKind from DocumentType
 
 **Files:**
-- Modify: `src/legal_rag/schemas/documents.py` (append after `make_document_id`)
+- Modify: `src/legal_rag/schemas/answer.py` (append after `CitationKind`)
 - Modify: `src/legal_rag/schemas/__init__.py` (export)
 - Test: `tests/legal_rag/unit/test_schemas_documents.py`
+
+**Where this lives, and why.** The mapping goes in `answer.py`, not `documents.py`. Every module in `schemas/` imports downward toward `documents.py` (`chunks.py`, `evidence.py`, and `query.py` all do). `answer.py` already owns `CitationKind` and currently imports nothing from the package, so `from .documents import DocumentType` runs with that direction. Putting the mapping in `documents.py` would make the base module depend on the answer contract — no runtime cycle, but backwards layering.
 
 **Step 1: Write the failing test**
 
@@ -63,11 +65,9 @@ Expected: FAIL with `ImportError: cannot import name 'citation_kind'`
 
 **Step 3: Write minimal implementation**
 
-Append to `src/legal_rag/schemas/documents.py`:
+Append to `src/legal_rag/schemas/answer.py`, below the `CitationKind` class:
 
 ```python
-from .answer import CitationKind
-
 # Retrieval filters on the fine-grained document_type; evidence rendering and citation
 # verification need only the coarse kind. Deriving one from the other keeps a new
 # document type from silently classifying as an interpretation.
@@ -91,19 +91,24 @@ def document_types_for(kind: CitationKind) -> list[DocumentType]:
     return [dt for dt, mapped in _CITATION_KINDS.items() if mapped is kind]
 ```
 
-Put `from .answer import CitationKind` with the other imports at the top of the file, not inline.
+Put `from .documents import DocumentType` with the other imports at the top of `answer.py`, not inline.
 
-In `src/legal_rag/schemas/__init__.py`, add `citation_kind` and `document_types_for` to both the `from .documents import (...)` block and `__all__`, keeping alphabetical order.
+In `src/legal_rag/schemas/__init__.py`, add `citation_kind` and `document_types_for` to the `from .answer import (...)` line and to `__all__`, keeping alphabetical order.
 
 **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/legal_rag/unit/test_schemas_documents.py -q`
 Expected: PASS
 
+Then confirm the package still imports cleanly, since this task moves an import between sibling modules:
+
+Run: `uv run python -c "import legal_rag.schemas"`
+Expected: no output, exit 0
+
 **Step 5: Commit**
 
 ```bash
-git add src/legal_rag/schemas/documents.py src/legal_rag/schemas/__init__.py tests/legal_rag/unit/test_schemas_documents.py
+git add src/legal_rag/schemas/answer.py src/legal_rag/schemas/__init__.py tests/legal_rag/unit/test_schemas_documents.py
 git commit -m "feat: derive CitationKind from DocumentType"
 ```
 
@@ -157,7 +162,12 @@ In `src/legal_rag/rag/context.py`, change the import line to:
 from legal_rag.schemas import CitationKind, Evidence, EvidenceBundle, ScoredChunk, citation_kind
 ```
 
-Replace the two branch conditions (lines 19 and 25). `DocumentType` is no longer referenced in this file, so drop it from the import:
+Before dropping `DocumentType` from that import, confirm nothing else in the file uses it:
+
+Run: `grep -n DocumentType src/legal_rag/rag/context.py`
+Expected: only the import line. If any other line appears, keep `DocumentType` in the import.
+
+Replace the two branch conditions (lines 19 and 25):
 
 ```python
             kind = citation_kind(chunk.document_type)
@@ -250,6 +260,8 @@ git commit -m "fix: classify citations by derived citation kind"
 - Test: `tests/legal_rag/unit/test_schemas_misc.py`
 
 This is what makes category separation usable at query time: a caller asks for `case` and Qdrant filters server-side, with no new payload field.
+
+Adding a field changes what `is_empty()` reports, since it compares against a default instance. Verified before writing this plan: `is_empty()` has no callers in `src/`, so nothing downstream changes behavior. Re-check with `grep -rn "is_empty" src/` if that looks stale.
 
 **Step 1: Write the failing test**
 
@@ -429,7 +441,22 @@ Repeat for `civil`, `administrative`, and `intellectual_property`. Run `--valida
 
 Each corpus writes `validation_report.json` with a `document_types` map. Confirm administrative shows `judgment` and no `judgement`, and that no domain reports a type outside the six.
 
-**Step 3: Note what is not done here**
+**Step 3: Prove the fix on real data**
+
+Everything up to here verifies the mapping in isolation. This step is the only one that proves the original 340,000-chunk bug is actually gone.
+
+`ip-sample-v1` survived the 2026-09-15 deletion and its index is still at `data/indexes/ip-sample-v1`. It predates this work and carries the same `patent_trial_decision` and `decision` types, so it is a valid smoke test and small enough to rebuild in seconds.
+
+```bash
+uv run python scripts/build_index.py --corpus-version ip-sample-v1 --embedding-backend fake
+uv run python scripts/search.py --corpus-version ip-sample-v1 --embedding-backend fake "특허 무효심판"
+```
+
+Expected: at least one hit whose `document_type` is `patent_trial_decision`, rendering with `Type: Case` and a `Court` or `Authority` line — not `Type: Interpretation` with empty fields. Check `scripts/search.py --help` first; its flags may differ from `build_index.py`.
+
+If the evidence header still reads `Interpretation` for a `patent_trial_decision` hit, stop. The unit tests pass but a call site was missed — go back to Task 6 Step 2.
+
+**Step 4: Note what is not done here**
 
 Do not build indexes yet. `BM25Stats.fit_stream` computes corpus-global statistics, so how these four corpora relate to one Qdrant collection is an open design question recorded in the design doc's risk section. Indexing per corpus version works today and is unaffected by this plan.
 
