@@ -163,3 +163,15 @@ def test_unknown_document_type_fails_with_file_and_line(source, tmp_path):
         importer.import_processed(root, settings(tmp_path))
     assert 'judgement' in str(excinfo.value)
     assert 'chunks.jsonl:1' in str(excinfo.value)
+
+
+def test_case_like_types_carry_authority_into_court(source, tmp_path):
+    # Whatever renders as Case evidence needs a court, or the header loses it.
+    root, _, _ = source
+    importer.import_processed(root, settings(tmp_path, version='courts'))
+    by_type = {c.document_type.value: c for c in Corpus.load(
+        settings(tmp_path, version='courts').processed_corpus_dir()).chunks()}
+    for kind in ('judgment', 'decision', 'patent_trial_decision', 'constitutional_decision'):
+        assert by_type[kind].metadata.court == '특허심판원', kind
+    assert by_type['statute'].metadata.court is None
+    assert by_type['legal_interpretation'].metadata.court is None
