@@ -46,6 +46,11 @@ raises `ValueError`, so administrative import fails on its first such record.
 
 ## Design
 
+**As implemented, the derived value is `CitationKind`, not a new `citation_category` enum.**
+`CitationKind` already existed in `schemas/answer.py` with exactly these three values, and
+`answer.py` already imported `DocumentType`, so the mapping lives there and reuses the
+existing type. Read `citation_category` below as `CitationKind`.
+
 Separate the two axes. Keep `document_type` as the stored, filterable retrieval facet.
 Derive a three-value citation category from it.
 
