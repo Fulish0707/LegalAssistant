@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from .documents import DocumentType
 
@@ -14,6 +14,7 @@ class _Frozen(BaseModel):
 
 
 class ChunkMetadata(_Frozen):
+    original: dict[str, JsonValue] = Field(default_factory=dict)
     dataset: str
     corpus_version: str
     law_name: str | None = None

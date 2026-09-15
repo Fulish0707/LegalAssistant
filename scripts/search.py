@@ -23,7 +23,7 @@ app = typer.Typer(add_completion=False)
 def main(
     query: str = typer.Argument(...),
     k: int = typer.Option(5),
-    document_type: str = typer.Option(None, help="statute | court_decision | admin_interpretation"),
+    document_type: str = typer.Option(None, help=" | ".join(kind.value for kind in DocumentType)),
     profile: str = typer.Option(None),
     root: Path = typer.Option(None),
     corpus_version: str = typer.Option(None),
@@ -44,7 +44,7 @@ def main(
         typer.echo(f"     {header}")
     for leg, rows in retriever.last_trace.items():
         if leg not in ("fused", "reranked"):
-            typer.echo(f"[{leg}] {[cid.split('#')[1] for cid, _ in rows[:3]]}", err=True)
+            typer.echo(f"[{leg}] {[cid.split('#', 1)[-1] for cid, _ in rows[:3]]}", err=True)
 
 
 if __name__ == "__main__":
