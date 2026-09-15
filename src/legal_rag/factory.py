@@ -157,8 +157,10 @@ def select_legs(retriever: HybridRetriever, leg: str) -> HybridRetriever:
     chosen = [candidate for candidate in retriever.legs if candidate.name.rsplit(":", 1)[-1] == leg]
     if not chosen:
         raise ValueError(f"no {leg!r} leg; available: {[c.name for c in retriever.legs]}")
-    return HybridRetriever(chosen, retriever.fuser, retriever.reranker,
-                           k_leg=retriever.k_leg, k_fused=retriever.k_fused)
+    narrowed = HybridRetriever(chosen, retriever.fuser, retriever.reranker,
+                               k_leg=retriever.k_leg, k_fused=retriever.k_fused)
+    narrowed.name = leg  # so an evaluation report records which leg it measured
+    return narrowed
 
 
 def close_legs(retriever: HybridRetriever) -> None:

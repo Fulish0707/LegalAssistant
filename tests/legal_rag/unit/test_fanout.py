@@ -145,5 +145,19 @@ def test_distinct_stores_are_closed_once_each(tmp_path):
     make_corpus(tmp_path, "alpha", ["특허"])
     make_corpus(tmp_path, "beta", ["절도"])
     retriever = build_hybrid_retriever(settings(tmp_path, "alpha", corpora=["alpha", "beta"]))
-    close_legs(retriever)  # two corpora share no store; each corpus's two legs share one
-    assert True
+    closed = []
+    for leg in retriever.legs:
+        leg.store.close = lambda store=leg.store: closed.append(store)
+    close_legs(retriever)
+    # Four legs, but only two stores: each corpus's dense and sparse legs share one, and
+    # in embedded mode a store left open keeps an exclusive lock on its index directory.
+    assert len(closed) == 2
+    assert len({id(store) for store in closed}) == 2
+
+
+def test_a_narrowed_retriever_reports_which_leg_it_is(tmp_path):
+    from legal_rag.factory import build_hybrid_retriever, select_legs
+    make_corpus(tmp_path, "alpha", ["특허"])
+    retriever = build_hybrid_retriever(settings(tmp_path, "alpha"))
+    assert select_legs(retriever, "sparse").name == "sparse"
+    assert select_legs(retriever, "hybrid").name == "hybrid"
