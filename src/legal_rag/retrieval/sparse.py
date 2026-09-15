@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,12 +35,18 @@ class BM25Stats:
 
     @classmethod
     def fit(cls, tokenized: dict[str, list[str]], *, k1: float, b: float) -> "BM25Stats":
+        return cls.fit_stream(tokenized.values(), k1=k1, b=b)
+
+    @classmethod
+    def fit_stream(cls, documents: Iterable[list[str]], *, k1: float, b: float) -> "BM25Stats":
+        """Fit corpus frequencies without retaining each document token list."""
         df: Counter[str] = Counter()
         total = 0
-        for tokens in tokenized.values():
+        n_docs = 0
+        for tokens in documents:
+            n_docs += 1
             total += len(tokens)
             df.update(set(tokens))
-        n_docs = len(tokenized)
         return cls(dict(df), n_docs, total / n_docs if n_docs else 0.0, k1, b)
 
     def idf(self, term: str) -> float:
