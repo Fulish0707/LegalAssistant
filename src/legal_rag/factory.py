@@ -109,20 +109,12 @@ def check_index_compatibility(settings: Settings, *, embedder_name: str | None =
     return metadata
 
 
-def build_hybrid_retriever(settings: Settings, *, embedder: Embedder | None = None, store: VectorStore | None = None) -> HybridRetriever:
+def build_hybrid_retriever(settings: Settings, *, embedder: Embedder | None = None) -> HybridRetriever:
     embedder = embedder or build_embedder(settings)
-    check_index_compatibility(settings, embedder_name=embedder.name)
-    store = store or open_store(settings, embedder)
-    tokenizer = build_tokenizer_from_settings(settings)
-    stats = BM25Stats.load(settings.index_corpus_dir() / "bm25.json")
-    legs = [DenseRetriever(store, embedder), SparseRetriever(store, tokenizer, stats)]
-    fuser = RRFFuser(
-        rrf_k=settings.retrieval.rrf_k,
-        weights={"dense": settings.retrieval.dense_weight, "sparse": settings.retrieval.sparse_weight},
-    )
+    legs = build_corpus_legs(settings, embedder=embedder)
     return HybridRetriever(
         legs,
-        fuser,
+        RRFFuser(rrf_k=settings.retrieval.rrf_k, weights=fusion_weights(settings)),
         build_reranker(settings),
         k_leg=max(settings.retrieval.k_dense, settings.retrieval.k_sparse),
         k_fused=settings.retrieval.k_fused,
