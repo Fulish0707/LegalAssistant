@@ -5,6 +5,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from legal_rag.schemas import (
     AdminInterpretation,
+    CitationKind,
     CourtDecision,
     DecisionSection,
     DocumentType,
@@ -12,6 +13,7 @@ from legal_rag.schemas import (
     SourceRef,
     Statute,
     StatuteArticle,
+    citation_kind,
     make_document_id,
 )
 
@@ -56,3 +58,25 @@ def test_extra_fields_are_rejected():
             id="admin_interpretation:x", title="t", text="t", source=_source(), authority="법제처",
             reference_number="19-0001", subject="s", question="q", interpretation="i", surprise=1,
         )
+
+
+def test_citation_kind_covers_every_document_type():
+    # Regression guard: a new DocumentType member must be classified, not silently
+    # fall through to "interpretation" the way judgment/decision once did.
+    for document_type in DocumentType:
+        assert isinstance(citation_kind(document_type), CitationKind)
+
+
+def test_citation_kind_groups_adjudicative_types_as_case():
+    case_like = {
+        DocumentType.judgment,
+        DocumentType.court_decision,
+        DocumentType.decision,
+        DocumentType.patent_trial_decision,
+        DocumentType.constitutional_decision,
+    }
+    for document_type in case_like:
+        assert citation_kind(document_type) is CitationKind.case
+    assert citation_kind(DocumentType.statute) is CitationKind.statute
+    assert citation_kind(DocumentType.legal_interpretation) is CitationKind.interpretation
+    assert citation_kind(DocumentType.admin_interpretation) is CitationKind.interpretation
