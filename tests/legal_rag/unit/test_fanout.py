@@ -60,3 +60,17 @@ def test_hits_carry_the_corpus_qualified_retriever_name(tmp_path):
     legs = {leg.name: leg for leg in build_corpus_legs(cfg)}
     hits = legs["alpha:sparse"].retrieve("특허", 5)
     assert hits and all(hit.retriever == "alpha:sparse" for hit in hits)
+
+
+def test_a_corpus_indexed_with_another_embedder_is_named_in_the_error(tmp_path):
+    from legal_rag.factory import IndexCompatibilityError
+    make_corpus(tmp_path, "alpha", ["특허"])
+    make_corpus(tmp_path, "beta", ["절도"])
+    index = settings(tmp_path, "beta").index_corpus_dir() / "index.json"
+    metadata = json.loads(index.read_text())
+    metadata["embedder"] = "bge-m3:1024"
+    index.write_text(json.dumps(metadata), encoding="utf-8")
+    cfg = settings(tmp_path, "alpha", corpora=["alpha", "beta"])
+    with pytest.raises(IndexCompatibilityError) as excinfo:
+        build_corpus_legs(cfg)
+    assert "beta" in str(excinfo.value) and "embedder" in str(excinfo.value)
