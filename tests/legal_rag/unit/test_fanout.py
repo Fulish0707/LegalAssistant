@@ -99,3 +99,22 @@ def test_a_down_weighted_corpus_ranks_below_a_full_weight_one(tmp_path):
     fused = fuser.fuse([[hit("beta-top", "beta:dense")],
                         [hit("alpha-1", "alpha:dense"), hit("alpha-2", "alpha:dense")]], k=3)
     assert [h.chunk.id for h in fused] == ["alpha-1", "alpha-2", "beta-top"]
+
+
+def test_configured_corpora_produce_a_retriever_spanning_both(tmp_path):
+    from legal_rag.factory import build_hybrid_retriever
+    make_corpus(tmp_path, "alpha", ["특허", "상표"])
+    make_corpus(tmp_path, "beta", ["절도", "사기"])
+    cfg = settings(tmp_path, "alpha", corpora=["alpha", "beta"])
+    retriever = build_hybrid_retriever(cfg)
+    assert [leg.name for leg in retriever.legs] == [
+        "alpha:dense", "alpha:sparse", "beta:dense", "beta:sparse"]
+    hits = retriever.retrieve("절도", k=5)
+    assert any(hit.chunk.id.startswith("beta") for hit in hits)
+
+
+def test_no_configured_corpora_keeps_single_corpus_behaviour(tmp_path):
+    from legal_rag.factory import build_hybrid_retriever
+    make_corpus(tmp_path, "alpha", ["특허"])
+    retriever = build_hybrid_retriever(settings(tmp_path, "alpha"))
+    assert [leg.name for leg in retriever.legs] == ["alpha:dense", "alpha:sparse"]
