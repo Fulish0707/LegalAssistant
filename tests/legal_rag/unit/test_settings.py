@@ -52,3 +52,16 @@ def test_derived_paths(tmp_path: Path):
     assert settings.processed_corpus_dir() == tmp_path / "data" / "processed" / "c"
     assert settings.qdrant_path() == tmp_path / "data" / "indexes" / "c" / "qdrant"
     assert settings.raw_dir() == tmp_path / "data" / "raw"
+
+
+def test_retrieval_corpora_default_to_single_corpus_behaviour():
+    settings = load_settings(profile="default")
+    assert settings.retrieval.corpora == []
+    assert settings.retrieval.corpus_weights == {}
+
+
+def test_retrieval_corpora_and_weights_are_configurable():
+    settings = load_settings(profile="default", overrides={"retrieval": {
+        "corpora": ["criminal-v1", "ip-v1"], "corpus_weights": {"ip-v1": 0.5}}})
+    assert settings.retrieval.corpora == ["criminal-v1", "ip-v1"]
+    assert settings.retrieval.corpus_weights == {"ip-v1": 0.5}

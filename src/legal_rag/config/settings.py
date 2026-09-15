@@ -60,6 +60,8 @@ class RetrievalSettings(_Section):
     k_fused: int = 20
     k_final: int = 5
     rrf_k: int = 60
+    corpora: list[str] = Field(default_factory=list)  # empty means query corpus.version alone
+    corpus_weights: dict[str, float] = Field(default_factory=dict)  # absent corpora weigh 1.0
     dense_weight: float = 1.0
     sparse_weight: float = 1.0
 
