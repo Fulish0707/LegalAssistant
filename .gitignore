@@ -22,3 +22,6 @@ chroma_db/
 data/**
 !data/**/
 !data/**/.gitkeep
+
+# agent execution scratch state
+.execute-protocol/
