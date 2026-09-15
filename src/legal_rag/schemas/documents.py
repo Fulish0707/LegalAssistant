@@ -7,7 +7,7 @@ import datetime as _dt
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 MetadataValue = str | int | float | bool | None
 
@@ -17,6 +17,11 @@ class _Frozen(BaseModel):
 
 
 class DocumentType(StrEnum):
+    judgment = "judgment"
+    legal_interpretation = "legal_interpretation"
+    decision = "decision"
+    patent_trial_decision = "patent_trial_decision"
+    constitutional_decision = "constitutional_decision"
     statute = "statute"
     court_decision = "court_decision"
     admin_interpretation = "admin_interpretation"
@@ -39,7 +44,13 @@ class LegalDocumentBase(_Frozen):
     source: SourceRef
     created_date: _dt.date | None = None
     effective_date: _dt.date | None = None
-    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class ImportedDocument(LegalDocumentBase):
+    """Flat external source; no invented article or decision structure."""
+
+    format: Literal["external_processed_v1"] = "external_processed_v1"
 
 
 # Statute hierarchy: law → chapter → article (조) → paragraph (항) → item (호)

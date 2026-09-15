@@ -148,3 +148,71 @@ citations for authorities the prose names and the evidence contains.
 V0.4 adds the `training/` package (RAG-aware SFT dataset, QLoRA config, adapter registry)
 and a Transformers `ChatModel` so experiments A–D (base vs tuned, with and without RAG) are
 pure configuration. V0.5 adds temporal validity and claim-level grounding checks.
+
+## Import externally preprocessed JSONL
+
+Use `scripts/import_processed.py` for data produced outside this repository. It reads
+only `documents.jsonl` and `chunks.jsonl` from the supplied directory. QA files are
+never read or indexed. Original files remain unchanged.
+
+```bash
+# Validate the entire source without creating a corpus.
+uv run python scripts/import_processed.py \
+  --input-dir /home/layke/Documents/legal-rag/data/processed/intellectual_property \
+  --corpus-version ip-v1 --validate-only
+
+# Import a sample containing all chunks of the first two documents.
+uv run python scripts/import_processed.py \
+  --input-dir /home/layke/Documents/legal-rag/data/processed/intellectual_property \
+  --corpus-version ip-sample-v1 --max-documents 2
+ollama pull bge-m3
+uv run python scripts/build_index.py --corpus-version ip-sample-v1
+uv run python scripts/search.py '상표권 침해' --corpus-version ip-sample-v1 --k 5
+
+# Import and index the full corpus in a separate version.
+uv run python scripts/import_processed.py \
+  --input-dir /home/layke/Documents/legal-rag/data/processed/intellectual_property \
+  --corpus-version ip-v1
+uv run python scripts/build_index.py --corpus-version ip-v1
+uv run python scripts/search.py '특허권 침해' --corpus-version ip-v1 --k 5
+```
+
+The importer requires `document_id`, `document_type`, `legal_domain`, and nonempty
+`text` on documents. Chunks additionally require `chunk_id`, `chunk_index`, and
+`total_chunks`. It preserves chunk IDs as `id`, copies chunk position into `order`,
+and stores the original record (excluding text, which stays in `text`) under
+`metadata.original`. The original metadata can therefore contain nested JSON.
+External document types (`judgment`, `legal_interpretation`, `decision`,
+`patent_trial_decision`, `constitutional_decision`) remain distinct; native backend
+types continue to work. Imported flat documents carry an explicit format marker;
+no article hierarchy or decision sections are invented.
+
+Duplicate IDs, empty text, missing document references, mismatched domains/types,
+and incomplete or duplicate chunk positions fail the import. Documents without any
+chunks are preserved and listed in `validation_report.json`; they are not searchable.
+Source hashes are recorded in the standard `manifest.json` and validation report.
+A sample still validates the entire source before publishing its selected records.
+
+Output goes to `data/processed/<corpus-version>/`. Existing output directories are
+never overwritten: choose a new version to import changed data. Publication occurs
+only after validation finishes. Collections retain the backend's model/version-based
+names; this importer does not switch to a fixed `legal_chunks` collection.
+
+**Indexing remains a full rebuild:** `build_index.py` recreates that version/model's
+collection. Use a new corpus version to preserve an existing index. Embedded Qdrant
+requires exclusive access; stop search/API processes using the same index first.
+Full embedding of a large corpus can take substantial time. `fake` embeddings are
+only suitable for pipeline tests, not semantic search.
+
+Structural validation does not prove that earlier preprocessing excluded QA gold
+answers. That requires reviewing the original preprocessing and QA/source provenance.
+
+The Ollama embedder sets `truncate: false`: overlength chunks cause an error instead
+of silently losing their ending. Generic source `date` values remain in
+`metadata.original`; only explicitly named `decision_date` and `effective_date`
+metadata populate those legal date filters.
+
+Index preparation uses two streaming passes: first fit corpus BM25 frequencies,
+then embed and upsert batches. It does not retain every chunk or token list in RAM.
+Embedded Qdrant still uses memory for its stored vectors and payloads; streaming
+preparation does not make total database memory constant.
