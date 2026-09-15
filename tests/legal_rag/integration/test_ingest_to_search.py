@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from legal_rag.config import load_settings
-from legal_rag.factory import build_hybrid_retriever
+from legal_rag.factory import build_hybrid_retriever, close_legs
 from legal_rag.ingestion.pipeline import run_ingestion
 from legal_rag.retrieval.index_builder import build_index
 from legal_rag.schemas import DocumentType, RetrievalFilters
@@ -33,9 +33,7 @@ def indexed(tmp_path_factory):
     report = build_index(settings)
     retriever = build_hybrid_retriever(settings)
     yield settings, report, retriever
-    for leg in retriever.legs:
-        leg.store.close()
-        break
+    close_legs(retriever)
 
 
 def test_index_report(indexed):

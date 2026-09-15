@@ -150,6 +150,23 @@ def build_corpus_legs(settings: Settings, *, embedder: Embedder | None = None) -
     return legs
 
 
+def select_legs(retriever: HybridRetriever, leg: str) -> HybridRetriever:
+    """Narrow a retriever to one kind of leg across every corpus, for diagnostics."""
+    if leg == "hybrid":
+        return retriever
+    chosen = [candidate for candidate in retriever.legs if candidate.name.rsplit(":", 1)[-1] == leg]
+    if not chosen:
+        raise ValueError(f"no {leg!r} leg; available: {[c.name for c in retriever.legs]}")
+    return HybridRetriever(chosen, retriever.fuser, retriever.reranker,
+                           k_leg=retriever.k_leg, k_fused=retriever.k_fused)
+
+
+def close_legs(retriever: HybridRetriever) -> None:
+    """Close each distinct store once; a corpus's two legs share one store."""
+    for store in {id(leg.store): leg.store for leg in retriever.legs if hasattr(leg, "store")}.values():
+        store.close()
+
+
 def fusion_weights(settings: Settings) -> dict[str, float]:
     """Per-leg RRF weights: the corpus weight scales both of that corpus's legs."""
     versions = settings.retrieval.corpora or [settings.corpus.version]

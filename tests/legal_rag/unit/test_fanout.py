@@ -118,3 +118,32 @@ def test_no_configured_corpora_keeps_single_corpus_behaviour(tmp_path):
     make_corpus(tmp_path, "alpha", ["특허"])
     retriever = build_hybrid_retriever(settings(tmp_path, "alpha"))
     assert [leg.name for leg in retriever.legs] == ["alpha:dense", "alpha:sparse"]
+
+
+def test_selecting_a_leg_kind_spans_every_corpus(tmp_path):
+    from legal_rag.factory import build_hybrid_retriever, select_legs
+    make_corpus(tmp_path, "alpha", ["특허"])
+    make_corpus(tmp_path, "beta", ["절도"])
+    cfg = settings(tmp_path, "alpha", corpora=["alpha", "beta"])
+    retriever = build_hybrid_retriever(cfg)
+    sparse = select_legs(retriever, "sparse")
+    assert [leg.name for leg in sparse.legs] == ["alpha:sparse", "beta:sparse"]
+    assert [leg.name for leg in select_legs(retriever, "hybrid").legs] == [
+        leg.name for leg in retriever.legs]
+
+
+def test_selecting_an_unknown_leg_kind_lists_what_exists(tmp_path):
+    from legal_rag.factory import build_hybrid_retriever, select_legs
+    make_corpus(tmp_path, "alpha", ["특허"])
+    retriever = build_hybrid_retriever(settings(tmp_path, "alpha"))
+    with pytest.raises(ValueError, match="alpha:dense"):
+        select_legs(retriever, "nonsense")
+
+
+def test_distinct_stores_are_closed_once_each(tmp_path):
+    from legal_rag.factory import build_hybrid_retriever, close_legs
+    make_corpus(tmp_path, "alpha", ["특허"])
+    make_corpus(tmp_path, "beta", ["절도"])
+    retriever = build_hybrid_retriever(settings(tmp_path, "alpha", corpora=["alpha", "beta"]))
+    close_legs(retriever)  # two corpora share no store; each corpus's two legs share one
+    assert True

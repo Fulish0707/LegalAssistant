@@ -44,4 +44,4 @@ class Chunk(_Frozen):
 class ScoredChunk(_Frozen):
     chunk: Chunk
     score: float
-    retriever: str  # "dense" | "sparse" | "fused" | "reranked"
+    retriever: str  # "<corpus>:dense" | "<corpus>:sparse" | "fused" | "reranked"
