@@ -216,3 +216,32 @@ Index preparation uses two streaming passes: first fit corpus BM25 frequencies,
 then embed and upsert batches. It does not retain every chunk or token list in RAM.
 Embedded Qdrant still uses memory for its stored vectors and payloads; streaming
 preparation does not make total database memory constant.
+
+## Document type and citation kind
+
+`document_type` is the fine-grained retrieval facet. Six values appear across the four
+AI Hub domains: `statute`, `judgment`, `legal_interpretation`, `constitutional_decision`,
+`decision`, and `patent_trial_decision`. `court_decision` and `admin_interpretation`
+remain the native normalizers' spellings for structured sources.
+
+Evidence rendering and citation verification need only a coarse reading, so
+`citation_kind(document_type)` in `schemas/answer.py` derives a `CitationKind` of
+`statute`, `case`, or `interpretation`. Every adjudicative type maps to `case`. That
+mapping is the single source of truth for `rag/context.py`, `verification/backfill.py`,
+and the importer's `court` field.
+
+Do not test `document_type` for equality against one spelling. Doing so is what caused
+imported judgments to render as interpretations with empty authority fields.
+
+Retrieval can filter by either axis. `RetrievalFilters.citation_kind` expands to a
+`MatchAny` over that kind's member document types, so a category filter runs server-side
+with no extra payload field. An explicit `document_types` list wins, letting a caller
+narrow within a category.
+
+```python
+RetrievalFilters(citation_kind=CitationKind.case)                  # any adjudicative source
+RetrievalFilters(document_types=[DocumentType.patent_trial_decision])  # just this one
+```
+
+A new `DocumentType` member must be added to `_CITATION_KINDS`;
+`test_citation_kind_covers_every_document_type` fails otherwise.
