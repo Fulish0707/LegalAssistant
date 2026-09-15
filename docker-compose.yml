@@ -1,0 +1,13 @@
+# Qdrant for multi-corpus retrieval. Embedded mode locks each index directory
+# exclusively, so one process serving four corpora blocks indexing and search on all
+# four. Server mode also creates the payload indexes that VectorStore.recreate skips
+# when embedded.
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    ports:
+      - "6333:6333"   # REST
+      - "6334:6334"   # gRPC
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    restart: unless-stopped
