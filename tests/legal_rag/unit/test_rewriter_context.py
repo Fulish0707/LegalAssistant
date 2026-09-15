@@ -1,7 +1,9 @@
+from datetime import date
+
 from legal_rag.llm import FakeChatModel
 from legal_rag.rag.context import ContextBuilder
 from legal_rag.rag.rewriter import QueryRewriter
-from legal_rag.schemas import DocumentType, QueryAnalysis, RewrittenQueries, ScoredChunk
+from legal_rag.schemas import Chunk, ChunkMetadata, DocumentType, QueryAnalysis, RewrittenQueries, ScoredChunk
 from tests.legal_rag.unit.test_store import _chunks
 
 
@@ -47,3 +49,19 @@ def test_context_builder_truncates_long_text():
     long = c1.model_copy(update={"text": "가" * 5000})
     bundle = ContextBuilder(max_chars=100).build([ScoredChunk(chunk=long, score=1, retriever="reranked")])
     assert len(bundle.items[0].text) == 101 and bundle.items[0].text.endswith("…")
+
+
+def test_context_builder_renders_imported_judgment_as_case():
+    # An imported judgment carries the same court/case metadata as a native
+    # court_decision and must not fall through to the interpretation header.
+    chunk = Chunk(
+        id="d9#p", document_id="d9", document_type=DocumentType.judgment, path="p", order=0,
+        text="피고인은 무죄", title="t",
+        metadata=ChunkMetadata(dataset="f", corpus_version="v", court="인천지방법원",
+                               case_number="2008보5", decision_date=date(2008, 7, 14)),
+    )
+    bundle = ContextBuilder().build([ScoredChunk(chunk=chunk, score=1.0, retriever="reranked")])
+    header = bundle.items[0].header
+    assert header["Type"] == "Case"
+    assert header["Court"] == "인천지방법원" and header["Case number"] == "2008보5"
+    assert "Authority" not in header
