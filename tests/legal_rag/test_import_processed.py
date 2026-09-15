@@ -152,3 +152,14 @@ def test_search_cli_accepts_preserved_external_ids(source, tmp_path):
                              '--embedding-backend', 'fake'], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert '_chunk_0000' in result.stdout
+
+
+def test_unknown_document_type_fails_with_file_and_line(source, tmp_path):
+    # Administrative sources spell this "judgement". Import must reject it loudly
+    # rather than tempt anyone into aliasing the typo inside the importer.
+    root, _, chunks = source
+    write_rows(root / 'chunks.jsonl', [dict(chunks[0], document_type='judgement')])
+    with pytest.raises(ValueError) as excinfo:
+        importer.import_processed(root, settings(tmp_path))
+    assert 'judgement' in str(excinfo.value)
+    assert 'chunks.jsonl:1' in str(excinfo.value)
