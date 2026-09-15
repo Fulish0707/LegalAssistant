@@ -74,3 +74,28 @@ def test_a_corpus_indexed_with_another_embedder_is_named_in_the_error(tmp_path):
     with pytest.raises(IndexCompatibilityError) as excinfo:
         build_corpus_legs(cfg)
     assert "beta" in str(excinfo.value) and "embedder" in str(excinfo.value)
+
+
+def test_leg_weights_multiply_corpus_and_retriever_weights(tmp_path):
+    from legal_rag.factory import fusion_weights
+    cfg = settings(tmp_path, "alpha", corpora=["alpha", "beta"],
+                   corpus_weights={"beta": 0.5}, dense_weight=1.0, sparse_weight=2.0)
+    weights = fusion_weights(cfg)
+    assert weights == {"alpha:dense": 1.0, "alpha:sparse": 2.0,
+                       "beta:dense": 0.5, "beta:sparse": 1.0}
+
+
+def test_a_down_weighted_corpus_ranks_below_a_full_weight_one(tmp_path):
+    from legal_rag.retrieval.fusion import RRFFuser
+    from legal_rag.schemas import Chunk, ChunkMetadata, DocumentType, ScoredChunk
+
+    def hit(chunk_id, retriever):
+        chunk = Chunk(id=chunk_id, document_id=chunk_id, document_type=DocumentType.statute,
+                      path="p", order=0, text="t", title="t",
+                      metadata=ChunkMetadata(dataset="d", corpus_version="v"))
+        return ScoredChunk(chunk=chunk, score=1.0, retriever=retriever)
+
+    fuser = RRFFuser(rrf_k=60, weights={"alpha:dense": 1.0, "beta:dense": 0.2})
+    fused = fuser.fuse([[hit("beta-top", "beta:dense")],
+                        [hit("alpha-1", "alpha:dense"), hit("alpha-2", "alpha:dense")]], k=3)
+    assert [h.chunk.id for h in fused] == ["alpha-1", "alpha-2", "beta-top"]

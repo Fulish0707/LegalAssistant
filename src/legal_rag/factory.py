@@ -158,6 +158,17 @@ def build_corpus_legs(settings: Settings, *, embedder: Embedder | None = None) -
     return legs
 
 
+def fusion_weights(settings: Settings) -> dict[str, float]:
+    """Per-leg RRF weights: the corpus weight scales both of that corpus's legs."""
+    versions = settings.retrieval.corpora or [settings.corpus.version]
+    weights: dict[str, float] = {}
+    for version in versions:
+        corpus_weight = settings.retrieval.corpus_weights.get(version, 1.0)
+        weights[f"{version}:dense"] = corpus_weight * settings.retrieval.dense_weight
+        weights[f"{version}:sparse"] = corpus_weight * settings.retrieval.sparse_weight
+    return weights
+
+
 def build_chat_model(settings: Settings):
     from legal_rag.llm import FakeChatModel, OllamaChatModel
 
