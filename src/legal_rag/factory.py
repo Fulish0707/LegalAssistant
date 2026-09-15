@@ -17,6 +17,7 @@ from legal_rag.retrieval import (
     DenseRetriever,
     HybridRetriever,
     RRFFuser,
+    Retriever,
     SparseRetriever,
     Tokenizer,
     VectorStore,
@@ -126,6 +127,35 @@ def build_hybrid_retriever(settings: Settings, *, embedder: Embedder | None = No
         k_leg=max(settings.retrieval.k_dense, settings.retrieval.k_sparse),
         k_fused=settings.retrieval.k_fused,
     )
+
+
+def corpus_settings(settings: Settings, corpus_version: str) -> Settings:
+    return settings.model_copy(
+        update={"corpus": settings.corpus.model_copy(update={"version": corpus_version})}
+    )
+
+
+def build_corpus_legs(settings: Settings, *, embedder: Embedder | None = None) -> list[Retriever]:
+    """Dense and sparse legs for every configured corpus, each named after its corpus.
+
+    Each corpus keeps its own collection and its own BM25 statistics, so a term missing
+    from one corpus's document frequencies simply yields nothing from that corpus rather
+    than being dropped from the query everywhere.
+    """
+    embedder = embedder or build_embedder(settings)
+    versions = settings.retrieval.corpora or [settings.corpus.version]
+    legs: list[Retriever] = []
+    for version in versions:
+        scoped = corpus_settings(settings, version)
+        check_index_compatibility(scoped, embedder_name=embedder.name)
+        store = open_store(scoped, embedder)
+        stats = BM25Stats.load(scoped.index_corpus_dir() / "bm25.json")
+        dense = DenseRetriever(store, embedder)
+        sparse = SparseRetriever(store, build_tokenizer_from_settings(scoped), stats)
+        dense.name = f"{version}:dense"
+        sparse.name = f"{version}:sparse"
+        legs += [dense, sparse]
+    return legs
 
 
 def build_chat_model(settings: Settings):
