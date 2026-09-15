@@ -1,6 +1,8 @@
+from legal_rag.retrieval.filters import to_conditions
 from legal_rag.schemas import (
     Chunk,
     ChunkMetadata,
+    CitationKind,
     DocumentType,
     Evidence,
     EvidenceBundle,
@@ -54,6 +56,24 @@ def test_query_analysis_defaults():
 
 def test_retrieval_filters_is_empty():
     assert RetrievalFilters().is_empty() and not RetrievalFilters(legal_domain="민사").is_empty()
+    assert not RetrievalFilters(citation_kind=CitationKind.case).is_empty()
+
+
+def test_citation_kind_filter_expands_to_document_types():
+    conditions = to_conditions(RetrievalFilters(citation_kind=CitationKind.case))
+    assert len(conditions) == 1
+    assert conditions[0].key == "document_type"
+    assert set(conditions[0].values) == {
+        "judgment", "court_decision", "decision", "patent_trial_decision", "constitutional_decision",
+    }
+
+
+def test_explicit_document_types_win_over_citation_kind():
+    # A narrower explicit list must not be widened back out to the whole category.
+    filters = RetrievalFilters(document_types=[DocumentType.patent_trial_decision],
+                               citation_kind=CitationKind.case)
+    conditions = to_conditions(filters)
+    assert [c.values for c in conditions if c.key == "document_type"] == [["patent_trial_decision"]]
 
 
 def test_retrieval_example_parses_filters():
