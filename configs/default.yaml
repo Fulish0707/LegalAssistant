@@ -34,6 +34,8 @@ retrieval:
   k_fused: 20
   k_final: 5
   rrf_k: 60
+  corpora: []              # e.g. [criminal-v1, civil-v1] to fan out; empty queries corpus.version
+  corpus_weights: {}       # e.g. {ip-v1: 0.5}; absent corpora weigh 1.0
   dense_weight: 1.0
   sparse_weight: 1.0
 
