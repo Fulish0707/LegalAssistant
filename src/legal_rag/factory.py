@@ -74,8 +74,43 @@ def read_index_metadata(settings: Settings) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+class IndexCompatibilityError(RuntimeError):
+    """Current settings cannot query the index on disk."""
+
+
+def check_index_compatibility(settings: Settings, *, embedder_name: str | None = None) -> dict:
+    """Refuse to query an index that was built under incompatible settings.
+
+    BM25 splits its state: stored document vectors were encoded with the indexing
+    tokenizer, while queries are tokenized now. Analyze a query differently and its
+    terms miss the document-frequency map entirely, so ``query_vector`` drops them and
+    the sparse leg returns nothing — while dense retrieval keeps returning plausible
+    hits and hides the failure. Fail closed instead.
+    """
+    metadata = read_index_metadata(settings)
+    index_dir = settings.index_corpus_dir()
+    problems: list[str] = []
+    if not (index_dir / "bm25.json").exists():
+        problems.append(f"bm25.json is missing from {index_dir}")
+    recorded_tokenizer = metadata.get("tokenizer")
+    if recorded_tokenizer != settings.sparse.tokenizer:
+        problems.append(
+            f"tokenizer: index built with {recorded_tokenizer!r}, settings say {settings.sparse.tokenizer!r}"
+        )
+    if embedder_name is not None and metadata.get("embedder") != embedder_name:
+        problems.append(f"embedder: index built with {metadata.get('embedder')!r}, settings say {embedder_name!r}")
+    if problems:
+        raise IndexCompatibilityError(
+            f"index at {index_dir} does not match the current settings:\n  "
+            + "\n  ".join(problems)
+            + "\nRestore the recorded settings, or rebuild with scripts/build_index.py."
+        )
+    return metadata
+
+
 def build_hybrid_retriever(settings: Settings, *, embedder: Embedder | None = None, store: VectorStore | None = None) -> HybridRetriever:
     embedder = embedder or build_embedder(settings)
+    check_index_compatibility(settings, embedder_name=embedder.name)
     store = store or open_store(settings, embedder)
     tokenizer = build_tokenizer_from_settings(settings)
     stats = BM25Stats.load(settings.index_corpus_dir() / "bm25.json")
