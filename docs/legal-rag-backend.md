@@ -245,3 +245,34 @@ RetrievalFilters(document_types=[DocumentType.patent_trial_decision])  # just th
 
 A new `DocumentType` member must be added to `_CITATION_KINDS`;
 `test_citation_kind_covers_every_document_type` fails otherwise.
+
+## Retrieval evaluation datasets
+
+`scripts/build_eval_set.py` converts an external `qa.jsonl` into the `RetrievalExample`
+rows `eval_retrieval.py` consumes. Only the question and its `document_id` cross over.
+The gold answer never enters the dataset — `test_gold_answer_never_reaches_the_dataset`
+fails if it does.
+
+```bash
+uv run python scripts/build_eval_set.py \
+  --qa-file /home/layke/Documents/legal-rag/data/processed/criminal/qa.jsonl \
+  --corpus-version criminal-v1
+
+uv run python scripts/eval_retrieval.py \
+  --dataset data/eval/criminal-v1.jsonl --corpus-version criminal-v1
+```
+
+A question whose `document_id` is absent from the corpus is dropped and counted, because
+it can never be retrieved and would depress Recall@k for a data-matching reason rather
+than a retrieval one. The four AI Hub domains currently drop none: the upstream
+preprocessor already writes only QA rows whose document reached `documents.jsonl`.
+
+Example ids are a digest of document and question, so reports stay comparable across
+runs regardless of row order. `--max-examples` with `--seed` samples deterministically;
+the full four-domain set is about 236,000 questions, which is far more than a routine
+run needs. `--with-filters` attaches the QA row's `legal_domain` and `document_type` as
+retrieval filters, which measures retrieval within a known category rather than the
+harder unfiltered task.
+
+Recall@k here is document-level: a hit counts when any retrieved chunk belongs to the
+question's source document.
