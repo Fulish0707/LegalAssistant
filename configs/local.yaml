@@ -3,3 +3,11 @@ embedding:
   model: bge-m3
 llm:
   model: qwen3:4b
+  
+qdrant:
+  mode: server
+  url: http://localhost:6333
+
+retrieval:
+  corpora: [criminal-v1, civil-v1, administrative-v1, ip-v1]
+  k_fused: 50
