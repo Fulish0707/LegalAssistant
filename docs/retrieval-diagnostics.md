@@ -83,3 +83,54 @@ uv run python scripts/compare_retrieval_modes.py \
 ```
 
 The runs must share an identical `target.jsonl`, settings hash, Top-K/deep-K, domain and corpus version, and each must be a different mode; otherwise the script refuses. The output directory holds `comparison.md` (Recall@5/10/20/50/100, MRR@deep_k, Top-K / K+1–deep_k / not-found buckets, and per-case gold rank for each mode), `comparison.json` with the same content, and `cases.csv` with one rank column per mode (blank = not found). Cases whose gold is missing from the corpus are excluded from every mode's denominator.
+
+## Graded relevance evaluation
+
+Exact-gold metrics cannot measure this system. QA questions state general legal rules, and none of the 76,142 intellectual-property questions names a case number or document title, so hundreds of decisions can answer a question the gold document happens to answer. The graded evaluation asks instead whether retrieved chunks are relevant, judged by a local LLM that is checked against human labels. Design: `docs/superpowers/specs/2026-09-17-graded-relevance-eval-design.md`.
+
+Grades are defined against the QA reference answer: **2** the chunk alone states the rule the answer relies on (any decision stating it qualifies, not only the gold); **1** same doctrine, insufficient alone; **0** unrelated.
+
+### Layout
+
+`data/eval/relevance/<name>/`:
+
+- `pool.json`, `pool.jsonl` — provenance and one row per (case, chunk): each mode's top-20 union plus the gold document's chunks.
+- `runs/<mode>.jsonl` — each mode's ranking to depth 100.
+- `calibration.csv`, `calibration.json` — 50 stratified pairs for human grading; strata stay in the JSON.
+- `judgments.jsonl` — append-only, keyed by judge model and prompt hash (which covers prompt text, truncation, temperature, token and context limits). Changing any of these starts a new key; nothing is overwritten.
+- `agreement.json`, `calibration_review.csv` — judge versus human.
+
+### Steps
+
+```bash
+P=data/eval/relevance/ip-v1-pilot-200
+
+# 1. Pool (minutes). --root keeps the settings hash identical to the diagnostic runs.
+uv run python scripts/build_relevance_pool.py --profile local --root "$PWD" --corpus-version ip-v1 \
+  --domain intellectual_property \
+  --target data/eval/reports/retrieval_diagnostics/ip-v1/intellectual_property/hybrid-seed42-final/target.jsonl \
+  --output $P
+
+# 2. Calibration sample, then a human fills human_grade (0/1/2) in calibration.csv.
+uv run python scripts/sample_calibration.py --pool-dir $P
+
+# 3. Judge the same 50 and measure agreement (exit 1 unless binary grade-2 kappa >= 0.6).
+uv run python scripts/judge_relevance.py --pool-dir $P --calibration-only
+uv run python scripts/judge_agreement.py --pool-dir $P
+
+# 4. Judge the whole pool (hours; interrupt and rerun freely).
+uv run python scripts/judge_relevance.py --pool-dir $P
+
+# 5. Graded comparison.
+uv run python scripts/eval_graded.py --pool-dir $P --output $P/graded-qwen3-8b
+```
+
+`calibration.csv` leads with `case_number` and `search_query` (for example `특허법원 2021허2359`, `상표법 제35조`) so each source can be looked up quickly. A statute label ending in `앞` means the chunk sits just before that article. Save the file from Excel as "CSV UTF-8". `judge_relevance.py` refuses to run until every calibration pair has a human grade, so the human never sees judge grades first.
+
+### Reading results
+
+Lead with nDCG@10 (gain 2^grade − 1, ideal from every judged chunk for the case) and Success@k (a grade-2 chunk in the top k). Each is reported per chunk and per document. Pooled recall is not reported, because its denominator depends on the pool.
+
+`min_judged_coverage@10` must be 1.0 at chunk level for a comparison to be valid. A new configuration, such as a reranker, surfaces chunks nobody judged; record its ranking and pool it, judge the new pairs with `--pool-file`, then evaluate. Parse failures are stored as `grade: null`, excluded from metrics, and counted in the report.
+
+Scope: this pilot is ip-v1 with the `legal_domain=intellectual_property` filter, under which the other corpora's legs return nothing, so multi-corpus fan-out is not measured.
