@@ -131,6 +131,6 @@ uv run python scripts/eval_graded.py --pool-dir $P --output $P/graded-qwen3-8b
 
 Lead with nDCG@10 (gain 2^grade − 1, ideal from every judged chunk for the case) and Success@k (a grade-2 chunk in the top k). Each is reported per chunk and per document. Pooled recall is not reported, because its denominator depends on the pool.
 
-`min_judged_coverage@10` must be 1.0 at chunk level for a comparison to be valid. A new configuration, such as a reranker, surfaces chunks nobody judged; record its ranking and pool it, judge the new pairs with `--pool-file`, then evaluate. Parse failures are stored as `grade: null`, excluded from metrics, and counted in the report.
+`min_judged_coverage@10` must be 1.0 at chunk level for a comparison to be valid. A new configuration, such as a reranker, surfaces chunks nobody judged; record its ranking and pool it, judge the new pairs with `--pool-file`, then evaluate. Parse failures are stored as `grade: null`. They count as judged for coverage, so they never block a comparison, but take gain 0, stay out of the ideal ranking, and are reported as `failed@10` per case and `failed_top10_total` per mode. `judge_relevance.py --retry-failed` judges them again and appends a new row, which replaces the failure.
 
 Scope: this pilot is ip-v1 with the `legal_domain=intellectual_property` filter, under which the other corpora's legs return nothing, so multi-corpus fan-out is not measured.

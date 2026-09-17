@@ -7,15 +7,20 @@ from pathlib import Path
 from .graded_metrics import LEVELS
 
 SUMMARY_ROWS = ['cases', 'cases_without_relevant', 'ndcg@10', 'success@5', 'success@10', 'success@20', 'mrr',
-                'precision@10_grade1', 'precision@10_grade2', 'mean_judged_coverage@10', 'min_judged_coverage@10']
-CASE_METRICS = ['ndcg@10', 'success@10', 'mrr', 'judged_coverage@10']
+                'precision@10_grade1', 'precision@10_grade2', 'mean_judged_coverage@10', 'min_judged_coverage@10', 'failed_top10_total']
+CASE_METRICS = ['ndcg@10', 'success@10', 'mrr', 'judged_coverage@10', 'failed@10']
 
 
 def min_chunk_coverage(summary: dict) -> float:
     return min(levels['chunk']['min_judged_coverage@10'] for levels in summary.values())
 
 
-COUNT_ROWS = {'cases', 'cases_without_relevant'}
+def failed_top10_total(summary: dict) -> int:
+    """Top-10 chunks whose judgment failed to parse, summed over modes at chunk level."""
+    return sum(levels['chunk']['failed_top10_total'] for levels in summary.values())
+
+
+COUNT_ROWS = {'cases', 'cases_without_relevant', 'failed_top10_total'}
 
 
 def _cell(row: str, value) -> str:
@@ -43,6 +48,9 @@ def render_markdown(summary: dict, *, judge: dict, pool: dict) -> str:
     if min_chunk_coverage(summary) < 1:
         lines += ['', '**WARNING:** some top-10 chunks are unjudged; run judge_relevance.py first. '
                   'Metrics treat them as grade 0 and the comparison is not valid.']
+    if failed_top10_total(summary):
+        lines += ['', f'**Note:** {failed_top10_total(summary)} top-10 chunk judgments failed to parse; they count '
+                  'as judged with gain 0. Rerun judge_relevance.py --retry-failed to grade them.']
     return '\n'.join(lines) + '\n'
 
 

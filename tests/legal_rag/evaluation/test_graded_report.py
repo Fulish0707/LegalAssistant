@@ -4,7 +4,7 @@ import pytest
 
 from legal_rag.evaluation.graded_metrics import per_case_metrics, summarize_runs
 from legal_rag.evaluation.graded_report import (
-    case_rows, min_chunk_coverage, render_markdown, write_cases_csv)
+    case_rows, failed_top10_total, min_chunk_coverage, render_markdown, write_cases_csv)
 
 RUNS = {'dense': [{'case_id': 'c1', 'ranked': [{'chunk_id': 'k1', 'document_id': 'd1'},
                                                {'chunk_id': 'k2', 'document_id': 'd2'}]}],
@@ -42,3 +42,11 @@ def test_case_rows_flatten_modes_and_levels(tmp_path):
         assert list(csv.DictReader(handle))[0]['case_id'] == 'c1'
     with pytest.raises(FileExistsError):
         write_cases_csv(tmp_path / 'cases.csv', fields, rows)
+
+
+def test_markdown_reports_failed_top10_counts():
+    summary = summarize_runs(RUNS, {('c1', 'k1'): 2}, {('c1', 'k1'): 'd1', ('c1', 'k2'): 'd2'},
+                             failures={('c1', 'k2')})
+    text = render_markdown(summary, judge=dict(JUDGE, failed_parses=1), pool=POOL)
+    assert '| failed_top10_total | 1 | 1 |' in text
+    assert min_chunk_coverage(summary) == 1 and failed_top10_total(summary) == 2

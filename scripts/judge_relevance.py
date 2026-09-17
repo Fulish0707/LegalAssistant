@@ -30,6 +30,7 @@ def main(
     calibration_only: bool = typer.Option(False, help='Judge only the pairs in calibration.json.'),
     pool_file: Path = typer.Option(None, exists=True, dir_okay=False,
                                    help='Another pool file, e.g. from a new run; defaults to pool.jsonl.'),
+    retry_failed: bool = typer.Option(False, help='Judge again pairs whose stored judgment failed to parse.'),
     skip_calibration_check: bool = typer.Option(
         False, help='Judge even though the human calibration grades are incomplete.'),
 ) -> None:
@@ -53,7 +54,7 @@ def main(
                err=True)
     chat = OllamaChatModel(model=model, base_url=base_url, timeout=300.0, think=False, num_ctx=JUDGE_NUM_CTX)
     counts = judge_pool(pairs, chat, JudgmentStore(pool_dir / 'judgments.jsonl'),
-                        progress=lambda message: typer.echo(message, err=True))
+                        progress=lambda message: typer.echo(message, err=True), retry_failed=retry_failed)
     typer.echo(json.dumps(counts))
 
 

@@ -69,3 +69,15 @@ def test_rows_returns_reason_for_one_judge_only(tmp_path):
     rows = JudgmentStore(tmp_path / 'judgments.jsonl').rows(KEY)
     assert list(rows) == [('c1', 'k1')]
     assert (rows[('c1', 'k1')]['grade'], rows[('c1', 'k1')]['reason']) == (1, 'why')
+
+
+def test_append_over_failed_row_is_allowed_and_later_row_wins_on_reload(tmp_path):
+    store = JudgmentStore(tmp_path / 'judgments.jsonl')
+    store.append(KEY, case_id='c1', chunk_id='k1', document_id='d1', grade=None, reason='', raw='garbage')
+    assert store.is_failed(KEY, 'c1', 'k1')
+    store.append(KEY, case_id='c1', chunk_id='k1', document_id='d1', grade=2, reason='ok')
+    reloaded = JudgmentStore(tmp_path / 'judgments.jsonl')
+    assert reloaded.grades(KEY) == {('c1', 'k1'): 2} and reloaded.failures(KEY) == []
+    assert not reloaded.is_failed(KEY, 'c1', 'k1')
+    with pytest.raises(ValueError, match='already judged'):
+        reloaded.append(KEY, case_id='c1', chunk_id='k1', document_id='d1', grade=None, reason='')
