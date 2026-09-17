@@ -68,7 +68,7 @@ can be checked against them.
 judge key. It is resumable: each judgment is appended and flushed as it completes.
 
 - Model `qwen3:8b` via `OllamaChatModel`, `think=False`, `temperature=0`, JSON schema
-  `{grade: 0|1|2, reason: str}`.
+  `{grade: 0|1|2, reason: str}` (prompt v1; see "Calibration v1 result and prompt v2").
 - The prompt shows the question, the reference answer, and the chunk (type, title, text).
   It never reveals the mode, rank, or whether the chunk belongs to the gold document.
 - Grades are defined against the reference answer:
@@ -130,6 +130,38 @@ rather than being left blank.
 The full run should not be trusted unless the binary kappa on grade 2 is at least 0.6.
 Below that, revise the prompt, re-judge only the 50, and repeat; a new prompt hash keeps
 the attempts apart.
+
+#### Calibration v1 result and prompt v2
+
+Calibration failed for every prompt tried (`qwen3:8b`, think off). Three rubric wordings are
+recorded in `judge_runs.jsonl`, identified by prompt hash; binary grade-2 kappa did not move:
+`2ac3175d19db` 0.34, `73296afdcb2b` 0.35, `b733e2805288` 0.31. The `agreement.json` of the last
+(`b733e2805288`) gives precision 0.42 and exact agreement 0.50: the judge gave 2 to 19 of the 50
+pairs, the reference labels to 12, and 25 pairs disagree. The reference labels were
+produced by the model "GPT 6 Astra", not by a person. Of the 10 gold chunks, the reference
+graded only 1 as 2 (6 as 0, 3 as 1), so a gold chunk is often not an answer.
+
+Reading all 25 disagreements of `b733e2805288` showed four patterns:
+
+- The judge quoted the reference answer's wording as if the chunk said it, and over-graded to 2.
+- The same field but a different issue, procedure or provision was graded relevant (a 보정각하
+  case for 정정청구 기각사유, 저작권 침해 for 특허권 침해, 제42조 제3항 for 제4항).
+- A rule stated in different words was missed, and under-graded.
+- Reference answers sometimes cite the wrong article, so anchoring grades on the answer
+  propagates its errors.
+
+Because rewording the rubric did not help, prompt v2 adds a mechanical check. It grades against the question's legal issue and treats the reference answer as a
+fallible hint. Grade 0 explicitly covers a different issue, institution, procedure or right.
+The schema becomes `{evidence_quote, grade, reason}`, quote first. Code verifies the quote
+against the chunk as shown (whitespace collapsed, surrounding quote marks and ellipses
+stripped, at least 15 characters) and stores an unverified grade 2 as 1, keeping the model
+grade, quote and verification result in `details`. Think is a run parameter in the key, with
+512 output tokens off and 4,096 on, `num_ctx` 8192 for both. `judge_agreement.py` writes
+per-key `agreement-<hash12>.json` files that record `reference_source`, `quote_downgrades` and
+agreement before the quote check, so the effect of verification can be seen.
+
+Prompts are identified by hash prefix, not version number. The prompt text of
+`b733e2805288` (called "v3" in its own notes) was never committed, so it is not in git history.
 
 ### 5. Metrics
 
