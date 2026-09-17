@@ -141,3 +141,49 @@ def test_coverage_cutoffs_never_exceed_a_shallow_pool_depth():
     hits = ranked(*[(f'k{i}', f'D{i}') for i in range(1, 11)])
     result = case_metrics(hits, {f'k{i}': 0 for i in range(1, 6)}, level='chunk', depth=5)
     assert result['judged_coverage@5'] == 1.0 and 'judged_coverage@10' not in result
+
+
+def test_threshold_1_counts_grade_1_as_relevant_for_headline_metrics():
+    grades = {'a': 0, 'b': 1, 'c': 2, 'z': 1}                # z judged but not retrieved
+    hits = ranked(('a', 'A'), ('b', 'B'), ('x', 'X'), ('c', 'C'))
+    strict = case_metrics(hits, grades, level='chunk')         # default threshold 2
+    loose = case_metrics(hits, grades, level='chunk', threshold=1)
+    assert strict['mrr@20'] == pytest.approx(1 / 4) and loose['mrr@20'] == pytest.approx(1 / 2)
+    assert strict['precision@10'] == pytest.approx(1 / 10) and loose['precision@10'] == pytest.approx(2 / 10)
+    assert strict['success@5'] == loose['success@5'] == 1
+    assert case_metrics(ranked(('a', 'A'), ('b', 'B')), grades, level='chunk')['success@5'] == 0
+    assert case_metrics(ranked(('a', 'A'), ('b', 'B')), grades, level='chunk', threshold=1)['success@5'] == 1
+    # binary nDCG: gain 1 at grade >= threshold; ideal from every judged chunk at/above it
+    assert loose['ndcg@10_binary'] == pytest.approx(
+        (1 / math.log2(3) + 1 / math.log2(5)) / (1 + 1 / math.log2(3) + 1 / math.log2(4)))
+    assert strict['ndcg@10_binary'] == pytest.approx(1 / math.log2(5))
+    assert loose['ndcg@10'] == strict['ndcg@10']               # graded nDCG ignores the threshold
+    assert loose['precision@10_grade2'] == strict['precision@10_grade2'] == pytest.approx(1 / 10)
+    with pytest.raises(ValueError):
+        case_metrics(hits, grades, level='chunk', threshold=3)
+
+
+def test_threshold_at_document_level_uses_max_grade_per_document():
+    grades = {'a1': 0, 'a2': 1, 'b1': 0, 'c9': 1}
+    documents = {'a1': 'A', 'a2': 'A', 'b1': 'B', 'c9': 'C'}
+    hits = ranked(('b1', 'B'), ('a1', 'A'))
+    result = case_metrics(hits, grades, level='document', documents=documents, threshold=1)
+    assert result['mrr@20'] == pytest.approx(1 / 2) and result['success@5'] == 1
+    assert result['precision@10'] == pytest.approx(1 / 10)
+    assert result['ndcg@10_binary'] == pytest.approx((1 / math.log2(3)) / (1 + 1 / math.log2(3)))
+    strict = case_metrics(hits, grades, level='document', documents=documents)
+    assert strict['mrr@20'] == 0.0 and strict['ndcg@10_binary'] is None and strict['ndcg@10'] is not None
+
+
+def test_summary_skips_undefined_binary_ndcg_and_counts_those_cases():
+    runs = {'dense': [{'case_id': 'c1', 'ranked': ranked(('a', 'A'))},
+                      {'case_id': 'c2', 'ranked': ranked(('b', 'B'))}]}
+    grades, documents = {('c1', 'a'): 2, ('c2', 'b'): 1}, {('c1', 'a'): 'A', ('c2', 'b'): 'B'}
+    strict = summarize_runs(runs, grades, documents)['dense']['chunk']
+    assert strict['ndcg@10_binary'] == 1.0 and strict['cases_without_relevant_binary'] == 1
+    assert strict['cases_without_relevant'] == 0 and strict['precision@10'] == pytest.approx(0.05)
+    loose = summarize_runs(runs, grades, documents, threshold=1)['dense']['chunk']
+    assert loose['cases_without_relevant_binary'] == 0 and loose['success@5'] == 1.0
+    assert loose['precision@10'] == pytest.approx(0.1)
+    per_case = per_case_metrics(runs, grades, documents, threshold=1)
+    assert per_case['dense']['document'][1]['mrr@20'] == 1.0

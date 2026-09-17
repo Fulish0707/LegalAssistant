@@ -20,6 +20,12 @@ the pool depth, because deeper ranks were never pooled and are mostly unjudged; 
 dropped when the pool is shallower than 20. Coverage is reported at 10 and at the largest success
 cut-off (``judged_coverage@20``), and validity requires chunk coverage 1.0 at both.
 Pooled recall is deliberately omitted.
+
+Relevance threshold: ``success@k``, ``mrr@<depth>``, ``precision@10`` and ``ndcg@10_binary`` count a
+chunk (or document) as relevant when its grade is at least ``threshold`` (1 or 2; default 2).
+``ndcg@10_binary`` uses gain 1 for relevant items and an ideal ranking of every judged item at or
+above the threshold; it is ``None`` when there is none (counted in ``cases_without_relevant_binary``).
+Graded ``ndcg@10`` and ``precision@10_grade1``/``precision@10_grade2`` do not depend on the threshold.
 """
 from __future__ import annotations
 
@@ -29,6 +35,7 @@ from statistics import mean
 SUCCESS_KS = (5, 10, 20)
 LEVELS = ('chunk', 'document')
 POOL_DEPTH = 20
+THRESHOLDS = (1, 2)
 
 
 def success_ks(depth: int) -> list[int]:
@@ -47,11 +54,14 @@ def _dcg(gains: list[int]) -> float:
 
 def case_metrics(ranked: list[dict], grades: dict[str, int], *, level: str,
                  documents: dict[str, str] | None = None, failed: set[str] | frozenset = frozenset(),
-                 depth: int = POOL_DEPTH) -> dict:
+                 depth: int = POOL_DEPTH, threshold: int = 2) -> dict:
     """``grades`` maps chunk id to grade for this case; ``documents`` maps judged chunk id to
     document id (from the store, so chunks judged for other runs still count in the ideal).
     ``failed`` holds chunk ids whose latest judgment is a parse failure: they count as judged for
-    coverage, take gain 0, stay out of the ideal ranking and are counted in ``failed@10``. ``depth`` is the pool depth: MRR and success stop there."""
+    coverage, take gain 0, stay out of the ideal ranking and are counted in ``failed@10``. ``depth`` is the pool depth: MRR and success stop there.
+    ``threshold`` is the minimum grade counted as relevant by the headline metrics."""
+    if threshold not in THRESHOLDS:
+        raise ValueError(f'threshold must be 1 or 2, got {threshold!r}')
     failed = set(failed) - set(grades)
     if level == 'document':
         documents = {**{h['chunk_id']: h['document_id'] for h in ranked}, **(documents or {})}
@@ -67,7 +77,9 @@ def case_metrics(ranked: list[dict], grades: dict[str, int], *, level: str,
         raise ValueError(f'unknown level: {level!r}')
     gains = [labels.get(item, 0) for item in items]
     ideal = _dcg(sorted(labels.values(), reverse=True)[:10])
-    first = next((i for i, g in enumerate(gains[:depth], 1) if g == 2), None)
+    relevant = [int(g >= threshold) for g in gains]
+    ideal_binary = _dcg(sorted((int(g >= threshold) for g in labels.values()), reverse=True)[:10])
+    first = next((i for i, r in enumerate(relevant[:depth], 1) if r), None)
     top10 = items[:10]
 
     def coverage(k: int) -> float:
@@ -75,8 +87,10 @@ def case_metrics(ranked: list[dict], grades: dict[str, int], *, level: str,
         return sum(item in labels or item in failed_items for item in top) / len(top) if top else 1.0
     return {
         'ndcg@10': _dcg(gains[:10]) / ideal if ideal else None,
-        **{f'success@{k}': int(any(g == 2 for g in gains[:k])) for k in success_ks(depth)},
+        'ndcg@10_binary': _dcg(relevant[:10]) / ideal_binary if ideal_binary else None,
+        **{f'success@{k}': int(any(relevant[:k])) for k in success_ks(depth)},
         f'mrr@{depth}': 1 / first if first else 0.0,
+        'precision@10': sum(relevant[:10]) / 10,
         'precision@10_grade1': sum(g >= 1 for g in gains[:10]) / 10,
         'precision@10_grade2': sum(g == 2 for g in gains[:10]) / 10,
         **{f'judged_coverage@{k}': coverage(k) for k in coverage_ks(depth)},
@@ -86,7 +100,8 @@ def case_metrics(ranked: list[dict], grades: dict[str, int], *, level: str,
 
 def per_case_metrics(runs: dict[str, list[dict]], grades: dict[tuple[str, str], int],
                      documents: dict[tuple[str, str], str],
-                     failures: set[tuple[str, str]] | frozenset = frozenset(), depth: int = POOL_DEPTH) -> dict:
+                     failures: set[tuple[str, str]] | frozenset = frozenset(), depth: int = POOL_DEPTH,
+                     threshold: int = 2) -> dict:
     """Return ``{mode: {level: [{'case_id': ..., **metrics}]}}``.
 
     Raises ``ValueError`` if a mode has no cases or modes cover different case ids."""
@@ -113,7 +128,8 @@ def per_case_metrics(runs: dict[str, list[dict]], grades: dict[tuple[str, str], 
             level: [{'case_id': row['case_id'],
                      **case_metrics(row['ranked'], per_case_grades.get(row['case_id'], {}), level=level,
                                     documents=per_case_docs.get(row['case_id'], {}),
-                                    failed=per_case_failed.get(row['case_id'], set()), depth=depth)}
+                                    failed=per_case_failed.get(row['case_id'], set()), depth=depth,
+                                    threshold=threshold)}
                     for row in rows]
             for level in LEVELS
         }
@@ -123,19 +139,23 @@ def per_case_metrics(runs: dict[str, list[dict]], grades: dict[tuple[str, str], 
 
 def summarize_runs(runs: dict[str, list[dict]], grades: dict[tuple[str, str], int],
                    documents: dict[tuple[str, str], str],
-                   failures: set[tuple[str, str]] | frozenset = frozenset(), depth: int = POOL_DEPTH) -> dict:
+                   failures: set[tuple[str, str]] | frozenset = frozenset(), depth: int = POOL_DEPTH,
+                   threshold: int = 2) -> dict:
     """``failures`` is ``set(store.failures(key))`` and ``depth`` is pool.json ``pool_depth``;
     see ``case_metrics``."""
     summary = {}
-    for mode, levels in per_case_metrics(runs, grades, documents, failures, depth).items():
+    for mode, levels in per_case_metrics(runs, grades, documents, failures, depth, threshold).items():
         summary[mode] = {}
         for level, results in levels.items():
             ndcgs = [r['ndcg@10'] for r in results if r['ndcg@10'] is not None]
-            keys = [k for k in results[0] if k not in ('case_id', 'ndcg@10', 'failed@10')
+            binary = [r['ndcg@10_binary'] for r in results if r['ndcg@10_binary'] is not None]
+            keys = [k for k in results[0] if k not in ('case_id', 'ndcg@10', 'ndcg@10_binary', 'failed@10')
                     and not k.startswith('judged_coverage@')]
             summary[mode][level] = {
                 'cases': len(results), 'cases_without_relevant': len(results) - len(ndcgs),
+                'cases_without_relevant_binary': len(results) - len(binary),
                 'ndcg@10': mean(ndcgs) if ndcgs else None,
+                'ndcg@10_binary': mean(binary) if binary else None,
                 **{k: mean(r[k] for r in results) for k in keys},
                 **{f'{stat.__name__}_judged_coverage@{k}': stat(r[f'judged_coverage@{k}'] for r in results)
                    for k in coverage_ks(depth) for stat in (mean, min)},
