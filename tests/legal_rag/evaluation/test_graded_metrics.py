@@ -187,3 +187,30 @@ def test_summary_skips_undefined_binary_ndcg_and_counts_those_cases():
     assert loose['precision@10'] == pytest.approx(0.1)
     per_case = per_case_metrics(runs, grades, documents, threshold=1)
     assert per_case['dense']['document'][1]['mrr@20'] == 1.0
+
+
+def test_restrict_to_pool_drops_out_of_pool_judgments_and_counts_them():
+    from legal_rag.evaluation.graded_metrics import restrict_to_pool
+    grades = {('c1', 'a'): 1, ('c1', 'z'): 2, ('c2', 'b'): 0}
+    documents = {('c1', 'a'): 'A', ('c1', 'z'): 'Z', ('c2', 'b'): 'B', ('c1', 'f'): 'F', ('c1', 'g'): 'G'}
+    failures = {('c1', 'f'), ('c1', 'g')}
+    pool_pairs = {('c1', 'a'), ('c2', 'b'), ('c1', 'f')}
+    kept_grades, kept_documents, kept_failures, ignored = restrict_to_pool(grades, documents, failures, pool_pairs)
+    assert kept_grades == {('c1', 'a'): 1, ('c2', 'b'): 0}
+    assert kept_documents == {('c1', 'a'): 'A', ('c2', 'b'): 'B', ('c1', 'f'): 'F'}
+    assert kept_failures == {('c1', 'f')} and ignored == 2          # z graded, g failed
+
+
+def test_out_of_pool_grade2_judgment_no_longer_lowers_ndcg():
+    from legal_rag.evaluation.graded_metrics import restrict_to_pool
+    runs = {'dense': [{'case_id': 'c1', 'ranked': ranked(('a', 'A'), ('b', 'B'))}]}
+    grades = {('c1', 'a'): 1, ('c1', 'b'): 0, ('c1', 'deep'): 2}     # 'deep' was judged for a deeper pool
+    documents = {('c1', 'a'): 'A', ('c1', 'b'): 'B', ('c1', 'deep'): 'D'}
+    polluted = summarize_runs(runs, grades, documents, threshold=1)['dense']
+    assert polluted['chunk']['ndcg@10'] < 1 and polluted['chunk']['ndcg@10_binary'] < 1
+    kept = restrict_to_pool(grades, documents, set(), {('c1', 'a'), ('c1', 'b')})
+    for threshold in (1, 2):
+        summary = summarize_runs(runs, *kept[:3], threshold=threshold)['dense']
+        for level in ('chunk', 'document'):
+            assert summary[level]['ndcg@10'] == 1.0
+    assert summarize_runs(runs, *kept[:3], threshold=1)['dense']['chunk']['ndcg@10_binary'] == 1.0
