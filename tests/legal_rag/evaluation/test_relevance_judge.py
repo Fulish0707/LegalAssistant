@@ -64,7 +64,7 @@ def test_retry_success_counts_as_judged(tmp_path):
 def test_long_chunks_are_truncated_in_the_prompt(tmp_path):
     model = ScriptedModel([{'grade': 0, 'reason': ''}])
     judge_pool([pair(text='가' * 10_000)], model, JudgmentStore(tmp_path / 'j.jsonl'))
-    assert '가' * 3000 not in ' '.join(m.content for m in model.messages[0])
+    assert '가' * 3600 not in ' '.join(m.content for m in model.messages[0])
 
 
 def test_braces_in_chunk_text_and_title_are_passed_through(tmp_path):

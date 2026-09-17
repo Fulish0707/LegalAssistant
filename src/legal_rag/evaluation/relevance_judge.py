@@ -15,11 +15,12 @@ from legal_rag.llm.base import ChatModel, Message, StructuredOutputError
 
 from .judgment_store import JudgeKey, JudgmentStore
 
-MAX_CHUNK_CHARS = 2500
+MAX_CHUNK_CHARS = 3500
 MAX_ANSWER_CHARS = 800
 JUDGE_TEMPERATURE = 0.0
 JUDGE_MAX_TOKENS = 256
 JUDGE_ATTEMPTS = 2
+JUDGE_NUM_CTX = 8192
 
 SYSTEM = """당신은 한국 법률 검색 평가자입니다. 질문, 참조 답변, 검색된 문서 조각이 주어집니다.
 문서 조각이 참조 답변의 근거로 얼마나 쓸모 있는지 등급을 매기십시오.
@@ -48,7 +49,7 @@ class RelevanceGrade(BaseModel):
 
 PROMPT_SHA256 = hashlib.sha256(
     json.dumps([SYSTEM, USER, RelevanceGrade.model_json_schema(), MAX_CHUNK_CHARS, MAX_ANSWER_CHARS,
-                JUDGE_TEMPERATURE, JUDGE_MAX_TOKENS, JUDGE_ATTEMPTS],
+                JUDGE_TEMPERATURE, JUDGE_MAX_TOKENS, JUDGE_ATTEMPTS, JUDGE_NUM_CTX],
                ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
