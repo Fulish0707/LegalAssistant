@@ -48,6 +48,21 @@ def coverage_ks(depth: int) -> list[int]:
     return sorted({min(10, depth), *success_ks(depth)[-1:]})
 
 
+def restrict_to_pool(grades: dict[tuple[str, str], int], documents: dict[tuple[str, str], str],
+                     failures: set[tuple[str, str]] | frozenset, pool_pairs: set[tuple[str, str]],
+                     ) -> tuple[dict, dict, set, int]:
+    """Keep only judgments whose (case_id, chunk_id) is in the pool being scored.
+
+    A judgments file copied from a deeper pool holds pairs this pool never pooled; left in, they
+    would enter the ideal ranking and lower nDCG. Returns the restricted grades, documents and
+    failures, and the number of judged pairs (graded or failed) that were dropped."""
+    judged = set(grades) | set(failures)
+    return ({pair: grade for pair, grade in grades.items() if pair in pool_pairs},
+            {pair: doc for pair, doc in documents.items() if pair in pool_pairs},
+            {pair for pair in failures if pair in pool_pairs},
+            len(judged - set(pool_pairs)))
+
+
 def _dcg(gains: list[int]) -> float:
     return sum((2 ** g - 1) / math.log2(i + 1) for i, g in enumerate(gains, 1))
 

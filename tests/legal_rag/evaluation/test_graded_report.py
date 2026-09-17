@@ -79,6 +79,8 @@ def test_markdown_at_threshold_1_moves_graded_rows_to_reference_block():
     headline, reference = chunk.split('### Reference (graded)')
     assert '| success@5 | 1.000 | 0.000 |' in headline and '| ndcg@10_binary | 1.000 | 0.000 |' in headline
     assert '| precision@10 |' in headline and '| ndcg@10 |' not in headline
+    assert '| cases_without_relevant |' not in headline and '| cases_without_relevant |' in reference
+    assert '| cases_without_relevant_binary |' in headline
     assert '| ndcg@10 | 1.000 | 0.000 |' in reference and '| precision@10_grade2 |' in reference
     assert '| success@5 |' not in reference
     default = render_markdown(summarize_runs(RUNS, grades, documents), judge=JUDGE, pool=POOL)
@@ -107,11 +109,13 @@ def test_eval_graded_script_threshold_is_recorded_in_every_output(tmp_path):
     for mode, rows in RUNS.items():
         (pool_dir / 'runs' / f'{mode}.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
     (pool_dir / 'pool.json').write_text(json.dumps(dict(POOL, pool_depth=10)))
-    (pool_dir / 'pool.jsonl').write_text(json.dumps({'case_id': 'c1', 'question': '질문'}) + '\n')
+    (pool_dir / 'pool.jsonl').write_text(''.join(json.dumps({'case_id': 'c1', 'chunk_id': chunk, 'question': '질문'})
+                                                 + '\n' for chunk in ('k1', 'k2')))
     store = JudgmentStore(pool_dir / 'judgments.jsonl')
     key = judge_key('ollama:qwen3:8b', think=True)
     store.append(key, case_id='c1', chunk_id='k1', document_id='d1', grade=0, reason='r')
     store.append(key, case_id='c1', chunk_id='k2', document_id='d2', grade=1, reason='r')
+    store.append(key, case_id='c1', chunk_id='deep', document_id='d9', grade=2, reason='out of pool')
     path = Path(__file__).resolve().parents[3] / 'scripts' / 'eval_graded.py'
     spec = importlib.util.spec_from_file_location('script_eval_graded', path)
     script = importlib.util.module_from_spec(spec)
@@ -122,7 +126,10 @@ def test_eval_graded_script_threshold_is_recorded_in_every_output(tmp_path):
     assert result.exit_code == 0, result.output
     report = json.loads((out / 'graded.json').read_text(encoding='utf-8'))
     assert report['threshold'] == 1 and report['modes']['sparse']['chunk']['success@5'] == 1.0
-    assert 'Headline relevance: grade ≥ 1' in (out / 'graded.md').read_text(encoding='utf-8')
+    assert report['judge']['out_of_pool_judgments'] == 1
+    assert report['modes']['sparse']['chunk']['ndcg@10_binary'] == 1.0     # 'deep' grade 2 not in the ideal
+    markdown = (out / 'graded.md').read_text(encoding='utf-8')
+    assert 'Headline relevance: grade ≥ 1' in markdown and 'out-of-pool judgments ignored: 1' in markdown
     with (out / 'cases.csv').open(newline='', encoding='utf-8-sig') as handle:
         assert list(csv.DictReader(handle))[0]['relevance_threshold'] == '1'
     default = CliRunner().invoke(script.app, ['--pool-dir', str(pool_dir), '--think'])

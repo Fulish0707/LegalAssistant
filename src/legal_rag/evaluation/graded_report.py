@@ -25,7 +25,7 @@ def failed_top10_total(summary: dict) -> int:
 
 COUNT_ROWS = {'cases', 'cases_without_relevant', 'cases_without_relevant_binary', 'failed_top10_total'}
 # Graded rows that stay as reference when the headline uses grade >= 1.
-REFERENCE_ROWS = ('ndcg@10', 'precision@10_grade1', 'precision@10_grade2')
+REFERENCE_ROWS = ('cases_without_relevant', 'ndcg@10', 'precision@10_grade1', 'precision@10_grade2')
 
 
 def _cell(row: str, value) -> str:
@@ -41,7 +41,9 @@ def render_markdown(summary: dict, *, judge: dict, pool: dict, threshold: int = 
     modes = list(summary)
     lines = [
         '# Graded retrieval comparison', '',
-        f"- Judge: `{judge['model']}`, prompt `{judge['prompt_sha256'][:12]}`, failed parses: {judge['failed_parses']}",
+        f"- Judge: `{judge['model']}`, prompt `{judge['prompt_sha256'][:12]}`, failed parses: {judge['failed_parses']}"
+        + (f", out-of-pool judgments ignored: {judge['out_of_pool_judgments']}"
+           if 'out_of_pool_judgments' in judge else ''),
         f"- Pool: corpus_version `{pool.get('corpus_version')}`, filters `{pool.get('filters')}`, "
         f"pool_depth {pool.get('pool_depth')}, settings_hash `{pool.get('settings_hash')}`",
         f'- Headline relevance: grade ≥ {threshold} (success@k, mrr, precision@10, ndcg@10_binary)',

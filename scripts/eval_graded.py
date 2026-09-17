@@ -15,7 +15,7 @@ from pathlib import Path
 
 import typer
 
-from legal_rag.evaluation.graded_metrics import per_case_metrics, summarize_runs
+from legal_rag.evaluation.graded_metrics import per_case_metrics, restrict_to_pool, summarize_runs
 from legal_rag.evaluation.graded_report import (
     case_rows, failed_top10_total, min_chunk_coverage, render_markdown, write_cases_csv)
 from legal_rag.evaluation.judgment_store import JudgmentStore
@@ -38,7 +38,12 @@ def main(
     typer.echo(describe_key(key, think=think), err=True)
     try:
         store = JudgmentStore(pool_dir / 'judgments.jsonl')
-        grades, documents, failures = store.grades(key), store.documents(key), set(store.failures(key))
+        pool_rows = read_jsonl(pool_dir / 'pool.jsonl')
+        # Only judgments for this pool's pairs: a judgments file copied from a deeper pool would
+        # otherwise add unpooled chunks to the nDCG ideal.
+        grades, documents, failures, out_of_pool = restrict_to_pool(
+            store.grades(key), store.documents(key), set(store.failures(key)),
+            {(row['case_id'], row['chunk_id']) for row in pool_rows})
         runs = {path.stem: read_jsonl(path) for path in sorted((pool_dir / 'runs').glob('*.jsonl'))}
         if not runs:
             raise ValueError(f'no runs in {pool_dir / "runs"}')
@@ -48,7 +53,8 @@ def main(
     except (ValueError, OSError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
-    judge = {'model': key.model, 'prompt_sha256': key.prompt_sha256, 'think': think, 'failed_parses': len(store.failures(key))}
+    judge = {'model': key.model, 'prompt_sha256': key.prompt_sha256, 'think': think,
+             'failed_parses': len(failures), 'out_of_pool_judgments': out_of_pool}
     text = render_markdown(summary, judge=judge, pool=pool, threshold=threshold)
     typer.echo(text)
     if failed_top10_total(summary):
@@ -60,7 +66,7 @@ def main(
         typer.echo('refusing to write --output with unjudged top-10/top-20 chunks; judge them or pass --allow-partial',
                    err=True)
         raise typer.Exit(1)
-    questions = {row['case_id']: row['question'] for row in read_jsonl(pool_dir / 'pool.jsonl')}
+    questions = {row['case_id']: row['question'] for row in pool_rows}
     fields, rows = case_rows(per_case_metrics(runs, grades, documents, failures, depth, threshold), questions,
                              threshold)
     try:
