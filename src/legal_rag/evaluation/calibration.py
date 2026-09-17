@@ -125,20 +125,25 @@ def _kappa(a: list[int], b: list[int], weighted: bool) -> float | None:
     return None if expected == 0 else 1 - observed / expected
 
 
+def _binary(h: list[int], l: list[int], *, boundary: int) -> dict:
+    bh, bl = [int(x >= boundary) for x in h], [int(y >= boundary) for y in l]
+    tp = sum(x and y for x, y in zip(bh, bl))
+    return {'kappa': _kappa(bh, bl, weighted=False),
+            'precision': tp / sum(bl) if sum(bl) else None,
+            'recall': tp / sum(bh) if sum(bh) else None}
+
+
 def agreement(human: dict, llm: dict, *, gold_pairs: set) -> dict:
     pairs = sorted(key for key in human if key in llm)
     h, l = [human[k] for k in pairs], [llm[k] for k in pairs]
     confusion = [[sum(x == i and y == j for x, y in zip(h, l)) for j in range(3)] for i in range(3)]
-    bh, bl = [int(x == 2) for x in h], [int(y == 2) for y in l]
-    tp = sum(x and y for x, y in zip(bh, bl))
     return {
         'pairs': len(pairs), 'missing_llm': len([k for k in human if k not in llm]),
         'confusion': confusion,
         'exact_agreement': sum(x == y for x, y in zip(h, l)) / len(pairs) if pairs else None,
         'weighted_kappa': _kappa(h, l, weighted=True),
-        'binary_grade2': {'kappa': _kappa(bh, bl, weighted=False),
-                          'precision': tp / sum(bl) if sum(bl) else None,
-                          'recall': tp / sum(bh) if sum(bh) else None},
+        'binary_relevant': _binary(h, l, boundary=1),
+        'binary_grade2': _binary(h, l, boundary=2),
         'gold_llm_grades': {str(g): sum(llm[k] == g for k in pairs if k in gold_pairs) for g in range(3)},
     }
 
@@ -203,9 +208,20 @@ def calibration_fingerprint(pool_dir: Path) -> dict[str, str | None]:
             'pool_jsonl_sha256': sha('pool.jsonl')}
 
 
-def judge_passes(result: dict, threshold: float = PASS_KAPPA) -> bool:
-    """Pass only when every human-graded pair has a judge grade and binary grade-2 kappa meets the threshold."""
-    kappa = result['binary_grade2']['kappa']
+BOUNDARY_KEYS = {1: 'binary_relevant', 2: 'binary_grade2'}
+
+
+def boundary_kappa(result: dict, boundary: int) -> float | None:
+    """Binary kappa at grade >= ``boundary`` (1: relevant vs 0, 2: grade 2 vs 0/1)."""
+    if boundary not in BOUNDARY_KEYS:
+        raise ValueError(f'boundary must be 1 or 2, got {boundary!r}')
+    return result[BOUNDARY_KEYS[boundary]]['kappa']
+
+
+def judge_passes(result: dict, boundary: int = 2, *, threshold: float = PASS_KAPPA) -> bool:
+    """Pass only when every reference-graded pair has a judge grade and binary kappa at grade >= ``boundary``
+    meets the threshold."""
+    kappa = boundary_kappa(result, boundary)
     return result['missing_llm'] == 0 and kappa is not None and kappa >= threshold
 
 
