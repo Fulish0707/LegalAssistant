@@ -145,6 +145,15 @@ def _gold_chunk_index(corpus: Corpus, document_ids: set[str], *, max_gold_chunks
     return previews, counts
 
 
+def deepen_retrieval(settings: Settings, deep_k: int) -> Settings:
+    """Raise candidate depths on a copy; fusion weights, models and reranker are unchanged."""
+    return settings.model_copy(update={'retrieval': settings.retrieval.model_copy(update={
+        'k_dense': max(deep_k, settings.retrieval.k_dense),
+        'k_sparse': max(deep_k, settings.retrieval.k_sparse),
+        'k_fused': max(deep_k, settings.retrieval.k_fused),
+    })})
+
+
 def run_retrieval_diagnostics(
     settings: Settings, *, domain: str, retrieval_mode: str = 'hybrid', limit: int = 50,
     top_k: int = 20, deep_k: int = 100, seed: int = 42, only_failures: bool = False,
@@ -175,11 +184,7 @@ def run_retrieval_diagnostics(
                                         max_gold_chunks=max_gold_chunks, preview_chars=preview_chars)
     # Change only candidate depth on a copied configuration. Fusion weights, models,
     # tokenization and the configured reranker are unchanged.
-    scoped = settings.model_copy(update={'retrieval': settings.retrieval.model_copy(update={
-        'k_dense': max(deep_k, settings.retrieval.k_dense),
-        'k_sparse': max(deep_k, settings.retrieval.k_sparse),
-        'k_fused': max(deep_k, settings.retrieval.k_fused),
-    })})
+    scoped = deepen_retrieval(settings, deep_k)
     versions = scoped.retrieval.corpora or [scoped.corpus.version]
     if scoped.corpus.version not in versions:
         raise ValueError('target QA corpus_version is not among the configured retrieval corpora')
