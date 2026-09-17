@@ -88,7 +88,11 @@ The runs must share an identical `target.jsonl`, settings hash, Top-K/deep-K, do
 
 Exact-gold metrics cannot measure this system. QA questions state general legal rules, and none of the 76,142 intellectual-property questions names a case number or document title, so hundreds of decisions can answer a question the gold document happens to answer. The graded evaluation asks instead whether retrieved chunks are relevant, judged by a local LLM that is checked against human labels. Design: `docs/superpowers/specs/2026-09-17-graded-relevance-eval-design.md`.
 
-Grades are defined against the QA reference answer: **2** the chunk alone states the rule the answer relies on (any decision stating it qualifies, not only the gold); **1** same doctrine, insufficient alone; **0** unrelated.
+Grades are defined by whether the chunk answers the question's legal issue. The reference answer is only a hint about the expected rule and may contain errors, such as a wrong article number: **2** the chunk itself states the rule, standard or requirement that answers the issue (any decision stating it qualifies, not only the gold); **1** the same issue or provision, but the rule is not stated fully enough to answer alone, or a related field where facts are applied without stating the rule; **0** a different issue, institution, procedure or right (보정 vs 정정, 저작권 vs 특허권, 출원 거절 vs 등록 후 무효·정정), or shared vocabulary only.
+
+Before grading, the judge copies one sentence of the chunk into `evidence_quote`. The quote is verified in code: after collapsing whitespace and stripping surrounding quote marks and ellipses, it must be at least 15 characters and occur in the chunk as the judge saw it (first 3,500 characters). A grade 2 whose quote fails is stored as 1. Grades 0 and 1 are never changed, so `quote_verified: false` on them is expected, not an error. Each row keeps `details`: `model_grade` (the judge's own grade), `evidence_quote` and `quote_verified`; rows from the first prompt have no `details`.
+
+`--think/--no-think` (default `--no-think`) on `judge_relevance.py`, `judge_agreement.py` and `eval_graded.py` selects the thinking mode. It is part of the judgment key, so pass the same flag to all three. Think off generates up to 512 tokens, think on up to 4,096 (Ollama counts thinking tokens against the limit); both use `num_ctx` 8192. Each script prints the key as `prompt <hash12> think on|off`.
 
 ### Layout
 
@@ -97,9 +101,9 @@ Grades are defined against the QA reference answer: **2** the chunk alone states
 - `pool.json`, `pool.jsonl` — provenance and one row per (case, chunk): each mode's top-20 union plus the gold document's chunks. Only the first 10 chunks (`--max-gold-chunks`) of a gold document are pooled.
 - `runs/<mode>.jsonl` — each mode's ranking to depth 100.
 - `calibration.csv`, `calibration.json` — 50 stratified pairs for human grading; strata stay in the JSON.
-- `judgments.jsonl` — append-only, keyed by judge model and prompt hash (which covers prompt text, truncation, temperature, token and context limits, and thinking mode). Changing any of these starts a new key; nothing is overwritten.
+- `judgments.jsonl` — append-only, keyed by judge model and prompt hash (which covers prompt text, schema, truncation, temperature, token and context limits, thinking mode and the quote verification rule). Changing any of these starts a new key; nothing is overwritten.
 - `judge_runs.jsonl` — one provenance line per completed judge run that passed the calibration check: judge key, Ollama model digest (best effort, not part of the key), `calibration.csv` hash, flags and counts.
-- `agreement.json`, `calibration_review.csv` — judge versus human; `agreement.json` records the hashes of `calibration.csv`, `calibration.json` and `pool.jsonl` it was computed from.
+- `agreement-<hash12>.json`, `calibration_review-<hash12>.csv` — judge versus reference labels, one pair per judge key (`<hash12>` is the prompt hash prefix). The JSON records the hashes of `calibration.csv`, `calibration.json` and `pool.jsonl`, the think mode, `reference_source`, `quote_downgrades` (calibration pairs whose grade 2 became 1 by quote verification) and `agreement_before_quote_check` (the same statistics on `model_grade`). The review CSV adds `evidence_quote`, `quote_verified` and `model_grade`. The unsuffixed `agreement.json`/`calibration_review.csv` come from the first prompt and are left alone.
 
 ### Steps
 
@@ -118,7 +122,7 @@ uv run python scripts/sample_calibration.py --pool-dir $P
 # 3. Judge the same 50 and measure agreement (exit 1 unless all 50 have a judge grade and
 #    binary grade-2 kappa >= 0.6; rerun with --retry-failed after parse failures).
 uv run python scripts/judge_relevance.py --pool-dir $P --calibration-only
-uv run python scripts/judge_agreement.py --pool-dir $P
+uv run python scripts/judge_agreement.py --pool-dir $P --reference-source human
 
 # 4. Judge the whole pool (hours; interrupt and rerun freely).
 uv run python scripts/judge_relevance.py --pool-dir $P
@@ -127,7 +131,7 @@ uv run python scripts/judge_relevance.py --pool-dir $P
 uv run python scripts/eval_graded.py --pool-dir $P --output $P/graded-qwen3-8b
 ```
 
-`calibration.csv` leads with `case_number` and `search_query` (for example `특허법원 2021허2359`, `상표법 제35조`) so each source can be looked up quickly. A statute label ending in `앞` means the chunk sits just before that article. Save the file from Excel as "CSV UTF-8". `judge_relevance.py` refuses to run until every calibration pair has a human grade, so the human never sees judge grades first.
+`calibration.csv` leads with `case_number` and `search_query` (for example `특허법원 2021허2359`, `상표법 제35조`) so each source can be looked up quickly. A statute label ending in `앞` means the chunk sits just before that article. Save the file from Excel as "CSV UTF-8". `judge_relevance.py` refuses to run until every calibration pair has a human grade, so the human never sees judge grades first. If the `human_grade` column was filled by a model rather than a person, say so with `--reference-source "<model>"`: it is recorded in the agreement JSON and printed as `reference labels: <source>`, because agreement with AI labels is inter-model agreement, not human validation.
 
 ### Reading results
 
