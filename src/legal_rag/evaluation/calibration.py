@@ -6,6 +6,7 @@ grade 0. The CSV leads with a searchable case number and hides strata, ranks and
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import random
 from pathlib import Path
@@ -130,6 +131,19 @@ def require_human_grades(pool_dir: Path) -> int:
         raise ValueError(f'{len(missing)} of {len(wanted)} calibration pairs have no human_grade in {csv_path}; '
                          'finish labelling before judging')
     return len(wanted)
+
+
+def calibration_fingerprint(pool_dir: Path) -> dict[str, str | None]:
+    """SHA-256 of the human labels, the calibration manifest and the pool (None when a file is missing),
+    so an agreement result or judge run can be tied to the exact labels it was checked against."""
+    pool_dir = Path(pool_dir)
+
+    def sha(name: str) -> str | None:
+        path = pool_dir / name
+        return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+
+    return {'calibration_csv_sha256': sha('calibration.csv'), 'calibration_json_sha256': sha('calibration.json'),
+            'pool_jsonl_sha256': sha('pool.jsonl')}
 
 
 def judge_passes(result: dict, threshold: float = PASS_KAPPA) -> bool:

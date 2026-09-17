@@ -17,7 +17,7 @@ from pathlib import Path
 import typer
 
 from legal_rag.evaluation.calibration import (
-    PASS_KAPPA, agreement, disagreement_rows, judge_passes, missing_llm_message, read_human_grades,
+    PASS_KAPPA, agreement, calibration_fingerprint, disagreement_rows, judge_passes, missing_llm_message, read_human_grades,
     require_human_grades, write_review)
 from legal_rag.evaluation.judgment_store import JudgeKey, JudgmentStore
 from legal_rag.evaluation.relevance_judge import PROMPT_SHA256
@@ -42,7 +42,8 @@ def main(pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     report = {'judge_model': key.model, 'prompt_sha256': key.prompt_sha256,
-              'computed_at': datetime.now(timezone.utc).isoformat(), 'pass_kappa': PASS_KAPPA, **result}
+              'computed_at': datetime.now(timezone.utc).isoformat(), 'pass_kappa': PASS_KAPPA,
+              **calibration_fingerprint(pool_dir), **result}
     (pool_dir / 'agreement.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n',
                                              encoding='utf-8')
     write_review(pool_dir / 'calibration_review.csv', review)
