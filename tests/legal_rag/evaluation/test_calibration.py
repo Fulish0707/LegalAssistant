@@ -141,6 +141,18 @@ def test_disagreement_rows_and_review_csv(tmp_path):
 
 def test_judge_passes_threshold():
     from legal_rag.evaluation.calibration import judge_passes
-    assert judge_passes({'binary_grade2': {'kappa': 0.6}})
-    assert not judge_passes({'binary_grade2': {'kappa': 0.59}})
-    assert not judge_passes({'binary_grade2': {'kappa': None}})
+    assert judge_passes({'binary_grade2': {'kappa': 0.6}, 'missing_llm': 0})
+    assert not judge_passes({'binary_grade2': {'kappa': 0.59}, 'missing_llm': 0})
+    assert not judge_passes({'binary_grade2': {'kappa': None}, 'missing_llm': 0})
+
+
+def test_judge_fails_when_a_human_graded_pair_has_no_llm_grade():
+    from legal_rag.evaluation.calibration import agreement, judge_passes, missing_llm_message
+    human = {('c', str(i)): g for i, g in enumerate([2, 2, 0, 0, 1])}
+    llm = {('c', str(i)): g for i, g in enumerate([2, 2, 0, 0])}      # pair 4 failed or not judged
+    result = agreement(human, llm, gold_pairs=set())
+    assert result['binary_grade2']['kappa'] == 1.0 and result['missing_llm'] == 1
+    assert not judge_passes(result)
+    assert '1 calibration pairs have no judge grade' in missing_llm_message(result)
+    assert '--retry-failed' in missing_llm_message(result)
+    assert judge_passes(dict(result, missing_llm=0))

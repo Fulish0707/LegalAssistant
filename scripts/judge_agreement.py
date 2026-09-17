@@ -2,7 +2,8 @@
 """Compare human calibration grades with the judge's grades.
 
 Writes agreement.json and calibration_review.csv (pairs where human and judge differ) into the
-pool directory, and exits 1 when binary grade-2 kappa is below the threshold.
+pool directory. Refuses unless every calibration pair has a human grade, and exits 1 when any
+human-graded pair has no judge grade or binary grade-2 kappa is below the threshold.
 
 Example:
     uv run python scripts/judge_agreement.py --pool-dir data/eval/relevance/ip-v1-pilot-200
@@ -16,7 +17,8 @@ from pathlib import Path
 import typer
 
 from legal_rag.evaluation.calibration import (
-    PASS_KAPPA, agreement, disagreement_rows, judge_passes, read_human_grades, write_review)
+    PASS_KAPPA, agreement, disagreement_rows, judge_passes, missing_llm_message, read_human_grades,
+    require_human_grades, write_review)
 from legal_rag.evaluation.judgment_store import JudgeKey, JudgmentStore
 from legal_rag.evaluation.relevance_judge import PROMPT_SHA256
 from legal_rag.evaluation.relevance_pool import read_jsonl
@@ -30,6 +32,7 @@ def main(pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
     key = JudgeKey(f'ollama:{model}', PROMPT_SHA256)
     csv_path = pool_dir / 'calibration.csv'
     try:
+        require_human_grades(pool_dir)
         human = read_human_grades(csv_path)
         store = JudgmentStore(pool_dir / 'judgments.jsonl')
         gold = {(r['case_id'], r['chunk_id']) for r in read_jsonl(pool_dir / 'pool.jsonl') if r['is_gold_chunk']}
@@ -45,10 +48,11 @@ def main(pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
     write_review(pool_dir / 'calibration_review.csv', review)
     typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
     typer.echo(f'wrote agreement.json and calibration_review.csv ({len(review)} disagreements)', err=True)
-    if result['missing_llm']:
-        typer.echo(f"WARNING: {result['missing_llm']} human-graded pairs have no judge grade", err=True)
     if not judge_passes(result):
-        typer.echo(f'FAIL: binary grade-2 kappa below {PASS_KAPPA}; revise the prompt before the full run')
+        if result['missing_llm']:
+            typer.echo(f'FAIL: {missing_llm_message(result)}')
+        else:
+            typer.echo(f'FAIL: binary grade-2 kappa below {PASS_KAPPA}; revise the prompt before the full run')
         raise typer.Exit(1)
     typer.echo('PASS: judge usable')
 
