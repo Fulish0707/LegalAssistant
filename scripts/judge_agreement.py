@@ -6,8 +6,9 @@ differ) into the pool directory, one pair of files per judge key. Refuses unless
 pair has a reference grade, and exits 1 when any graded pair has no judge grade or binary kappa at
 the pass boundary (--pass-boundary: grade >= 1, relevant vs 0; or grade >= 2, the default) is below
 the threshold. Both binary statistics are always reported (binary_relevant, binary_grade2).
-Agreement is also reported on the judge's grades before quote verification (``agreement_before_quote_check``), with ``quote_downgrades`` counting the calibration
-pairs whose grade 2 became 1.
+Agreement is also reported on the judge's grades before quote verification
+(``agreement_before_quote_check``), with ``quote_downgrades`` counting the calibration pairs whose
+grade 2 became 1.
 
 Example:
     uv run python scripts/judge_agreement.py --pool-dir data/eval/relevance/ip-v1-pilot-200 \
