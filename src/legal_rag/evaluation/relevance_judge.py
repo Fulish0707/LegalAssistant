@@ -17,6 +17,9 @@ from .judgment_store import JudgeKey, JudgmentStore
 
 MAX_CHUNK_CHARS = 2500
 MAX_ANSWER_CHARS = 800
+JUDGE_TEMPERATURE = 0.0
+JUDGE_MAX_TOKENS = 256
+JUDGE_ATTEMPTS = 2
 
 SYSTEM = """당신은 한국 법률 검색 평가자입니다. 질문, 참조 답변, 검색된 문서 조각이 주어집니다.
 문서 조각이 참조 답변의 근거로 얼마나 쓸모 있는지 등급을 매기십시오.
@@ -44,7 +47,8 @@ class RelevanceGrade(BaseModel):
 
 
 PROMPT_SHA256 = hashlib.sha256(
-    json.dumps([SYSTEM, USER, RelevanceGrade.model_json_schema(), MAX_CHUNK_CHARS, MAX_ANSWER_CHARS],
+    json.dumps([SYSTEM, USER, RelevanceGrade.model_json_schema(), MAX_CHUNK_CHARS, MAX_ANSWER_CHARS,
+                JUDGE_TEMPERATURE, JUDGE_MAX_TOKENS, JUDGE_ATTEMPTS],
                ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
@@ -61,9 +65,9 @@ def _messages(pair: dict) -> list[Message]:
 
 def judge_pool(pairs: Iterable[dict], model: ChatModel, store: JudgmentStore, *,
                progress: Callable[[str], None] | None = None) -> dict[str, int]:
-    """Judge each unjudged pair, retrying a schema failure once.
+    """Judge each unjudged pair, making up to JUDGE_ATTEMPTS tries on schema failures.
 
-    A second schema failure is stored with grade None and the raw text. Transport errors
+    When every attempt fails, the pair is stored with grade None and the raw text. Transport errors
     are not caught: the run stops and a rerun skips pairs already in the store.
     """
     key = judge_key(model)
@@ -74,10 +78,10 @@ def judge_pool(pairs: Iterable[dict], model: ChatModel, store: JudgmentStore, *,
             counts['skipped'] += 1
             continue
         grade, reason, raw = None, '', None
-        for _attempt in range(2):
+        for _attempt in range(JUDGE_ATTEMPTS):
             try:
                 parsed = model.generate(_messages(pair), response_schema=RelevanceGrade,
-                                        temperature=0.0, max_tokens=256).parsed
+                                        temperature=JUDGE_TEMPERATURE, max_tokens=JUDGE_MAX_TOKENS).parsed
                 grade, reason = parsed.grade, parsed.reason
                 break
             except StructuredOutputError as exc:
