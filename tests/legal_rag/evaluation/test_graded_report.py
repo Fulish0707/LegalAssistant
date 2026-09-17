@@ -67,3 +67,64 @@ def test_validity_uses_coverage_at_20_and_rows_follow_depth():
     assert '| mrr@10 |' in text and 'success@20' not in text and min_chunk_coverage(shallow) == 1
     fields, _ = case_rows(per_case_metrics(runs, grades, documents, depth=10), {})
     assert 'dense.chunk.mrr@10' in fields and 'dense.chunk.failed@10' in fields
+
+
+def test_markdown_at_threshold_1_moves_graded_rows_to_reference_block():
+    grades = {('c1', 'k1'): 1, ('c1', 'k2'): 0}
+    documents = {('c1', 'k1'): 'd1', ('c1', 'k2'): 'd2'}
+    summary = summarize_runs(RUNS, grades, documents, threshold=1)
+    text = render_markdown(summary, judge=JUDGE, pool=POOL, threshold=1)
+    assert '- Headline relevance: grade ≥ 1' in text
+    chunk = text.split('## chunk')[1].split('## document')[0]
+    headline, reference = chunk.split('### Reference (graded)')
+    assert '| success@5 | 1.000 | 0.000 |' in headline and '| ndcg@10_binary | 1.000 | 0.000 |' in headline
+    assert '| precision@10 |' in headline and '| ndcg@10 |' not in headline
+    assert '| ndcg@10 | 1.000 | 0.000 |' in reference and '| precision@10_grade2 |' in reference
+    assert '| success@5 |' not in reference
+    default = render_markdown(summarize_runs(RUNS, grades, documents), judge=JUDGE, pool=POOL)
+    assert '- Headline relevance: grade ≥ 2' in default and 'Reference (graded)' not in default
+    assert '| ndcg@10 | 1.000 | 0.000 |' in default and '| ndcg@10_binary | — | — |' in default
+
+
+def test_case_rows_record_threshold_and_binary_metrics():
+    grades = {('c1', 'k1'): 1}
+    per_case = per_case_metrics(RUNS, grades, {('c1', 'k1'): 'd1'}, threshold=1)
+    fields, rows = case_rows(per_case, {'c1': '질문'}, threshold=1)
+    assert fields[:3] == ['case_id', 'question', 'relevance_threshold'] and rows[0]['relevance_threshold'] == 1
+    assert 'dense.chunk.ndcg@10_binary' in fields and 'dense.chunk.precision@10' in fields
+    assert rows[0]['dense.chunk.success@10'] == 1
+
+
+def test_eval_graded_script_threshold_is_recorded_in_every_output(tmp_path):
+    import importlib.util
+    import json
+    from pathlib import Path
+    from typer.testing import CliRunner
+    from legal_rag.evaluation.judgment_store import JudgmentStore
+    from legal_rag.evaluation.relevance_judge import judge_key
+    pool_dir = tmp_path / 'pool'
+    (pool_dir / 'runs').mkdir(parents=True)
+    for mode, rows in RUNS.items():
+        (pool_dir / 'runs' / f'{mode}.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
+    (pool_dir / 'pool.json').write_text(json.dumps(dict(POOL, pool_depth=10)))
+    (pool_dir / 'pool.jsonl').write_text(json.dumps({'case_id': 'c1', 'question': '질문'}) + '\n')
+    store = JudgmentStore(pool_dir / 'judgments.jsonl')
+    key = judge_key('ollama:qwen3:8b', think=True)
+    store.append(key, case_id='c1', chunk_id='k1', document_id='d1', grade=0, reason='r')
+    store.append(key, case_id='c1', chunk_id='k2', document_id='d2', grade=1, reason='r')
+    path = Path(__file__).resolve().parents[3] / 'scripts' / 'eval_graded.py'
+    spec = importlib.util.spec_from_file_location('script_eval_graded', path)
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    out = tmp_path / 'out'
+    result = CliRunner().invoke(script.app, ['--pool-dir', str(pool_dir), '--think', '--threshold', '1',
+                                             '--output', str(out)])
+    assert result.exit_code == 0, result.output
+    report = json.loads((out / 'graded.json').read_text(encoding='utf-8'))
+    assert report['threshold'] == 1 and report['modes']['sparse']['chunk']['success@5'] == 1.0
+    assert 'Headline relevance: grade ≥ 1' in (out / 'graded.md').read_text(encoding='utf-8')
+    with (out / 'cases.csv').open(newline='', encoding='utf-8-sig') as handle:
+        assert list(csv.DictReader(handle))[0]['relevance_threshold'] == '1'
+    default = CliRunner().invoke(script.app, ['--pool-dir', str(pool_dir), '--think'])
+    assert default.exit_code == 0 and 'Headline relevance: grade ≥ 2' in default.output
+    assert CliRunner().invoke(script.app, ['--pool-dir', str(pool_dir), '--threshold', '3']).exit_code != 0

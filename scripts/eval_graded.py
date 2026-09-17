@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 """Graded metrics for every recorded run in a pool directory.
 
+--threshold sets the grade counted as relevant by the headline metrics (success@k, MRR,
+precision@10, ndcg@10_binary); graded nDCG@10 is kept as reference.
+
 Example:
     uv run python scripts/eval_graded.py --pool-dir data/eval/relevance/ip-v1-pilot-200 \
       --output data/eval/reports/graded/ip-v1-pilot-200
@@ -29,6 +32,7 @@ def main(
     output: Path = typer.Option(None, help='New directory for graded.json, graded.md and cases.csv.'),
     allow_partial: bool = typer.Option(False, help='Write --output even if some top-10/top-20 chunks are unjudged.'),
     think: bool = typer.Option(JUDGE_THINK, '--think/--no-think', help='Use judgments made with thinking on.'),
+    threshold: int = typer.Option(2, min=1, max=2, help='Minimum grade counted as relevant by the headline metrics.'),
 ) -> None:
     key = judge_key(f'ollama:{model}', think=think)
     typer.echo(describe_key(key, think=think), err=True)
@@ -40,12 +44,12 @@ def main(
             raise ValueError(f'no runs in {pool_dir / "runs"}')
         pool = json.loads((pool_dir / 'pool.json').read_text(encoding='utf-8'))
         depth = int(pool.get('pool_depth', 20))
-        summary = summarize_runs(runs, grades, documents, failures, depth)
+        summary = summarize_runs(runs, grades, documents, failures, depth, threshold)
     except (ValueError, OSError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     judge = {'model': key.model, 'prompt_sha256': key.prompt_sha256, 'think': think, 'failed_parses': len(store.failures(key))}
-    text = render_markdown(summary, judge=judge, pool=pool)
+    text = render_markdown(summary, judge=judge, pool=pool, threshold=threshold)
     typer.echo(text)
     if failed_top10_total(summary):
         typer.echo(f'WARNING: {failed_top10_total(summary)} top-10 chunk slots (summed over modes) hold failed '
@@ -57,13 +61,14 @@ def main(
                    err=True)
         raise typer.Exit(1)
     questions = {row['case_id']: row['question'] for row in read_jsonl(pool_dir / 'pool.jsonl')}
-    fields, rows = case_rows(per_case_metrics(runs, grades, documents, failures, depth), questions)
+    fields, rows = case_rows(per_case_metrics(runs, grades, documents, failures, depth, threshold), questions,
+                             threshold)
     try:
         output.mkdir(parents=True, exist_ok=False)
     except FileExistsError as exc:
         typer.echo(f'{output} already exists', err=True)
         raise typer.Exit(1) from exc
-    report = {'judge': judge, 'pool': pool, 'modes': summary}
+    report = {'judge': judge, 'pool': pool, 'threshold': threshold, 'modes': summary}
     (output / 'graded.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     (output / 'graded.md').write_text(text, encoding='utf-8')
     write_cases_csv(output / 'cases.csv', fields, rows)
