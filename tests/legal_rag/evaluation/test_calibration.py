@@ -295,3 +295,55 @@ def test_scripts_without_think_help_exits_zero():
     from typer.testing import CliRunner
     result = CliRunner().invoke(_load_script('sample_calibration').app, ['--help'])
     assert result.exit_code == 0 and '--quota' in result.output and '--exclude-calibration' in result.output
+
+
+def _matrix_pairs(matrix):
+    human, llm, number = {}, {}, 0
+    for ref, row in enumerate(matrix):
+        for judge, count in enumerate(row):
+            for _ in range(count):
+                human[('c', str(number))], llm[('c', str(number))] = ref, judge
+                number += 1
+    return human, llm
+
+
+def test_agreement_reports_both_binary_boundaries_on_calibration_matrix():
+    from legal_rag.evaluation.calibration import judge_passes
+    human, llm = _matrix_pairs([[16, 4, 1], [3, 6, 8], [0, 4, 8]])
+    result = agreement(human, llm, gold_pairs=set())
+    assert result['confusion'] == [[16, 4, 1], [3, 6, 8], [0, 4, 8]]
+    assert result['binary_relevant']['kappa'] == pytest.approx(0.6672, abs=1e-4)
+    assert result['binary_relevant']['precision'] == pytest.approx(26 / 31)
+    assert result['binary_relevant']['recall'] == pytest.approx(26 / 29)
+    assert result['binary_grade2']['kappa'] == pytest.approx(0.376, abs=1e-3)
+    assert judge_passes(result, 1) and not judge_passes(result, 2) and not judge_passes(result)
+    assert not judge_passes(dict(result, missing_llm=1), 1)
+    assert not judge_passes(result, 1, threshold=0.7)
+    with pytest.raises(ValueError):
+        judge_passes(result, 0)
+
+
+def test_agreement_script_pass_boundary(tmp_path):
+    from typer.testing import CliRunner
+    from legal_rag.evaluation.judgment_store import JudgmentStore
+    from legal_rag.evaluation.relevance_judge import judge_key
+    rows = _graded_calibration(tmp_path, ['2'] * 20 + ['1'] * 10 + ['0'] * 20)
+    (tmp_path / 'pool.jsonl').write_text(
+        ''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in pool()), encoding='utf-8')
+    key = judge_key('ollama:qwen3:8b', think=True)
+    store = JudgmentStore(tmp_path / 'judgments.jsonl')
+    for row in rows:                                   # judge swaps 1 and 2: >=1 perfect, grade 2 poor
+        case_id, chunk_id = row['pair_id'].split('|', 1)
+        grade = {'2': 1, '1': 2, '0': 0}[row['human_grade']]
+        store.append(key, case_id=case_id, chunk_id=chunk_id, document_id='d', reason='r', grade=grade)
+    script = _load_script('judge_agreement')
+    passed = CliRunner().invoke(script.app, ['--pool-dir', str(tmp_path), '--think', '--pass-boundary', '1'])
+    assert passed.exit_code == 0, passed.output
+    assert 'PASS: binary grade≥1 kappa 1.000' in passed.output
+    report = json.loads((tmp_path / f'agreement-{key.prompt_sha256[:12]}.json').read_text(encoding='utf-8'))
+    assert report['pass_boundary'] == 1 and report['binary_relevant']['kappa'] == 1.0
+    assert 'binary_relevant' in report['agreement_before_quote_check']
+    failed = CliRunner().invoke(script.app, ['--pool-dir', str(tmp_path), '--think'])
+    assert failed.exit_code == 1 and 'FAIL: binary grade≥2 kappa' in failed.output
+    assert json.loads((tmp_path / f'agreement-{key.prompt_sha256[:12]}.json').read_text())['pass_boundary'] == 2
+    assert CliRunner().invoke(script.app, ['--pool-dir', str(tmp_path), '--think', '--pass-boundary', '3']).exit_code != 0

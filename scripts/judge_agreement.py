@@ -3,14 +3,15 @@
 
 Writes agreement-<hash12>.json and calibration_review-<hash12>.csv (pairs where reference and judge
 differ) into the pool directory, one pair of files per judge key. Refuses unless every calibration
-pair has a reference grade, and exits 1 when any graded pair has no judge grade or binary grade-2
-kappa is below the threshold. Agreement is also reported on the judge's grades before quote
-verification (``agreement_before_quote_check``), with ``quote_downgrades`` counting the calibration
+pair has a reference grade, and exits 1 when any graded pair has no judge grade or binary kappa at
+the pass boundary (--pass-boundary: grade >= 1, relevant vs 0; or grade >= 2, the default) is below
+the threshold. Both binary statistics are always reported (binary_relevant, binary_grade2).
+Agreement is also reported on the judge's grades before quote verification (``agreement_before_quote_check``), with ``quote_downgrades`` counting the calibration
 pairs whose grade 2 became 1.
 
 Example:
     uv run python scripts/judge_agreement.py --pool-dir data/eval/relevance/ip-v1-pilot-200 \
-      --reference-source "GPT 6 Astra"
+      --reference-source "GPT 6 Astra" --think --pass-boundary 1
 """
 from __future__ import annotations
 
@@ -21,8 +22,8 @@ from pathlib import Path
 import typer
 
 from legal_rag.evaluation.calibration import (
-    PASS_KAPPA, agreement, agreement_paths, calibration_fingerprint, disagreement_rows, judge_passes,
-    missing_llm_message, model_grades, quote_downgrades, read_human_grades, require_human_grades, write_review)
+    PASS_KAPPA, agreement, agreement_paths, boundary_kappa, calibration_fingerprint, disagreement_rows,
+    judge_passes, missing_llm_message, model_grades, quote_downgrades, read_human_grades, require_human_grades, write_review)
 from legal_rag.evaluation.judgment_store import JudgmentStore
 from legal_rag.evaluation.relevance_judge import (
     JUDGE_THINK, QUOTE_RULE_VERSION, describe_key, generation_settings, judge_key)
@@ -36,7 +37,10 @@ def main(pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
          model: str = typer.Option('qwen3:8b'),
          think: bool = typer.Option(JUDGE_THINK, '--think/--no-think', help='Check judgments made with thinking on.'),
          reference_source: str = typer.Option(
-             'human', help='Who produced the human_grade column (e.g. a model name when labels are AI-made).')) -> None:
+             'human', help='Who produced the human_grade column (e.g. a model name when labels are AI-made).'),
+         pass_boundary: int = typer.Option(
+             2, min=1, max=2, help='Pass on binary kappa at grade >= this: 1 (relevant vs 0) or 2 (grade 2 vs 0/1).'),
+         ) -> None:
     key = judge_key(f'ollama:{model}', think=think)
     typer.echo(describe_key(key, think=think))
     typer.echo(f'reference labels: {reference_source}')
@@ -57,6 +61,7 @@ def main(pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
               'generation': generation_settings(think=think), 'quote_rule_version': QUOTE_RULE_VERSION,
               'reference_source': reference_source,
               'computed_at': datetime.now(timezone.utc).isoformat(), 'pass_kappa': PASS_KAPPA,
+              'pass_boundary': pass_boundary,
               **calibration_fingerprint(pool_dir), **result,
               'quote_downgrades': quote_downgrades(llm_rows, human.keys()),
               'agreement_before_quote_check': before}
@@ -65,13 +70,15 @@ def main(pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
     write_review(review_path, review)
     typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
     typer.echo(f'wrote {report_path.name} and {review_path.name} ({len(review)} disagreements)', err=True)
-    if not judge_passes(result):
+    kappa = boundary_kappa(result, pass_boundary)
+    stat = f"binary grade≥{pass_boundary} kappa {'—' if kappa is None else f'{kappa:.3f}'}"
+    if not judge_passes(result, pass_boundary):
         if result['missing_llm']:
             typer.echo(f'FAIL: {missing_llm_message(result)}')
         else:
-            typer.echo(f'FAIL: binary grade-2 kappa below {PASS_KAPPA}; revise the prompt before the full run')
+            typer.echo(f'FAIL: {stat} below {PASS_KAPPA}; revise the prompt before the full run')
         raise typer.Exit(1)
-    typer.echo('PASS: judge usable')
+    typer.echo(f'PASS: {stat} >= {PASS_KAPPA}; judge usable at this boundary')
 
 
 if __name__ == '__main__':
