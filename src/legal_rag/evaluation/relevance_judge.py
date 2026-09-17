@@ -65,17 +65,19 @@ def _messages(pair: dict) -> list[Message]:
 
 
 def judge_pool(pairs: Iterable[dict], model: ChatModel, store: JudgmentStore, *,
-               progress: Callable[[str], None] | None = None) -> dict[str, int]:
+               progress: Callable[[str], None] | None = None, retry_failed: bool = False) -> dict[str, int]:
     """Judge each unjudged pair, making up to JUDGE_ATTEMPTS tries on schema failures.
 
     When every attempt fails, the pair is stored with grade None and the raw text. Transport errors
-    are not caught: the run stops and a rerun skips pairs already in the store.
+    are not caught: the run stops and a rerun skips pairs already in the store. With ``retry_failed``,
+    pairs whose latest row is a failure are judged again and a new row is appended.
     """
     key = judge_key(model)
     counts = {'judged': 0, 'skipped': 0, 'failed': 0}
     pairs = list(pairs)
     for number, pair in enumerate(pairs, 1):
-        if store.has(key, pair['case_id'], pair['chunk_id']):
+        if store.has(key, pair['case_id'], pair['chunk_id']) and not (
+                retry_failed and store.is_failed(key, pair['case_id'], pair['chunk_id'])):
             counts['skipped'] += 1
             continue
         grade, reason, raw = None, '', None

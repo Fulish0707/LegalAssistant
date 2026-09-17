@@ -1,6 +1,7 @@
 """Append-only relevance judgments.
 
 A judgment is identified by (judge model, prompt hash, case, chunk) and is never rewritten.
+A parse failure (grade None) may be followed by a later row for the same key; the latest row wins.
 Changing the model or prompt creates new keys, so judgments from different judges coexist
 and are never mixed silently.
 """
@@ -60,10 +61,15 @@ class JudgmentStore:
     def has(self, judge: JudgeKey, case_id: str, chunk_id: str) -> bool:
         return self._key(judge, case_id, chunk_id) in self._rows
 
+    def is_failed(self, judge: JudgeKey, case_id: str, chunk_id: str) -> bool:
+        """True when the latest row for this pair is a parse failure (grade None)."""
+        row = self._rows.get(self._key(judge, case_id, chunk_id))
+        return row is not None and row['grade'] is None
+
     def append(self, judge: JudgeKey, *, case_id: str, chunk_id: str, document_id: str,
                grade: int | None, reason: str, raw: str | None = None) -> None:
         key = self._key(judge, case_id, chunk_id)
-        if key in self._rows:
+        if key in self._rows and self._rows[key]['grade'] is not None:
             raise ValueError(f'already judged: {key}')
         row = {'case_id': case_id, 'chunk_id': chunk_id, 'document_id': document_id, 'grade': grade,
                'reason': reason, 'judge_model': judge.model, 'prompt_sha256': judge.prompt_sha256,

@@ -76,3 +76,35 @@ def test_document_coverage_counts_document_judged_via_other_chunk():
     hits = ranked(('a2', 'A'))
     assert case_metrics(hits, grades, level='document', documents=documents)['judged_coverage@10'] == 1.0
     assert case_metrics(hits, grades, level='chunk')['judged_coverage@10'] == 0.0
+
+
+def test_failed_chunk_counts_as_covered_with_zero_gain_and_is_reported():
+    grades = {'a': 2}
+    hits = ranked(('x', 'X'), ('a', 'A'))
+    result = case_metrics(hits, grades, level='chunk', failed={'x'})
+    assert result['judged_coverage@10'] == 1.0
+    assert result['failed@10'] == 1
+    assert result['ndcg@10'] == pytest.approx((3 / math.log2(3)) / 3)   # x has gain 0, not in ideal
+    assert result['mrr'] == pytest.approx(1 / 2)
+
+
+def test_document_judged_via_failed_chunk_only_counts_as_failed():
+    documents = {'x1': 'X', 'a1': 'A'}
+    result = case_metrics(ranked(('x1', 'X'), ('a1', 'A')), {'a1': 1}, level='document',
+                          documents=documents, failed={'x1'})
+    assert result['judged_coverage@10'] == 1.0 and result['failed@10'] == 1
+    graded_too = case_metrics(ranked(('x1', 'X')), {'x2': 2}, level='document',
+                              documents={'x1': 'X', 'x2': 'X'}, failed={'x1'})
+    assert graded_too['failed@10'] == 0                          # X has a graded chunk
+
+
+def test_summary_totals_failed_top10_from_store_failures():
+    runs = {'dense': [{'case_id': 'c1', 'ranked': ranked(('a', 'A'), ('b', 'B'))}]}
+    summary = summarize_runs(runs, {('c1', 'a'): 2}, {('c1', 'a'): 'A', ('c1', 'b'): 'B'},
+                             failures={('c1', 'b')})
+    chunk = summary['dense']['chunk']
+    assert chunk['min_judged_coverage@10'] == 1.0 and chunk['failed_top10_total'] == 1
+    assert summary['dense']['document']['failed_top10_total'] == 1
+    per_case = per_case_metrics(runs, {('c1', 'a'): 2}, {('c1', 'a'): 'A', ('c1', 'b'): 'B'},
+                                failures={('c1', 'b')})
+    assert per_case['dense']['chunk'][0]['failed@10'] == 1

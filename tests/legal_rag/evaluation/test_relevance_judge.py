@@ -86,3 +86,17 @@ def test_generate_uses_the_hashed_generation_settings(tmp_path):
     model = ScriptedModel([{'grade': 1, 'reason': ''}])
     judge_pool([pair()], model, JudgmentStore(tmp_path / 'j.jsonl'))
     assert model.settings == [(RelevanceGrade, JUDGE_TEMPERATURE, JUDGE_MAX_TOKENS)]
+
+
+def test_retry_failed_rejudges_only_failed_pairs(tmp_path):
+    store = JudgmentStore(tmp_path / 'j.jsonl')
+    bad = StructuredOutputError('bad', text='garbage')
+    model = ScriptedModel([{'grade': 1, 'reason': 'ok'}, bad, bad])
+    judge_pool([pair('k1'), pair('k2')], model, store)
+    assert store.failures(judge_key(model)) == [('c1', 'k2')]
+    assert judge_pool([pair('k1'), pair('k2')], ScriptedModel([]), store) == {'judged': 0, 'skipped': 2, 'failed': 0}
+    retry = ScriptedModel([{'grade': 2, 'reason': 'now'}])
+    counts = judge_pool([pair('k1'), pair('k2')], retry, store, retry_failed=True)
+    assert counts == {'judged': 1, 'skipped': 1, 'failed': 0}
+    reloaded = JudgmentStore(tmp_path / 'j.jsonl')
+    assert reloaded.grades(judge_key(model)) == {('c1', 'k1'): 1, ('c1', 'k2'): 2}
