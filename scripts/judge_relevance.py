@@ -2,7 +2,8 @@
 """Grade pool pairs with an Ollama judge, appending to judgments.jsonl. Safe to interrupt and rerun.
 
 The human labels calibration.csv first; the judge refuses to run until every calibration pair
-has a human grade (override with --skip-calibration-check).
+has a human grade (override with --skip-calibration-check). Runs that pass the check append a
+provenance line (calibration CSV hash, model digest, flags, counts) to judge_runs.jsonl.
 
 Example:
     uv run python scripts/judge_relevance.py --pool-dir data/eval/relevance/ip-v1-pilot-200 --calibration-only
@@ -14,9 +15,10 @@ from pathlib import Path
 
 import typer
 
-from legal_rag.evaluation.calibration import require_human_grades
+from legal_rag.evaluation.calibration import calibration_fingerprint, require_human_grades
 from legal_rag.evaluation.judgment_store import JudgeKey, JudgmentStore
-from legal_rag.evaluation.relevance_judge import JUDGE_NUM_CTX, PROMPT_SHA256, judge_pool
+from legal_rag.evaluation.relevance_judge import (
+    JUDGE_NUM_CTX, JUDGE_THINK, PROMPT_SHA256, append_judge_run, judge_pool, judge_run_record, ollama_model_digest)
 from legal_rag.evaluation.relevance_pool import read_jsonl
 
 app = typer.Typer(add_completion=False)
@@ -37,6 +39,8 @@ def main(
     try:
         if not skip_calibration_check:
             require_human_grades(pool_dir)
+        # Hashed when the guard passes, so later edits to the labels do not change the record.
+        calibration_csv_sha256 = calibration_fingerprint(pool_dir)['calibration_csv_sha256']
         pairs = read_jsonl(pool_file or pool_dir / 'pool.jsonl')
         if calibration_only:
             manifest = json.loads((pool_dir / 'calibration.json').read_text(encoding='utf-8'))
@@ -52,9 +56,15 @@ def main(
     key = JudgeKey(f'ollama:{model}', PROMPT_SHA256)
     typer.echo(f'judge {key.model} prompt {key.prompt_sha256[:12]} num_ctx {JUDGE_NUM_CTX}: {len(pairs)} pairs',
                err=True)
-    chat = OllamaChatModel(model=model, base_url=base_url, timeout=300.0, think=False, num_ctx=JUDGE_NUM_CTX)
+    digest = ollama_model_digest(base_url, model)
+    chat = OllamaChatModel(model=model, base_url=base_url, timeout=300.0, think=JUDGE_THINK, num_ctx=JUDGE_NUM_CTX)
     counts = judge_pool(pairs, chat, JudgmentStore(pool_dir / 'judgments.jsonl'),
                         progress=lambda message: typer.echo(message, err=True), retry_failed=retry_failed)
+    if not skip_calibration_check:
+        append_judge_run(pool_dir, judge_run_record(
+            key, calibration_csv_sha256=calibration_csv_sha256,
+            calibration_only=calibration_only, retry_failed=retry_failed, pairs=len(pairs), counts=counts,
+            model_digest=digest))
     typer.echo(json.dumps(counts))
 
 

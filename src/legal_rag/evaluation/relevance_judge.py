@@ -7,8 +7,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable, Iterable, Literal
 
+import httpx
 from pydantic import BaseModel
 
 from legal_rag.llm.base import ChatModel, Message, StructuredOutputError
@@ -21,6 +24,7 @@ JUDGE_TEMPERATURE = 0.0
 JUDGE_MAX_TOKENS = 256
 JUDGE_ATTEMPTS = 2
 JUDGE_NUM_CTX = 8192
+JUDGE_THINK = False
 
 SYSTEM = """당신은 한국 법률 검색 평가자입니다. 질문, 참조 답변, 검색된 문서 조각이 주어집니다.
 문서 조각이 참조 답변의 근거로 얼마나 쓸모 있는지 등급을 매기십시오.
@@ -47,10 +51,15 @@ class RelevanceGrade(BaseModel):
     reason: str
 
 
-PROMPT_SHA256 = hashlib.sha256(
-    json.dumps([SYSTEM, USER, RelevanceGrade.model_json_schema(), MAX_CHUNK_CHARS, MAX_ANSWER_CHARS,
-                JUDGE_TEMPERATURE, JUDGE_MAX_TOKENS, JUDGE_ATTEMPTS, JUDGE_NUM_CTX],
-               ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+def prompt_sha256(*, think: bool = JUDGE_THINK) -> str:
+    """Hash of everything that shapes a grade: prompt, schema, truncation and generation settings."""
+    return hashlib.sha256(
+        json.dumps([SYSTEM, USER, RelevanceGrade.model_json_schema(), MAX_CHUNK_CHARS, MAX_ANSWER_CHARS,
+                    JUDGE_TEMPERATURE, JUDGE_MAX_TOKENS, JUDGE_ATTEMPTS, JUDGE_NUM_CTX, think],
+                   ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+PROMPT_SHA256 = prompt_sha256()
 
 
 def judge_key(model: ChatModel) -> JudgeKey:
@@ -95,3 +104,33 @@ def judge_pool(pairs: Iterable[dict], model: ChatModel, store: JudgmentStore, *,
         if progress and number % 25 == 0:
             progress(f'{number}/{len(pairs)} {counts}')
     return counts
+
+
+def ollama_model_digest(base_url: str, model: str, *, transport: httpx.BaseTransport | None = None) -> str | None:
+    """Best-effort digest of an Ollama model from ``GET /api/tags``; None if unavailable.
+
+    Provenance only: the digest is recorded in judge_runs.jsonl, never in the judgment key."""
+    try:
+        with httpx.Client(base_url=base_url, timeout=5.0, transport=transport) as client:
+            response = client.get('/api/tags')
+            response.raise_for_status()
+            models = response.json().get('models') or []
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return None
+    names = {model, model if ':' in model else f'{model}:latest'}
+    return next((entry.get('digest') for entry in models if entry.get('name') in names), None)
+
+
+def judge_run_record(key: JudgeKey, *, calibration_csv_sha256: str | None, calibration_only: bool,
+                     retry_failed: bool, pairs: int, counts: dict[str, int], model_digest: str | None) -> dict:
+    return {'finished_at': datetime.now(timezone.utc).isoformat(), 'judge_model': key.model,
+            'prompt_sha256': key.prompt_sha256, 'model_digest': model_digest,
+            'calibration_csv_sha256': calibration_csv_sha256, 'calibration_only': calibration_only,
+            'retry_failed': retry_failed, 'pairs': pairs, 'counts': counts}
+
+
+def append_judge_run(pool_dir: Path, record: dict) -> Path:
+    path = Path(pool_dir) / 'judge_runs.jsonl'
+    with path.open('a', encoding='utf-8') as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + '\n')
+    return path

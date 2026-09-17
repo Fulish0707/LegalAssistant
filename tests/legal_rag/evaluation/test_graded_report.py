@@ -36,7 +36,7 @@ def test_case_rows_flatten_modes_and_levels(tmp_path):
     fields, rows = case_rows(per_case_metrics(RUNS, grades, {('c1', 'k1'): 'd1'}), {'c1': '질문'})
     assert fields[:2] == ['case_id', 'question'] and 'sparse.document.judged_coverage@10' in fields
     assert len(rows) == 1 and rows[0]['question'] == '질문'
-    assert rows[0]['dense.chunk.mrr'] == 1.0 and rows[0]['sparse.chunk.success@10'] == 0
+    assert rows[0]['dense.chunk.mrr@20'] == 1.0 and rows[0]['sparse.chunk.success@10'] == 0
     write_cases_csv(tmp_path / 'cases.csv', fields, rows)
     with (tmp_path / 'cases.csv').open(newline='', encoding='utf-8-sig') as handle:
         assert list(csv.DictReader(handle))[0]['case_id'] == 'c1'
@@ -50,3 +50,20 @@ def test_markdown_reports_failed_top10_counts():
     text = render_markdown(summary, judge=dict(JUDGE, failed_parses=1), pool=POOL)
     assert '| failed_top10_total | 1 | 1 |' in text
     assert min_chunk_coverage(summary) == 1 and failed_top10_total(summary) == 2
+
+
+def test_validity_uses_coverage_at_20_and_rows_follow_depth():
+    hits = [{'chunk_id': f'k{i}', 'document_id': f'd{i}'} for i in range(1, 21)]
+    runs = {'dense': [{'case_id': 'c1', 'ranked': hits}]}
+    grades = {('c1', f'k{i}'): 0 for i in range(1, 11)}
+    documents = {key: 'd' + key[1][1:] for key in grades}
+    summary = summarize_runs(runs, grades, documents, depth=20)
+    assert summary['dense']['chunk']['min_judged_coverage@10'] == 1.0
+    assert min_chunk_coverage(summary) == pytest.approx(0.5)
+    text = render_markdown(summary, judge=JUDGE, pool=POOL)
+    assert '| mrr@20 |' in text and '| min_judged_coverage@20 |' in text and 'WARNING' in text
+    shallow = summarize_runs(runs, grades, documents, depth=10)
+    text = render_markdown(shallow, judge=JUDGE, pool=dict(POOL, pool_depth=10))
+    assert '| mrr@10 |' in text and 'success@20' not in text and min_chunk_coverage(shallow) == 1
+    fields, _ = case_rows(per_case_metrics(runs, grades, documents, depth=10), {})
+    assert 'dense.chunk.mrr@10' in fields and 'dense.chunk.failed@10' in fields

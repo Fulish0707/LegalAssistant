@@ -6,13 +6,16 @@ from pathlib import Path
 
 from .graded_metrics import LEVELS
 
-SUMMARY_ROWS = ['cases', 'cases_without_relevant', 'ndcg@10', 'success@5', 'success@10', 'success@20', 'mrr',
-                'precision@10_grade1', 'precision@10_grade2', 'mean_judged_coverage@10', 'min_judged_coverage@10', 'failed_top10_total']
-CASE_METRICS = ['ndcg@10', 'success@10', 'mrr', 'judged_coverage@10', 'failed@10']
+
+def _is_case_metric(name: str) -> bool:
+    return (name in ('ndcg@10', 'success@10', 'failed@10') or name.startswith('mrr@')
+            or name.startswith('judged_coverage@'))
 
 
 def min_chunk_coverage(summary: dict) -> float:
-    return min(levels['chunk']['min_judged_coverage@10'] for levels in summary.values())
+    """Minimum chunk-level coverage over modes and over every reported cut-off (10 and 20)."""
+    return min(value for levels in summary.values() for name, value in levels['chunk'].items()
+               if name.startswith('min_judged_coverage@'))
 
 
 def failed_top10_total(summary: dict) -> int:
@@ -44,9 +47,9 @@ def render_markdown(summary: dict, *, judge: dict, pool: dict) -> str:
     for level in LEVELS:
         lines += ['', f'## {level}', '', '| Metric | ' + ' | '.join(modes) + ' |', '|---|' + '---:|' * len(modes)]
         lines += [f'| {row} | ' + ' | '.join(_cell(row, summary[m][level][row]) for m in modes) + ' |'
-                  for row in SUMMARY_ROWS]
+                  for row in summary[modes[0]][level]]
     if min_chunk_coverage(summary) < 1:
-        lines += ['', '**WARNING:** some top-10 chunks are unjudged; run judge_relevance.py first. '
+        lines += ['', '**WARNING:** some top-10 or top-20 chunks are unjudged; run judge_relevance.py first. '
                   'Metrics treat them as grade 0 and the comparison is not valid.']
     if failed_top10_total(summary):
         lines += ['', f'**Note:** {failed_top10_total(summary)} top-10 chunk judgments failed to parse; they count '
@@ -56,15 +59,17 @@ def render_markdown(summary: dict, *, judge: dict, pool: dict) -> str:
 
 def case_rows(per_case: dict, questions: dict[str, str]) -> tuple[list[str], list[dict]]:
     """Flatten ``per_case_metrics`` output to one row per case with ``{mode}.{level}.{metric}`` columns."""
+    metrics = {mode: {level: [m for m in levels[level][0] if _is_case_metric(m)] if levels[level] else []
+                      for level in LEVELS} for mode, levels in per_case.items()}
     fields = ['case_id', 'question'] + [f'{mode}.{level}.{metric}' for mode in per_case for level in LEVELS
-                                        for metric in CASE_METRICS]
+                                        for metric in metrics[mode][level]]
     rows: dict[str, dict] = {}
     for mode, levels in per_case.items():
         for level in LEVELS:
             for result in levels[level]:
                 row = rows.setdefault(result['case_id'], {'case_id': result['case_id'],
                                                           'question': questions.get(result['case_id'], '')})
-                row.update({f'{mode}.{level}.{metric}': result[metric] for metric in CASE_METRICS})
+                row.update({f'{mode}.{level}.{metric}': result[metric] for metric in metrics[mode][level]})
     return fields, sorted(rows.values(), key=lambda row: row['case_id'])
 
 

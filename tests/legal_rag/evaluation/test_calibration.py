@@ -156,3 +156,17 @@ def test_judge_fails_when_a_human_graded_pair_has_no_llm_grade():
     assert '1 calibration pairs have no judge grade' in missing_llm_message(result)
     assert '--retry-failed' in missing_llm_message(result)
     assert judge_passes(dict(result, missing_llm=0))
+
+
+def test_calibration_fingerprint_hashes_labels_manifest_and_pool(tmp_path):
+    import hashlib
+    from legal_rag.evaluation.calibration import calibration_fingerprint
+    _graded_calibration(tmp_path, ['0'] * 50)
+    (tmp_path / 'pool.jsonl').write_text('{}\n', encoding='utf-8')
+    fingerprint = calibration_fingerprint(tmp_path)
+    sha = lambda name: hashlib.sha256((tmp_path / name).read_bytes()).hexdigest()
+    assert fingerprint == {'calibration_csv_sha256': sha('calibration.csv'),
+                           'calibration_json_sha256': sha('calibration.json'),
+                           'pool_jsonl_sha256': sha('pool.jsonl')}
+    (tmp_path / 'pool.jsonl').unlink()
+    assert calibration_fingerprint(tmp_path)['pool_jsonl_sha256'] is None

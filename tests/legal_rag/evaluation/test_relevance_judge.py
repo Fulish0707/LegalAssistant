@@ -100,3 +100,41 @@ def test_retry_failed_rejudges_only_failed_pairs(tmp_path):
     assert counts == {'judged': 1, 'skipped': 1, 'failed': 0}
     reloaded = JudgmentStore(tmp_path / 'j.jsonl')
     assert reloaded.grades(judge_key(model)) == {('c1', 'k1'): 1, ('c1', 'k2'): 2}
+
+
+def test_think_is_part_of_the_prompt_hash():
+    from legal_rag.evaluation.relevance_judge import JUDGE_THINK, PROMPT_SHA256, prompt_sha256
+    assert JUDGE_THINK is False and prompt_sha256() == PROMPT_SHA256
+    assert prompt_sha256(think=True) != PROMPT_SHA256
+
+
+def test_judge_run_record_and_append(tmp_path):
+    import json
+    from legal_rag.evaluation.judgment_store import JudgeKey
+    from legal_rag.evaluation.relevance_judge import append_judge_run, judge_run_record
+    record = judge_run_record(JudgeKey('ollama:qwen3:8b', 'p1'), calibration_csv_sha256='abc',
+                              calibration_only=True, retry_failed=False, pairs=50,
+                              counts={'judged': 49, 'skipped': 0, 'failed': 1}, model_digest=None)
+    assert record['judge_model'] == 'ollama:qwen3:8b' and record['prompt_sha256'] == 'p1'
+    assert record['calibration_csv_sha256'] == 'abc' and record['model_digest'] is None
+    assert record['calibration_only'] is True and record['retry_failed'] is False
+    assert record['pairs'] == 50 and record['counts']['failed'] == 1 and record['finished_at']
+    append_judge_run(tmp_path, record)
+    append_judge_run(tmp_path, dict(record, retry_failed=True))
+    lines = (tmp_path / 'judge_runs.jsonl').read_text(encoding='utf-8').splitlines()
+    assert [json.loads(line)['retry_failed'] for line in lines] == [False, True]
+
+
+def test_ollama_model_digest_is_best_effort():
+    import httpx
+    from legal_rag.evaluation.relevance_judge import ollama_model_digest
+    tags = {'models': [{'name': 'llama3:8b', 'digest': 'x'}, {'name': 'qwen3:8b', 'digest': 'sha-q'}]}
+    ok = httpx.MockTransport(lambda request: httpx.Response(200, json=tags))
+    assert ollama_model_digest('http://ollama', 'qwen3:8b', transport=ok) == 'sha-q'
+    assert ollama_model_digest('http://ollama', 'absent', transport=ok) is None
+
+    def refuse(request):
+        raise httpx.ConnectError('down')
+    assert ollama_model_digest('http://ollama', 'qwen3:8b', transport=httpx.MockTransport(refuse)) is None
+    broken = httpx.MockTransport(lambda request: httpx.Response(500))
+    assert ollama_model_digest('http://ollama', 'qwen3:8b', transport=broken) is None

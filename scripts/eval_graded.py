@@ -27,7 +27,7 @@ def main(
     pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
     model: str = typer.Option('qwen3:8b'),
     output: Path = typer.Option(None, help='New directory for graded.json, graded.md and cases.csv.'),
-    allow_partial: bool = typer.Option(False, help='Write --output even if some top-10 chunks are unjudged.'),
+    allow_partial: bool = typer.Option(False, help='Write --output even if some top-10/top-20 chunks are unjudged.'),
 ) -> None:
     key = JudgeKey(f'ollama:{model}', PROMPT_SHA256)
     try:
@@ -37,7 +37,8 @@ def main(
         if not runs:
             raise ValueError(f'no runs in {pool_dir / "runs"}')
         pool = json.loads((pool_dir / 'pool.json').read_text(encoding='utf-8'))
-        summary = summarize_runs(runs, grades, documents, failures)
+        depth = int(pool.get('pool_depth', 20))
+        summary = summarize_runs(runs, grades, documents, failures, depth)
     except (ValueError, OSError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
@@ -50,11 +51,11 @@ def main(
     if not output:
         return
     if min_chunk_coverage(summary) < 1 and not allow_partial:
-        typer.echo('refusing to write --output with unjudged top-10 chunks; judge them or pass --allow-partial',
+        typer.echo('refusing to write --output with unjudged top-10/top-20 chunks; judge them or pass --allow-partial',
                    err=True)
         raise typer.Exit(1)
     questions = {row['case_id']: row['question'] for row in read_jsonl(pool_dir / 'pool.jsonl')}
-    fields, rows = case_rows(per_case_metrics(runs, grades, documents, failures), questions)
+    fields, rows = case_rows(per_case_metrics(runs, grades, documents, failures, depth), questions)
     try:
         output.mkdir(parents=True, exist_ok=False)
     except FileExistsError as exc:
