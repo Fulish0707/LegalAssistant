@@ -15,8 +15,8 @@ import typer
 from legal_rag.evaluation.graded_metrics import per_case_metrics, summarize_runs
 from legal_rag.evaluation.graded_report import (
     case_rows, failed_top10_total, min_chunk_coverage, render_markdown, write_cases_csv)
-from legal_rag.evaluation.judgment_store import JudgeKey, JudgmentStore
-from legal_rag.evaluation.relevance_judge import PROMPT_SHA256
+from legal_rag.evaluation.judgment_store import JudgmentStore
+from legal_rag.evaluation.relevance_judge import JUDGE_THINK, describe_key, judge_key
 from legal_rag.evaluation.relevance_pool import read_jsonl
 
 app = typer.Typer(add_completion=False)
@@ -28,8 +28,10 @@ def main(
     model: str = typer.Option('qwen3:8b'),
     output: Path = typer.Option(None, help='New directory for graded.json, graded.md and cases.csv.'),
     allow_partial: bool = typer.Option(False, help='Write --output even if some top-10/top-20 chunks are unjudged.'),
+    think: bool = typer.Option(JUDGE_THINK, '--think/--no-think', help='Use judgments made with thinking on.'),
 ) -> None:
-    key = JudgeKey(f'ollama:{model}', PROMPT_SHA256)
+    key = judge_key(f'ollama:{model}', think=think)
+    typer.echo(describe_key(key, think=think), err=True)
     try:
         store = JudgmentStore(pool_dir / 'judgments.jsonl')
         grades, documents, failures = store.grades(key), store.documents(key), set(store.failures(key))
@@ -42,7 +44,7 @@ def main(
     except (ValueError, OSError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
-    judge = {'model': key.model, 'prompt_sha256': key.prompt_sha256, 'failed_parses': len(store.failures(key))}
+    judge = {'model': key.model, 'prompt_sha256': key.prompt_sha256, 'think': think, 'failed_parses': len(store.failures(key))}
     text = render_markdown(summary, judge=judge, pool=pool)
     typer.echo(text)
     if failed_top10_total(summary):

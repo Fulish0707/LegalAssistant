@@ -67,13 +67,13 @@ class JudgmentStore:
         return row is not None and row['grade'] is None
 
     def append(self, judge: JudgeKey, *, case_id: str, chunk_id: str, document_id: str,
-               grade: int | None, reason: str, raw: str | None = None) -> None:
+               grade: int | None, reason: str, raw: str | None = None, details: dict | None = None) -> None:
         key = self._key(judge, case_id, chunk_id)
         if key in self._rows and self._rows[key]['grade'] is not None:
             raise ValueError(f'already judged: {key}')
         row = {'case_id': case_id, 'chunk_id': chunk_id, 'document_id': document_id, 'grade': grade,
                'reason': reason, 'judge_model': judge.model, 'prompt_sha256': judge.prompt_sha256,
-               'judged_at': datetime.now(timezone.utc).isoformat(), 'raw': raw}
+               'judged_at': datetime.now(timezone.utc).isoformat(), 'raw': raw, 'details': details}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open('a', encoding='utf-8') as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + '\n')

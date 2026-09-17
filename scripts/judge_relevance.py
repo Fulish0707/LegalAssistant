@@ -16,9 +16,10 @@ from pathlib import Path
 import typer
 
 from legal_rag.evaluation.calibration import calibration_fingerprint, require_human_grades
-from legal_rag.evaluation.judgment_store import JudgeKey, JudgmentStore
+from legal_rag.evaluation.judgment_store import JudgmentStore
 from legal_rag.evaluation.relevance_judge import (
-    JUDGE_NUM_CTX, JUDGE_THINK, PROMPT_SHA256, append_judge_run, judge_pool, judge_run_record, ollama_model_digest)
+    JUDGE_THINK, append_judge_run, describe_key, generation_settings, judge_key, judge_pool, judge_run_record,
+    ollama_model_digest)
 from legal_rag.evaluation.relevance_pool import read_jsonl
 
 app = typer.Typer(add_completion=False)
@@ -35,6 +36,8 @@ def main(
     retry_failed: bool = typer.Option(False, help='Judge again pairs whose stored judgment failed to parse.'),
     skip_calibration_check: bool = typer.Option(
         False, help='Judge even though the human calibration grades are incomplete.'),
+    think: bool = typer.Option(JUDGE_THINK, '--think/--no-think',
+                               help='Let the model think first; a separate judgment key with more output tokens.'),
 ) -> None:
     try:
         if not skip_calibration_check:
@@ -53,18 +56,21 @@ def main(
     # Imported late so a refusal never touches the model client.
     from legal_rag.llm import OllamaChatModel
 
-    key = JudgeKey(f'ollama:{model}', PROMPT_SHA256)
-    typer.echo(f'judge {key.model} prompt {key.prompt_sha256[:12]} num_ctx {JUDGE_NUM_CTX}: {len(pairs)} pairs',
-               err=True)
+    key = judge_key(f'ollama:{model}', think=think)
+    settings = generation_settings(think=think)
+    typer.echo(f"{describe_key(key, think=think)} max_tokens {settings['max_tokens']} num_ctx {settings['num_ctx']}: "
+               f'{len(pairs)} pairs', err=True)
     digest = ollama_model_digest(base_url, model)
-    chat = OllamaChatModel(model=model, base_url=base_url, timeout=300.0, think=JUDGE_THINK, num_ctx=JUDGE_NUM_CTX)
-    counts = judge_pool(pairs, chat, JudgmentStore(pool_dir / 'judgments.jsonl'),
+    chat = OllamaChatModel(model=model, base_url=base_url, timeout=300.0, think=think, num_ctx=settings['num_ctx'])
+    if chat.name != key.model:
+        raise RuntimeError(f'model name {chat.name} does not match judge key {key.model}')
+    counts = judge_pool(pairs, chat, JudgmentStore(pool_dir / 'judgments.jsonl'), think=think,
                         progress=lambda message: typer.echo(message, err=True), retry_failed=retry_failed)
     if not skip_calibration_check:
         append_judge_run(pool_dir, judge_run_record(
             key, calibration_csv_sha256=calibration_csv_sha256,
             calibration_only=calibration_only, retry_failed=retry_failed, pairs=len(pairs), counts=counts,
-            model_digest=digest))
+            model_digest=digest, think=think))
     typer.echo(json.dumps(counts))
 
 
