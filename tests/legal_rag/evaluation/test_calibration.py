@@ -90,3 +90,57 @@ def test_agreement_on_known_matrix():
     assert result['binary_grade2']['kappa'] == pytest.approx(0.25)
     assert result['gold_llm_grades'] == {'0': 1, '1': 0, '2': 1}
     assert result['missing_llm'] == 0
+
+
+def _graded_calibration(tmp_path, grades):
+    from legal_rag.evaluation.calibration import CSV_FIELDS
+    write_calibration(tmp_path, sample_calibration(pool(), seed=42))
+    path = tmp_path / 'calibration.csv'
+    with path.open(newline='', encoding='utf-8-sig') as handle:
+        rows = list(csv.DictReader(handle))
+    for row, grade in zip(rows, grades):
+        row['human_grade'] = grade
+    with path.open('w', newline='', encoding='utf-8-sig') as handle:
+        writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    return rows
+
+
+def test_require_human_grades_refuses_missing_or_partial_labels(tmp_path):
+    from legal_rag.evaluation.calibration import require_human_grades
+    with pytest.raises(ValueError, match='missing'):
+        require_human_grades(tmp_path)
+    _graded_calibration(tmp_path, ['1'] * 49)
+    with pytest.raises(ValueError, match='1 of 50'):
+        require_human_grades(tmp_path)
+
+
+def test_require_human_grades_accepts_complete_labels(tmp_path):
+    from legal_rag.evaluation.calibration import require_human_grades
+    _graded_calibration(tmp_path, ['0'] * 50)
+    assert require_human_grades(tmp_path) == 50
+
+
+def test_disagreement_rows_and_review_csv(tmp_path):
+    from legal_rag.evaluation.calibration import REVIEW_FIELDS, disagreement_rows, write_review
+    rows = _graded_calibration(tmp_path, ['2', '1', '0', ''])
+    key = lambda row: tuple(row['pair_id'].split('|', 1))
+    llm = {key(rows[0]): {'grade': 2, 'reason': 'same'},
+           key(rows[1]): {'grade': 0, 'reason': 'differs'},
+           key(rows[2]): {'grade': None, 'reason': 'parse failure'},
+           key(rows[3]): {'grade': 1, 'reason': 'no human grade'}}
+    review = disagreement_rows(tmp_path / 'calibration.csv', llm)
+    assert [(r['pair_id'], r['human_grade'], r['llm_grade'], r['llm_reason']) for r in review] == [
+        (rows[1]['pair_id'], 1, 0, 'differs'), (rows[2]['pair_id'], 0, None, 'parse failure')]
+    write_review(tmp_path / 'review.csv', review)
+    with (tmp_path / 'review.csv').open(newline='', encoding='utf-8-sig') as handle:
+        written = list(csv.DictReader(handle))
+    assert list(written[0]) == REVIEW_FIELDS and written[0]['case_number'] == rows[1]['case_number']
+
+
+def test_judge_passes_threshold():
+    from legal_rag.evaluation.calibration import judge_passes
+    assert judge_passes({'binary_grade2': {'kappa': 0.6}})
+    assert not judge_passes({'binary_grade2': {'kappa': 0.59}})
+    assert not judge_passes({'binary_grade2': {'kappa': None}})

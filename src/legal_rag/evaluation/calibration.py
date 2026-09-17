@@ -108,3 +108,57 @@ def agreement(human: dict, llm: dict, *, gold_pairs: set) -> dict:
                           'recall': tp / sum(bh) if sum(bh) else None},
         'gold_llm_grades': {str(g): sum(llm[k] == g for k in pairs if k in gold_pairs) for g in range(3)},
     }
+
+
+PASS_KAPPA = 0.6
+REVIEW_FIELDS = ['pair_id', 'case_number', 'search_query', 'human_grade', 'llm_grade', 'llm_reason', 'human_note']
+
+
+def require_human_grades(pool_dir: Path) -> int:
+    """Raise ``ValueError`` unless every pair in calibration.json has a human grade in calibration.csv.
+
+    The judge must not run before the human has labelled the calibration set blind."""
+    pool_dir = Path(pool_dir)
+    manifest_path, csv_path = pool_dir / 'calibration.json', pool_dir / 'calibration.csv'
+    for path in (manifest_path, csv_path):
+        if not path.exists():
+            raise ValueError(f'{path} is missing; run sample_calibration.py and grade it first')
+    wanted = {pair['pair_id'] for pair in json.loads(manifest_path.read_text(encoding='utf-8'))['pairs']}
+    graded = {f'{case_id}|{chunk_id}' for case_id, chunk_id in read_human_grades(csv_path)}
+    missing = wanted - graded
+    if missing:
+        raise ValueError(f'{len(missing)} of {len(wanted)} calibration pairs have no human_grade in {csv_path}; '
+                         'finish labelling before judging')
+    return len(wanted)
+
+
+def judge_passes(result: dict, threshold: float = PASS_KAPPA) -> bool:
+    kappa = result['binary_grade2']['kappa']
+    return kappa is not None and kappa >= threshold
+
+
+def disagreement_rows(csv_path: Path, llm_rows: dict[tuple[str, str], dict]) -> list[dict]:
+    """Human-graded pairs whose stored judgment differs from the human grade (a failed parse,
+    grade None, counts as a disagreement). Pairs the judge has not reached are left out."""
+    with Path(csv_path).open(newline='', encoding='utf-8-sig') as handle:
+        rows = list(csv.DictReader(handle))
+    human = read_human_grades(csv_path)
+    review = []
+    for row in rows:
+        key = tuple(row['pair_id'].split('|', 1))
+        if key not in human or key not in llm_rows or llm_rows[key]['grade'] == human[key]:
+            continue
+        judged = llm_rows[key]
+        review.append({'pair_id': row['pair_id'], 'case_number': row.get('case_number'),
+                       'search_query': row.get('search_query'), 'human_grade': human[key],
+                       'llm_grade': judged['grade'], 'llm_reason': judged.get('reason'),
+                       'human_note': row.get('human_note')})
+    return review
+
+
+def write_review(path: Path, rows: list[dict]) -> Path:
+    with Path(path).open('w', newline='', encoding='utf-8-sig') as handle:
+        writer = csv.DictWriter(handle, fieldnames=REVIEW_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    return Path(path)
