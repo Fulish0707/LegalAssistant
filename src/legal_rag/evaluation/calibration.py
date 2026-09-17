@@ -112,7 +112,32 @@ def agreement(human: dict, llm: dict, *, gold_pairs: set) -> dict:
 
 
 PASS_KAPPA = 0.6
-REVIEW_FIELDS = ['pair_id', 'case_number', 'search_query', 'human_grade', 'llm_grade', 'llm_reason', 'human_note']
+REVIEW_FIELDS = ['pair_id', 'case_number', 'search_query', 'human_grade', 'llm_grade', 'llm_reason',
+                 'evidence_quote', 'quote_verified', 'model_grade', 'human_note']
+
+
+def agreement_paths(pool_dir: Path, prompt_sha256: str) -> tuple[Path, Path]:
+    """Per-key agreement report and review CSV, so runs with different prompts or think modes
+    never overwrite each other (or the unsuffixed files of the first calibration)."""
+    prefix = prompt_sha256[:12]
+    return Path(pool_dir) / f'agreement-{prefix}.json', Path(pool_dir) / f'calibration_review-{prefix}.csv'
+
+
+def model_grades(llm_rows: dict[tuple[str, str], dict]) -> dict[tuple[str, str], int]:
+    """The judge's own grade before quote verification; rows without details (prompt v1) use the stored grade.
+    Parse failures are left out."""
+    grades = {}
+    for key, row in llm_rows.items():
+        grade = (row.get('details') or {}).get('model_grade', row['grade'])
+        if grade is not None:
+            grades[key] = grade
+    return grades
+
+
+def quote_downgrades(llm_rows: dict[tuple[str, str], dict], pairs) -> int:
+    """Pairs among ``pairs`` whose model grade 2 was stored as 1 because the evidence quote failed verification."""
+    return sum(1 for key in pairs if key in llm_rows and llm_rows[key]['grade'] == 1
+               and (llm_rows[key].get('details') or {}).get('model_grade') == 2)
 
 
 def require_human_grades(pool_dir: Path) -> int:
@@ -169,10 +194,12 @@ def disagreement_rows(csv_path: Path, llm_rows: dict[tuple[str, str], dict]) -> 
         if key not in human or key not in llm_rows or llm_rows[key]['grade'] == human[key]:
             continue
         judged = llm_rows[key]
+        details = judged.get('details') or {}
         review.append({'pair_id': row['pair_id'], 'case_number': row.get('case_number'),
                        'search_query': row.get('search_query'), 'human_grade': human[key],
                        'llm_grade': judged['grade'], 'llm_reason': judged.get('reason'),
-                       'human_note': row.get('human_note')})
+                       'evidence_quote': details.get('evidence_quote'), 'quote_verified': details.get('quote_verified'),
+                       'model_grade': details.get('model_grade'), 'human_note': row.get('human_note')})
     return review
 
 

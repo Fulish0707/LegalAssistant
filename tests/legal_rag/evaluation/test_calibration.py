@@ -126,8 +126,9 @@ def test_disagreement_rows_and_review_csv(tmp_path):
     from legal_rag.evaluation.calibration import REVIEW_FIELDS, disagreement_rows, write_review
     rows = _graded_calibration(tmp_path, ['2', '1', '0', ''])
     key = lambda row: tuple(row['pair_id'].split('|', 1))
+    details = {'model_grade': 2, 'evidence_quote': '지어낸 인용', 'quote_verified': False}
     llm = {key(rows[0]): {'grade': 2, 'reason': 'same'},
-           key(rows[1]): {'grade': 0, 'reason': 'differs'},
+           key(rows[1]): {'grade': 0, 'reason': 'differs', 'details': details},
            key(rows[2]): {'grade': None, 'reason': 'parse failure'},
            key(rows[3]): {'grade': 1, 'reason': 'no human grade'}}
     review = disagreement_rows(tmp_path / 'calibration.csv', llm)
@@ -137,6 +138,10 @@ def test_disagreement_rows_and_review_csv(tmp_path):
     with (tmp_path / 'review.csv').open(newline='', encoding='utf-8-sig') as handle:
         written = list(csv.DictReader(handle))
     assert list(written[0]) == REVIEW_FIELDS and written[0]['case_number'] == rows[1]['case_number']
+    assert {'evidence_quote', 'quote_verified', 'model_grade'} <= set(REVIEW_FIELDS)
+    assert (written[0]['evidence_quote'], written[0]['quote_verified'], written[0]['model_grade']) == (
+        '지어낸 인용', 'False', '2')
+    assert (written[1]['evidence_quote'], written[1]['quote_verified'], written[1]['model_grade']) == ('', '', '')
 
 
 def test_judge_passes_threshold():
@@ -170,3 +175,68 @@ def test_calibration_fingerprint_hashes_labels_manifest_and_pool(tmp_path):
                            'pool_jsonl_sha256': sha('pool.jsonl')}
     (tmp_path / 'pool.jsonl').unlink()
     assert calibration_fingerprint(tmp_path)['pool_jsonl_sha256'] is None
+
+
+def test_model_grades_fall_back_to_stored_grade_and_downgrades_are_counted():
+    from legal_rag.evaluation.calibration import model_grades, quote_downgrades
+    rows = {('c', '1'): {'grade': 1, 'details': {'model_grade': 2, 'evidence_quote': 'x', 'quote_verified': False}},
+            ('c', '2'): {'grade': 2, 'details': {'model_grade': 2, 'evidence_quote': 'y', 'quote_verified': True}},
+            ('c', '3'): {'grade': 0},                                   # v1 row without details
+            ('c', '4'): {'grade': None, 'details': None},               # parse failure
+            ('c', '5'): {'grade': 1, 'details': {'model_grade': 2, 'evidence_quote': '', 'quote_verified': False}}}
+    assert model_grades(rows) == {('c', '1'): 2, ('c', '2'): 2, ('c', '3'): 0, ('c', '5'): 2}
+    assert quote_downgrades(rows, {('c', '1'), ('c', '2'), ('c', '3'), ('c', '4')}) == 1
+
+
+def _load_script(name):
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[3] / 'scripts' / f'{name}.py'
+    spec = importlib.util.spec_from_file_location(f'script_{name}', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_agreement_script_writes_per_key_files_with_reference_source(tmp_path):
+    from typer.testing import CliRunner
+    from legal_rag.evaluation.judgment_store import JudgmentStore
+    from legal_rag.evaluation.relevance_judge import judge_key
+    rows = _graded_calibration(tmp_path, ['2'] * 25 + ['0'] * 25)
+    (tmp_path / 'pool.jsonl').write_text(
+        ''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in pool()), encoding='utf-8')
+    (tmp_path / 'agreement.json').write_text('v1', encoding='utf-8')
+    (tmp_path / 'calibration_review.csv').write_text('v1', encoding='utf-8')
+    key = judge_key('ollama:qwen3:8b', think=True)
+    store = JudgmentStore(tmp_path / 'judgments.jsonl')
+    for number, row in enumerate(rows):
+        case_id, chunk_id = row['pair_id'].split('|', 1)
+        human = int(row['human_grade'])
+        downgraded = number == 0
+        store.append(key, case_id=case_id, chunk_id=chunk_id, document_id='d', reason='r',
+                     grade=1 if downgraded else human,
+                     details={'model_grade': human, 'evidence_quote': 'q', 'quote_verified': not downgraded})
+    script = _load_script('judge_agreement')
+    result = CliRunner().invoke(script.app, ['--pool-dir', str(tmp_path), '--think',
+                                             '--reference-source', 'GPT 6 Astra'])
+    assert 'reference labels: GPT 6 Astra' in result.output
+    assert key.prompt_sha256[:12] in result.output
+    report = json.loads((tmp_path / f'agreement-{key.prompt_sha256[:12]}.json').read_text(encoding='utf-8'))
+    assert report['reference_source'] == 'GPT 6 Astra' and report['think'] is True
+    assert report['prompt_sha256'] == key.prompt_sha256
+    assert report['quote_downgrades'] == 1
+    assert report['exact_agreement'] == pytest.approx(49 / 50)
+    assert report['agreement_before_quote_check']['exact_agreement'] == 1.0
+    assert (tmp_path / f'calibration_review-{key.prompt_sha256[:12]}.csv').exists()
+    assert (tmp_path / 'agreement.json').read_text(encoding='utf-8') == 'v1'
+    assert (tmp_path / 'calibration_review.csv').read_text(encoding='utf-8') == 'v1'
+    default = CliRunner().invoke(script.app, ['--pool-dir', str(tmp_path)])
+    assert 'reference labels: human' in default.output and default.exit_code == 1   # no think-off judgments
+
+
+def test_scripts_help_exits_zero():
+    from typer.testing import CliRunner
+    for name in ('judge_relevance', 'judge_agreement', 'eval_graded'):
+        result = CliRunner().invoke(_load_script(name).app, ['--help'])
+        assert result.exit_code == 0, (name, result.output)
+        assert '--think' in result.output and '--no-think' in result.output
