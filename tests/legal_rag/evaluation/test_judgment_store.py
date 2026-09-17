@@ -81,3 +81,18 @@ def test_append_over_failed_row_is_allowed_and_later_row_wins_on_reload(tmp_path
     assert not reloaded.is_failed(KEY, 'c1', 'k1')
     with pytest.raises(ValueError, match='already judged'):
         reloaded.append(KEY, case_id='c1', chunk_id='k1', document_id='d1', grade=None, reason='')
+
+
+def test_details_are_stored_and_rows_without_details_still_load(tmp_path):
+    path = tmp_path / 'judgments.jsonl'
+    legacy = {'case_id': 'c0', 'chunk_id': 'k0', 'document_id': 'd0', 'grade': 1, 'reason': 'v1',
+              'judge_model': KEY.model, 'prompt_sha256': KEY.prompt_sha256, 'judged_at': 'x', 'raw': None}
+    path.write_text(json.dumps(legacy, ensure_ascii=False) + '\n', encoding='utf-8')
+    store = JudgmentStore(path)
+    details = {'model_grade': 2, 'evidence_quote': '인용', 'quote_verified': False}
+    store.append(KEY, case_id='c1', chunk_id='k1', document_id='d1', grade=1, reason='r', details=details)
+    store.append(KEY, case_id='c2', chunk_id='k2', document_id='d2', grade=0, reason='r')
+    rows = JudgmentStore(path).rows(KEY)
+    assert rows[('c0', 'k0')]['grade'] == 1 and 'details' not in rows[('c0', 'k0')]
+    assert rows[('c1', 'k1')]['details'] == details
+    assert rows[('c2', 'k2')]['details'] is None
