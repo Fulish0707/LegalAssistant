@@ -1,5 +1,6 @@
 from legal_rag.evaluation.judgment_store import JudgmentStore
-from legal_rag.evaluation.relevance_judge import RelevanceGrade, judge_key, judge_pool
+from legal_rag.evaluation.relevance_judge import (JUDGE_MAX_TOKENS, JUDGE_TEMPERATURE, RelevanceGrade, judge_key,
+                                                  judge_pool)
 from legal_rag.llm.base import ModelResponse, StructuredOutputError
 
 
@@ -7,10 +8,11 @@ class ScriptedModel:
     name = 'scripted'
 
     def __init__(self, replies):
-        self.replies, self.messages = list(replies), []
+        self.replies, self.messages, self.settings = list(replies), [], []
 
     def generate(self, messages, *, response_schema=None, temperature=0.2, max_tokens=1024):
         self.messages.append(messages)
+        self.settings.append((response_schema, temperature, max_tokens))
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
@@ -78,3 +80,9 @@ def test_transport_errors_propagate_without_recording(tmp_path):
     with pytest.raises(TimeoutError):
         judge_pool([pair()], ScriptedModel([TimeoutError('slow')]), store)
     assert not store.has(judge_key(ScriptedModel([])), 'c1', 'k1')
+
+
+def test_generate_uses_the_hashed_generation_settings(tmp_path):
+    model = ScriptedModel([{'grade': 1, 'reason': ''}])
+    judge_pool([pair()], model, JudgmentStore(tmp_path / 'j.jsonl'))
+    assert model.settings == [(RelevanceGrade, JUDGE_TEMPERATURE, JUDGE_MAX_TOKENS)]
