@@ -16,8 +16,10 @@ CSV_FIELDS = ['pair_id', 'case_number', 'search_query', 'authority', 'date', 'ti
               'document_id', 'question', 'reference_answer', 'chunk_text', 'human_grade', 'human_note']
 
 
-def _stratum(row: dict) -> str | None:
-    if row['is_gold_chunk']:
+def _stratum(row: dict, *, gold_stratum: bool = True) -> str | None:
+    """Gold chunks form their own stratum when sampled as one; otherwise they are placed by rank
+    like any other pair (so a retrieved gold chunk can still be drawn)."""
+    if gold_stratum and row['is_gold_chunk']:
         return 'gold'
     best = min(row['ranks'].values(), default=None)
     if best is None:
@@ -25,16 +27,46 @@ def _stratum(row: dict) -> str | None:
     return 'rank_1_3' if best <= 3 else 'rank_4_10' if best <= 10 else 'rank_11_20' if best <= 20 else None
 
 
-def sample_calibration(pool: list[dict], *, seed: int, quotas: dict[str, int] = STRATA) -> list[dict]:
+def sample_calibration(pool: list[dict], *, seed: int, quotas: dict[str, int] = STRATA,
+                       exclude: set[str] | frozenset = frozenset()) -> list[dict]:
+    """Draw ``quotas`` pairs per stratum, in the quotas' order, skipping pair ids in ``exclude``."""
+    unknown = set(quotas) - set(STRATA)
+    if unknown:
+        raise ValueError(f'unknown stratum {sorted(unknown)}; choose from {list(STRATA)}')
     rng = random.Random(seed)
-    ordered = sorted(pool, key=lambda row: (row['case_id'], row['chunk_id']))
+    ordered = sorted((row for row in pool if _pair_id(row) not in exclude),
+                     key=lambda row: (row['case_id'], row['chunk_id']))
+    gold_stratum = 'gold' in quotas
     sample = []
     for name, quota in quotas.items():
-        members = [row for row in ordered if _stratum(row) == name]
+        members = [row for row in ordered if _stratum(row, gold_stratum=gold_stratum) == name]
         if len(members) < quota:
             raise ValueError(f'stratum {name} has {len(members)} pairs, needs {quota}')
         sample += [dict(row, stratum=name) for row in rng.sample(members, quota)]
     return sample
+
+
+def parse_quotas(values: list[str]) -> dict[str, int]:
+    """``['rank_1_3=25', ...]`` to an ordered quota dict; no values means the default STRATA."""
+    if not values:
+        return dict(STRATA)
+    quotas: dict[str, int] = {}
+    for value in values:
+        name, sep, count = value.partition('=')
+        if not sep or not count.strip().isdigit() or int(count) < 1:
+            raise ValueError(f'quota must look like rank_1_3=25, got {value!r}')
+        if name not in STRATA:
+            raise ValueError(f'unknown stratum {name!r}; choose from {list(STRATA)}')
+        if name in quotas:
+            raise ValueError(f'stratum {name!r} given twice')
+        quotas[name] = int(count)
+    return quotas
+
+
+def calibration_pair_ids(pool_dir: Path) -> set[str]:
+    """Pair ids in a pool directory's calibration.json (read only)."""
+    manifest = json.loads((Path(pool_dir) / 'calibration.json').read_text(encoding='utf-8'))
+    return {pair['pair_id'] for pair in manifest['pairs']}
 
 
 def _pair_id(row: dict) -> str:

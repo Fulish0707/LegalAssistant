@@ -240,3 +240,58 @@ def test_scripts_help_exits_zero():
         result = CliRunner().invoke(_load_script(name).app, ['--help'])
         assert result.exit_code == 0, (name, result.output)
         assert '--think' in result.output and '--no-think' in result.output
+
+
+def test_sample_excludes_given_pair_ids():
+    rows = pool(n_cases=2)
+    top3 = [f"{r['case_id']}|{r['chunk_id']}" for r in rows if r['ranks'] and r['ranks']['dense'] <= 3]
+    exclude = set(top3[:4])
+    sample = sample_calibration(rows, seed=43, quotas={'rank_1_3': 2}, exclude=exclude)
+    assert {f"{r['case_id']}|{r['chunk_id']}" for r in sample} == set(top3[4:])
+    with pytest.raises(ValueError, match='rank_1_3 has 2 pairs'):
+        sample_calibration(rows, seed=43, quotas={'rank_1_3': 3}, exclude=exclude)
+
+
+def test_without_a_gold_quota_retrieved_gold_chunks_fall_into_rank_strata():
+    rows = [dict(row, is_gold_chunk=True) if row['chunk_id'] == 'c0-k1' else row for row in pool(n_cases=1)]
+    sample = sample_calibration(rows, seed=1, quotas={'rank_1_3': 3, 'rank_4_10': 1})
+    assert {'c0-k1', 'c0-k2', 'c0-k3'} <= {row['chunk_id'] for row in sample}
+    assert 'c0-gold' not in {row['chunk_id'] for row in sample}          # unretrieved gold has no rank
+    with pytest.raises(ValueError, match='unknown stratum'):
+        sample_calibration(rows, seed=1, quotas={'rank_1_5': 1})
+
+
+def test_parse_quotas_keeps_argument_order_and_validates():
+    from legal_rag.evaluation.calibration import parse_quotas
+    assert list(parse_quotas(['rank_4_10=25', 'rank_1_3=25']).items()) == [('rank_4_10', 25), ('rank_1_3', 25)]
+    assert parse_quotas([]) == STRATA
+    for bad in (['rank_1_3'], ['rank_1_3=x'], ['nope=3'], ['rank_1_3=1', 'rank_1_3=2'], ['rank_1_3=0']):
+        with pytest.raises(ValueError):
+            parse_quotas(bad)
+
+
+def test_sample_script_quotas_and_exclusion(tmp_path):
+    from typer.testing import CliRunner
+    first, second = tmp_path / 'first', tmp_path / 'second'
+    for directory in (first, second):
+        directory.mkdir()
+        (directory / 'pool.jsonl').write_text(
+            ''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in pool(n_cases=3)), encoding='utf-8')
+    write_calibration(first, sample_calibration(pool(n_cases=3), seed=42, quotas={'rank_1_3': 8}))
+    first_ids = {p['pair_id'] for p in json.loads((first / 'calibration.json').read_text())['pairs']}
+    script = _load_script('sample_calibration')
+    result = CliRunner().invoke(script.app, ['--pool-dir', str(second), '--seed', '43', '--quota', 'rank_1_3=1',
+                                             '--quota', 'rank_4_10=2', '--exclude-calibration', str(first)])
+    assert result.exit_code == 0, result.output
+    pairs = json.loads((second / 'calibration.json').read_text())['pairs']
+    assert sorted(p['stratum'] for p in pairs) == ['rank_1_3', 'rank_4_10', 'rank_4_10']
+    assert not first_ids & {p['pair_id'] for p in pairs}
+    assert 'excluded 8' in result.output
+    bad = CliRunner().invoke(script.app, ['--pool-dir', str(first), '--quota', 'bogus=1'])
+    assert bad.exit_code == 1
+
+
+def test_scripts_without_think_help_exits_zero():
+    from typer.testing import CliRunner
+    result = CliRunner().invoke(_load_script('sample_calibration').app, ['--help'])
+    assert result.exit_code == 0 and '--quota' in result.output and '--exclude-calibration' in result.output
