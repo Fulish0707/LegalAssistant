@@ -52,8 +52,8 @@ def render_markdown(summary: dict, *, judge: dict, pool: dict) -> str:
         lines += ['', '**WARNING:** some top-10 or top-20 chunks are unjudged; run judge_relevance.py first. '
                   'Metrics treat them as grade 0 and the comparison is not valid.']
     if failed_top10_total(summary):
-        lines += ['', f'**Note:** {failed_top10_total(summary)} top-10 chunk judgments failed to parse; they count '
-                  'as judged with gain 0. Rerun judge_relevance.py --retry-failed to grade them.']
+        lines += ['', f'**Note:** {failed_top10_total(summary)} top-10 chunk slots (summed over modes) hold failed '
+                  'judgments; they count as judged with gain 0. Rerun judge_relevance.py --retry-failed to grade them.']
     return '\n'.join(lines) + '\n'
 
 
