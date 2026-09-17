@@ -1,4 +1,4 @@
-"""Stratified human calibration of the relevance judge.
+"""Stratified calibration of the relevance judge against reference labels (codex_grade).
 
 Pairs are drawn before any LLM grade is visible, stratified so the sample is not nearly all
 grade 0. The CSV leads with a searchable case number and hides strata, ranks and gold status.
@@ -13,7 +13,10 @@ from pathlib import Path
 
 STRATA = {'gold': 10, 'rank_1_3': 15, 'rank_4_10': 15, 'rank_11_20': 10}
 CSV_FIELDS = ['pair_id', 'case_number', 'search_query', 'authority', 'date', 'title', 'document_type',
-              'document_id', 'question', 'reference_answer', 'chunk_text', 'human_grade', 'human_note']
+              'document_id', 'question', 'reference_answer', 'chunk_text', 'codex_grade', 'codex_note']
+# Reference-label columns, newest name first; calibration files written before the rename use human_*.
+GRADE_COLUMNS = ('codex_grade', 'human_grade')
+NOTE_COLUMNS = ('codex_note', 'human_note')
 
 
 def _stratum(row: dict, *, gold_stratum: bool = True) -> str | None:
@@ -92,11 +95,19 @@ def write_calibration(output: Path, sample: list[dict]) -> Path:
         writer.writeheader()
         for row in rows:
             writer.writerow({**{key: row.get(key) for key in CSV_FIELDS}, 'pair_id': _pair_id(row),
-                             'chunk_text': row['text'], 'human_grade': '', 'human_note': ''})
+                             'chunk_text': row['text'], 'codex_grade': '', 'codex_note': ''})
     return output
 
 
-def read_human_grades(path: Path) -> dict[tuple[str, str], int]:
+def _cell(row: dict, columns: tuple[str, ...]) -> str:
+    """The one filled value among ``columns``; two different filled values are a labelling error."""
+    values = {(row.get(column) or '').strip() for column in columns} - {''}
+    if len(values) > 1:
+        raise ValueError(f"{row.get('pair_id')}: conflicting values in {', '.join(columns)}: {sorted(values)}")
+    return values.pop() if values else ''
+
+
+def read_reference_grades(path: Path) -> dict[tuple[str, str], int]:
     grades = {}
     try:
         with Path(path).open(newline='', encoding='utf-8-sig') as handle:
@@ -104,11 +115,11 @@ def read_human_grades(path: Path) -> dict[tuple[str, str], int]:
     except UnicodeDecodeError as error:
         raise ValueError(f'{path} is not UTF-8 ({error}); re-save it from Excel as "CSV UTF-8"') from error
     for row in rows:
-        value = (row.get('human_grade') or '').strip()
+        value = _cell(row, GRADE_COLUMNS)
         if not value:
             continue
         if value not in {'0', '1', '2'}:
-            raise ValueError(f"{row['pair_id']}: human_grade must be 0, 1 or 2, got {value!r}")
+            raise ValueError(f"{row['pair_id']}: codex_grade must be 0, 1 or 2, got {value!r}")
         case_id, chunk_id = row['pair_id'].split('|', 1)
         grades[(case_id, chunk_id)] = int(value)
     return grades
@@ -133,12 +144,12 @@ def _binary(h: list[int], l: list[int], *, boundary: int) -> dict:
             'recall': tp / sum(bh) if sum(bh) else None}
 
 
-def agreement(human: dict, llm: dict, *, gold_pairs: set) -> dict:
-    pairs = sorted(key for key in human if key in llm)
-    h, l = [human[k] for k in pairs], [llm[k] for k in pairs]
+def agreement(reference: dict, llm: dict, *, gold_pairs: set) -> dict:
+    pairs = sorted(key for key in reference if key in llm)
+    h, l = [reference[k] for k in pairs], [llm[k] for k in pairs]
     confusion = [[sum(x == i and y == j for x, y in zip(h, l)) for j in range(3)] for i in range(3)]
     return {
-        'pairs': len(pairs), 'missing_llm': len([k for k in human if k not in llm]),
+        'pairs': len(pairs), 'missing_llm': len([k for k in reference if k not in llm]),
         'confusion': confusion,
         'exact_agreement': sum(x == y for x, y in zip(h, l)) / len(pairs) if pairs else None,
         'weighted_kappa': _kappa(h, l, weighted=True),
@@ -149,8 +160,8 @@ def agreement(human: dict, llm: dict, *, gold_pairs: set) -> dict:
 
 
 PASS_KAPPA = 0.6
-REVIEW_FIELDS = ['pair_id', 'case_number', 'search_query', 'human_grade', 'llm_grade', 'llm_reason',
-                 'evidence_quote', 'quote_verified', 'model_grade', 'human_note']
+REVIEW_FIELDS = ['pair_id', 'case_number', 'search_query', 'codex_grade', 'llm_grade', 'llm_reason',
+                 'evidence_quote', 'quote_verified', 'model_grade', 'codex_note']
 
 
 def agreement_paths(pool_dir: Path, prompt_sha256: str) -> tuple[Path, Path]:
@@ -177,26 +188,26 @@ def quote_downgrades(llm_rows: dict[tuple[str, str], dict], pairs) -> int:
                and (llm_rows[key].get('details') or {}).get('model_grade') == 2)
 
 
-def require_human_grades(pool_dir: Path) -> int:
-    """Raise ``ValueError`` unless every pair in calibration.json has a human grade in calibration.csv.
+def require_reference_grades(pool_dir: Path) -> int:
+    """Raise ``ValueError`` unless every pair in calibration.json has a reference grade in calibration.csv.
 
-    The judge must not run before the human has labelled the calibration set blind."""
+    The judge must not run before the reference labeller has graded the calibration set blind."""
     pool_dir = Path(pool_dir)
     manifest_path, csv_path = pool_dir / 'calibration.json', pool_dir / 'calibration.csv'
     for path in (manifest_path, csv_path):
         if not path.exists():
             raise ValueError(f'{path} is missing; run sample_calibration.py and grade it first')
     wanted = {pair['pair_id'] for pair in json.loads(manifest_path.read_text(encoding='utf-8'))['pairs']}
-    graded = {f'{case_id}|{chunk_id}' for case_id, chunk_id in read_human_grades(csv_path)}
+    graded = {f'{case_id}|{chunk_id}' for case_id, chunk_id in read_reference_grades(csv_path)}
     missing = wanted - graded
     if missing:
-        raise ValueError(f'{len(missing)} of {len(wanted)} calibration pairs have no human_grade in {csv_path}; '
+        raise ValueError(f'{len(missing)} of {len(wanted)} calibration pairs have no codex_grade in {csv_path}; '
                          'finish labelling before judging')
     return len(wanted)
 
 
 def calibration_fingerprint(pool_dir: Path) -> dict[str, str | None]:
-    """SHA-256 of the human labels, the calibration manifest and the pool (None when a file is missing),
+    """SHA-256 of the reference labels, the calibration manifest and the pool (None when a file is missing),
     so an agreement result or judge run can be tied to the exact labels it was checked against."""
     pool_dir = Path(pool_dir)
 
@@ -231,23 +242,23 @@ def missing_llm_message(result: dict) -> str:
 
 
 def disagreement_rows(csv_path: Path, llm_rows: dict[tuple[str, str], dict]) -> list[dict]:
-    """Human-graded pairs whose stored judgment differs from the human grade (a failed parse,
+    """Reference-graded pairs whose stored judgment differs from the reference grade (a failed parse,
     grade None, counts as a disagreement). Pairs the judge has not reached are left out."""
     with Path(csv_path).open(newline='', encoding='utf-8-sig') as handle:
         rows = list(csv.DictReader(handle))
-    human = read_human_grades(csv_path)
+    reference = read_reference_grades(csv_path)
     review = []
     for row in rows:
         key = tuple(row['pair_id'].split('|', 1))
-        if key not in human or key not in llm_rows or llm_rows[key]['grade'] == human[key]:
+        if key not in reference or key not in llm_rows or llm_rows[key]['grade'] == reference[key]:
             continue
         judged = llm_rows[key]
         details = judged.get('details') or {}
         review.append({'pair_id': row['pair_id'], 'case_number': row.get('case_number'),
-                       'search_query': row.get('search_query'), 'human_grade': human[key],
+                       'search_query': row.get('search_query'), 'codex_grade': reference[key],
                        'llm_grade': judged['grade'], 'llm_reason': judged.get('reason'),
                        'evidence_quote': details.get('evidence_quote'), 'quote_verified': details.get('quote_verified'),
-                       'model_grade': details.get('model_grade'), 'human_note': row.get('human_note')})
+                       'model_grade': details.get('model_grade'), 'codex_note': _cell(row, NOTE_COLUMNS)})
     return review
 
 

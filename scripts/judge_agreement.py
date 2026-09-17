@@ -24,7 +24,8 @@ import typer
 
 from legal_rag.evaluation.calibration import (
     PASS_KAPPA, agreement, agreement_paths, boundary_kappa, calibration_fingerprint, disagreement_rows,
-    judge_passes, missing_llm_message, model_grades, quote_downgrades, read_human_grades, require_human_grades, write_review)
+    judge_passes, missing_llm_message, model_grades, quote_downgrades, read_reference_grades, require_reference_grades,
+    write_review)
 from legal_rag.evaluation.judgment_store import JudgmentStore
 from legal_rag.evaluation.relevance_judge import (
     JUDGE_THINK, QUOTE_RULE_VERSION, describe_key, generation_settings, judge_key)
@@ -38,7 +39,7 @@ def main(pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
          model: str = typer.Option('qwen3:8b'),
          think: bool = typer.Option(JUDGE_THINK, '--think/--no-think', help='Check judgments made with thinking on.'),
          reference_source: str = typer.Option(
-             'human', help='Who produced the human_grade column (e.g. a model name when labels are AI-made).'),
+             'codex', help='Who produced the codex_grade column (e.g. "GPT 6 Astra"); recorded in the report.'),
          pass_boundary: int = typer.Option(
              2, min=1, max=2, help='Pass on binary kappa at grade >= this: 1 (relevant vs 0) or 2 (grade 2 vs 0/1).'),
          ) -> None:
@@ -47,13 +48,13 @@ def main(pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
     typer.echo(f'reference labels: {reference_source}')
     csv_path = pool_dir / 'calibration.csv'
     try:
-        require_human_grades(pool_dir)
-        human = read_human_grades(csv_path)
+        require_reference_grades(pool_dir)
+        reference = read_reference_grades(csv_path)
         store = JudgmentStore(pool_dir / 'judgments.jsonl')
         gold = {(r['case_id'], r['chunk_id']) for r in read_jsonl(pool_dir / 'pool.jsonl') if r['is_gold_chunk']}
         llm_rows = store.rows(key)
-        result = agreement(human, store.grades(key), gold_pairs=gold)
-        before = agreement(human, model_grades(llm_rows), gold_pairs=gold)
+        result = agreement(reference, store.grades(key), gold_pairs=gold)
+        before = agreement(reference, model_grades(llm_rows), gold_pairs=gold)
         review = disagreement_rows(csv_path, llm_rows)
     except (ValueError, OSError) as exc:
         typer.echo(str(exc), err=True)
@@ -64,7 +65,7 @@ def main(pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
               'computed_at': datetime.now(timezone.utc).isoformat(), 'pass_kappa': PASS_KAPPA,
               'pass_boundary': pass_boundary,
               **calibration_fingerprint(pool_dir), **result,
-              'quote_downgrades': quote_downgrades(llm_rows, human.keys()),
+              'quote_downgrades': quote_downgrades(llm_rows, reference.keys()),
               'agreement_before_quote_check': before}
     report_path, review_path = agreement_paths(pool_dir, key.prompt_sha256)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
