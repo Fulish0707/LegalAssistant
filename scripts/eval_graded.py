@@ -46,8 +46,8 @@ def main(
     text = render_markdown(summary, judge=judge, pool=pool)
     typer.echo(text)
     if failed_top10_total(summary):
-        typer.echo(f'WARNING: {failed_top10_total(summary)} top-10 chunk judgments failed to parse and count as '
-                   'grade 0; consider judge_relevance.py --retry-failed', err=True)
+        typer.echo(f'WARNING: {failed_top10_total(summary)} top-10 chunk slots (summed over modes) hold failed '
+                   'judgments, counted as grade 0; consider judge_relevance.py --retry-failed', err=True)
     if not output:
         return
     if min_chunk_coverage(summary) < 1 and not allow_partial:
