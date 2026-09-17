@@ -131,11 +131,34 @@ uv run python scripts/judge_relevance.py --pool-dir $P
 uv run python scripts/eval_graded.py --pool-dir $P --output $P/graded-qwen3-8b
 ```
 
+### Top-10 pool and grade ≥1 headline
+
+Calibration v2 (qwen3:8b, think on, 50 pairs, reference labels by GPT 6 Astra) reached binary kappa 0.667 on relevant (grade ≥1) vs 0 but only 0.38 on grade 2 vs 0/1. The 8B judge is usable at the ≥1 boundary, not at grade 2, so headline metrics count grade ≥1 as relevant and graded metrics are reference only. Because that boundary was chosen after seeing the results, it is re-validated on a fresh sample (seed 43) before the full run. To halve judging time (think on is about 15 s per pair), the pool is cut to each mode's top-10 union:
+
+```bash
+T=data/eval/relevance/ip-v1-pilot-200-top10
+
+# Derive without retrieving again: keeps pairs ranked <= 10 by any mode (gold chunks only if retrieved
+# there, unless --include-unretrieved-gold), copies runs/, judgments.jsonl and judge_runs.jsonl.
+uv run python scripts/derive_relevance_pool.py --from $P --output $T --pool-depth 10
+
+# Fresh calibration sample that never repeats the first one; fill human_grade, then judge it.
+uv run python scripts/sample_calibration.py --pool-dir $T --seed 43 \
+  --quota rank_1_3=25 --quota rank_4_10=25 --exclude-calibration $P
+uv run python scripts/judge_relevance.py --pool-dir $T --calibration-only --think
+uv run python scripts/judge_agreement.py --pool-dir $T --think --pass-boundary 1 --reference-source "<source>"
+
+uv run python scripts/judge_relevance.py --pool-dir $T --think
+uv run python scripts/eval_graded.py --pool-dir $T --think --threshold 1 --output $T/graded-qwen3-8b-think
+```
+
+`pool.json` of a derived pool records `derived_from` (source directory, its `pool.jsonl` hash and depth), `include_unretrieved_gold` and `judgments_copied_from`; deepening is refused. Without a `gold` quota, `sample_calibration.py` places gold chunks by rank like any other pair. `judge_agreement.py` always reports `binary_relevant` (grade ≥1) and `binary_grade2`; `--pass-boundary 1|2` (default 2) picks which kappa must reach 0.6 and is recorded as `pass_boundary`. `eval_graded.py --threshold 1|2` (default 2) sets the grade that success@k, MRR, `precision@10` and `ndcg@10_binary` (gain 1, ideal from judged chunks at or above the threshold) count as relevant; it is recorded in `graded.json` and `cases.csv` and stated in the markdown header. At threshold 1, graded `ndcg@10` and `precision@10_grade1/2` move to a "Reference (graded)" table. The copied `judgments.jsonl` also holds grades for pairs outside the top-10 pool, and the nDCG ideal uses every judged chunk for the case, so those few pairs can lower nDCG slightly.
+
 `calibration.csv` leads with `case_number` and `search_query` (for example `특허법원 2021허2359`, `상표법 제35조`) so each source can be looked up quickly. A statute label ending in `앞` means the chunk sits just before that article. Save the file from Excel as "CSV UTF-8". `judge_relevance.py` refuses to run until every calibration pair has a human grade, so the human never sees judge grades first. If the `human_grade` column was filled by a model rather than a person, say so with `--reference-source "<model>"`: it is recorded in the agreement JSON and printed as `reference labels: <source>`, because agreement with AI labels is inter-model agreement, not human validation.
 
 ### Reading results
 
-Lead with nDCG@10 (gain 2^grade − 1, ideal from every judged chunk for the case) and Success@k (a grade-2 chunk in the top k). Success@k and MRR (`mrr@20`) stop at the pool depth, since deeper ranks were never pooled; with a pool shallower than 20, Success@20 is not reported. Each is reported per chunk and per document. Pooled recall is not reported, because its denominator depends on the pool.
+Lead with nDCG@10 (gain 2^grade − 1, ideal from every judged chunk for the case) and Success@k (a chunk at or above `--threshold`, grade 2 by default, in the top k). Success@k and MRR (`mrr@20`) stop at the pool depth, since deeper ranks were never pooled; with a pool shallower than 20, Success@20 is not reported. Each is reported per chunk and per document. Pooled recall is not reported, because its denominator depends on the pool.
 
 `min_judged_coverage@10` and `min_judged_coverage@20` must be 1.0 at chunk level for a comparison to be valid; `eval_graded.py --output` refuses otherwise. A new retrieval configuration, such as a reranker, surfaces chunks nobody judged. Extending an existing pool with a new configuration is not scripted yet. Until it is, build a new pool directory with `build_relevance_pool.py` (same target, including the new mode), copy `judgments.jsonl` into it, and run `judge_relevance.py` there: judgments are keyed by (model, prompt hash, case, chunk), not by pool directory, so pairs already judged are skipped and only the new ones are sent to the judge. `--pool-file` only selects which pairs to judge; it must come from the same target as the pool directory. Parse failures are stored as `grade: null`. They count as judged for coverage, so they never block a comparison, but take gain 0, stay out of the ideal ranking, and are reported as `failed@10` per case and `failed_top10_total` per mode. `judge_relevance.py --retry-failed` judges them again and appends a new row, which replaces the failure.
 
