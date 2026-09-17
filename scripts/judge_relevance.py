@@ -29,7 +29,7 @@ def main(
     base_url: str = typer.Option('http://localhost:11434'),
     calibration_only: bool = typer.Option(False, help='Judge only the pairs in calibration.json.'),
     pool_file: Path = typer.Option(None, exists=True, dir_okay=False,
-                                   help='Another pool file, e.g. from a new run; defaults to pool.jsonl.'),
+                                   help='Pairs to judge instead of pool.jsonl; must come from the same target.'),
     retry_failed: bool = typer.Option(False, help='Judge again pairs whose stored judgment failed to parse.'),
     skip_calibration_check: bool = typer.Option(
         False, help='Judge even though the human calibration grades are incomplete.'),
