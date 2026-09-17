@@ -10,7 +10,8 @@ import re
 # '대법원-2017후905-1': a trailing '-N' separates rulings that share one case number.
 _AUTHORITY_ID = re.compile(r'^(?P<authority>[^-\d]+)-(?P<number>\d+(?:[가-힣]+\d+)?)(?:-\d+)?$')
 _AGENDA = re.compile(r'(\d{2}-\d{4})$')
-_ARTICLE = re.compile(r'^\s*(제\d+조(?:의\d+)?)')
+_ARTICLE = re.compile(r'^\s*(제\d+조(?:의\d+)?)\s*\(')
+_LATER_ARTICLE = re.compile(r'(?m)^\s*(제\d+조(?:의\d+)?)\s*\(')
 
 
 def case_label(chunk: dict) -> dict:
@@ -18,9 +19,17 @@ def case_label(chunk: dict) -> dict:
     authority = chunk.get('authority')
     if document_type == 'statute':
         law = chunk.get('title') or document_id.split('::')[1]
-        article = _ARTICLE.match(chunk.get('text') or '')
-        number = f'{law} {article.group(1)}' if article else law
-        return {'case_number': number, 'authority': authority, 'search_query': number}
+        text = chunk.get('text') or ''
+        article = _ARTICLE.match(text)
+        if article:
+            number = query = f'{law} {article.group(1)}'
+        elif later := _LATER_ARTICLE.search(text):
+            # The chunk opens mid-article: point the reviewer at the next heading and scroll up.
+            query = f'{law} {later.group(1)}'
+            number = f'{query} 앞'
+        else:
+            number = query = law
+        return {'case_number': number, 'authority': authority, 'search_query': query}
     prefixed = _AUTHORITY_ID.match(document_id)
     if prefixed:
         authority = authority or prefixed['authority']
