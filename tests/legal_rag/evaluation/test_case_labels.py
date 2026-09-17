@@ -27,10 +27,26 @@ def test_statute_uses_law_name_and_opening_article():
                              text='제73조의2(상표등록의 취소심판)\n...'))
     assert label['case_number'] == '상표법 제73조의2'
     assert label['search_query'] == '상표법 제73조의2'
+    older = case_label(chunk('statute::특허보상심의회규정::1970', 'statute', title='특허보상심의회규정',
+                             text='제1조 (설치)\n...'))
+    assert older['case_number'] == '특허보상심의회규정 제1조'
 
 
 def test_statute_without_article_falls_back_to_law_name():
     label = case_label(chunk('statute::상표법::2024', 'statute', title='상표법', text='부칙 ...'))
+    assert label['case_number'] == '상표법'
+
+
+def test_statute_opening_mid_article_points_before_next_heading():
+    label = case_label(chunk('statute::상표법::2024', 'statute', title='상표법',
+                             text='리인을 포함한다.\n1. 등록출원\n제18조의2(절차의 정지)\n...'))
+    assert label['case_number'] == '상표법 제18조의2 앞'
+    assert label['search_query'] == '상표법 제18조의2'
+
+
+def test_statute_ignores_in_sentence_article_reference():
+    label = case_label(chunk('statute::상표법::2024', 'statute', title='상표법',
+                             text='제73조제1항에 따라\n제73조제1항에 따라 취소한다.\n1. 제36조(출원)에 따른'))
     assert label['case_number'] == '상표법'
 
 
