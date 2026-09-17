@@ -37,8 +37,8 @@ def success_ks(depth: int) -> list[int]:
 
 
 def coverage_ks(depth: int) -> list[int]:
-    """Coverage is reported at 10 and at the largest success cut-off."""
-    return sorted({10, *success_ks(depth)[-1:]})
+    """Coverage is reported at 10 and at the largest success cut-off, never deeper than the pool."""
+    return sorted({min(10, depth), *success_ks(depth)[-1:]})
 
 
 def _dcg(gains: list[int]) -> float:
