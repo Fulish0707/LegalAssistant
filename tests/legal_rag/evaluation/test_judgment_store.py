@@ -60,3 +60,12 @@ def test_corruption_before_the_final_line_raises(tmp_path):
     path.write_text('{"broken\n' + json.dumps(row) + '\n', encoding='utf-8')
     with pytest.raises(json.JSONDecodeError):
         JudgmentStore(path)
+
+
+def test_rows_returns_reason_for_one_judge_only(tmp_path):
+    store = JudgmentStore(tmp_path / 'judgments.jsonl')
+    store.append(KEY, case_id='c1', chunk_id='k1', document_id='d1', grade=1, reason='why')
+    store.append(JudgeKey('other', 'p1'), case_id='c1', chunk_id='k1', document_id='d1', grade=2, reason='x')
+    rows = JudgmentStore(tmp_path / 'judgments.jsonl').rows(KEY)
+    assert list(rows) == [('c1', 'k1')]
+    assert (rows[('c1', 'k1')]['grade'], rows[('c1', 'k1')]['reason']) == (1, 'why')

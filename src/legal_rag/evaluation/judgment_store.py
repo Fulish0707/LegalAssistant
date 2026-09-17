@@ -87,3 +87,7 @@ class JudgmentStore:
 
     def failures(self, judge: JudgeKey) -> list[tuple[str, str]]:
         return sorted((row['case_id'], row['chunk_id']) for row in self._for(judge) if row['grade'] is None)
+
+    def rows(self, judge: JudgeKey) -> dict[tuple[str, str], dict]:
+        """Full stored rows (grade, reason, raw, ...) for one judge, keyed by (case, chunk)."""
+        return {(row['case_id'], row['chunk_id']): dict(row) for row in self._for(judge)}
