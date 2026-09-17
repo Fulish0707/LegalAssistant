@@ -94,7 +94,7 @@ Grades are defined against the QA reference answer: **2** the chunk alone states
 
 `data/eval/relevance/<name>/`:
 
-- `pool.json`, `pool.jsonl` — provenance and one row per (case, chunk): each mode's top-20 union plus the gold document's chunks.
+- `pool.json`, `pool.jsonl` — provenance and one row per (case, chunk): each mode's top-20 union plus the gold document's chunks. Only the first 10 chunks of a gold document are pooled.
 - `runs/<mode>.jsonl` — each mode's ranking to depth 100.
 - `calibration.csv`, `calibration.json` — 50 stratified pairs for human grading; strata stay in the JSON.
 - `judgments.jsonl` — append-only, keyed by judge model and prompt hash (which covers prompt text, truncation, temperature, token and context limits). Changing any of these starts a new key; nothing is overwritten.
@@ -132,6 +132,6 @@ uv run python scripts/eval_graded.py --pool-dir $P --output $P/graded-qwen3-8b
 
 Lead with nDCG@10 (gain 2^grade − 1, ideal from every judged chunk for the case) and Success@k (a grade-2 chunk in the top k). Each is reported per chunk and per document. Pooled recall is not reported, because its denominator depends on the pool.
 
-`min_judged_coverage@10` must be 1.0 at chunk level for a comparison to be valid. A new configuration, such as a reranker, surfaces chunks nobody judged; record its ranking and pool it, judge the new pairs with `--pool-file`, then evaluate. Parse failures are stored as `grade: null`. They count as judged for coverage, so they never block a comparison, but take gain 0, stay out of the ideal ranking, and are reported as `failed@10` per case and `failed_top10_total` per mode. `judge_relevance.py --retry-failed` judges them again and appends a new row, which replaces the failure.
+`min_judged_coverage@10` must be 1.0 at chunk level for a comparison to be valid. A new retrieval configuration, such as a reranker, surfaces chunks nobody judged. Extending an existing pool with a new configuration is not scripted yet. Until it is, build a new pool directory with `build_relevance_pool.py` (same target, including the new mode), copy `judgments.jsonl` into it, and run `judge_relevance.py` there: judgments are keyed by (model, prompt hash, case, chunk), not by pool directory, so pairs already judged are skipped and only the new ones are sent to the judge. `--pool-file` only selects which pairs to judge; it must come from the same target as the pool directory. Parse failures are stored as `grade: null`. They count as judged for coverage, so they never block a comparison, but take gain 0, stay out of the ideal ranking, and are reported as `failed@10` per case and `failed_top10_total` per mode. `judge_relevance.py --retry-failed` judges them again and appends a new row, which replaces the failure.
 
 Scope: this pilot is ip-v1 with the `legal_domain=intellectual_property` filter, under which the other corpora's legs return nothing, so multi-corpus fan-out is not measured.
