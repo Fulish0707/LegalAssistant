@@ -1,7 +1,9 @@
 """Pool retrieved chunks from several modes for relevance judging, and record rankings."""
 from __future__ import annotations
 
+import hashlib
 import json
+import shutil
 from pathlib import Path
 from typing import Callable
 
@@ -59,4 +61,71 @@ def write_pool(output: Path, pool: list[dict], runs: dict[str, list[dict]], prov
                 handle.write(json.dumps(row, ensure_ascii=False) + '\n')
     (output / 'pool.json').write_text(json.dumps(
         {**provenance, 'pairs': len(pool), 'modes': list(runs)}, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    return output
+
+
+def derive_pool(pool_rows: list[dict], runs: dict[str, list[dict]], *, pool_depth: int,
+                include_unretrieved_gold: bool) -> list[dict]:
+    """Rows of a shallower pool, taken from an existing pool without retrieving again.
+
+    Ranks are recomputed from the runs to ``pool_depth`` and must agree with the source rows'
+    ranks, so a depth the source pool never reached (or a mismatched runs directory) raises.
+    Gold chunks not retrieved within the depth are kept, with empty ranks, only when
+    ``include_unretrieved_gold``. Source order and all other fields are kept.
+    """
+    if pool_depth < 1:
+        raise ValueError('pool_depth must be >= 1')
+    ranks: dict[tuple[str, str], dict[str, int]] = {}
+    for mode, rows in runs.items():
+        for row in rows:
+            for rank, hit in enumerate(row['ranked'][:pool_depth], 1):
+                ranks.setdefault((row['case_id'], hit['chunk_id']), {})[mode] = rank
+    by_pair = {(row['case_id'], row['chunk_id']): row for row in pool_rows}
+    missing = [pair for pair in ranks if pair not in by_pair]
+    if missing:
+        raise ValueError(f'{len(missing)} pairs ranked within depth {pool_depth} are not in the source pool '
+                         f'(e.g. {missing[0]}); the source pool is shallower or from other runs')
+    derived = []
+    for row in pool_rows:
+        pair = (row['case_id'], row['chunk_id'])
+        trimmed = {mode: rank for mode, rank in row['ranks'].items() if rank <= pool_depth}
+        if trimmed != ranks.get(pair, {}):
+            raise ValueError(f'pool ranks {row["ranks"]} for {pair} disagree with the runs')
+        if trimmed or (row['is_gold_chunk'] and include_unretrieved_gold):
+            derived.append(dict(row, ranks=trimmed))
+    return derived
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+JUDGMENT_FILES = ('judgments.jsonl', 'judge_runs.jsonl')
+
+
+def derive_pool_dir(source: Path, output: Path, *, pool_depth: int, include_unretrieved_gold: bool) -> Path:
+    """Write a shallower pool directory derived from ``source`` (which is only read).
+
+    runs/ are copied unchanged. judgments.jsonl and judge_runs.jsonl are copied when present, so
+    pairs already judged are reused (judgment keys do not depend on the pool directory).
+    """
+    source, output = Path(source), Path(output)
+    if output.exists():
+        raise FileExistsError(output)
+    provenance = json.loads((source / 'pool.json').read_text(encoding='utf-8'))
+    source_depth = int(provenance['pool_depth'])
+    if pool_depth > source_depth:
+        raise ValueError(f'cannot deepen: pool_depth {pool_depth} > source pool_depth {source_depth}')
+    modes = provenance.get('modes') or sorted(path.stem for path in (source / 'runs').glob('*.jsonl'))
+    runs = {mode: read_jsonl(source / 'runs' / f'{mode}.jsonl') for mode in modes}
+    rows = derive_pool(read_jsonl(source / 'pool.jsonl'), runs, pool_depth=pool_depth,
+                       include_unretrieved_gold=include_unretrieved_gold)
+    copied = [name for name in JUDGMENT_FILES if (source / name).exists()]
+    write_pool(output, rows, runs, {
+        **provenance, 'pool_depth': pool_depth, 'include_unretrieved_gold': include_unretrieved_gold,
+        'derived_from': {'pool_dir': str(source), 'pool_jsonl_sha256': _sha256(source / 'pool.jsonl'),
+                         'pool_depth': source_depth},
+        'judgments_copied_from': str(source) if copied else None})
+    for name in copied:
+        shutil.copyfile(source / name, output / name)
     return output
