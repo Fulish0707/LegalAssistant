@@ -86,7 +86,7 @@ The runs must share an identical `target.jsonl`, settings hash, Top-K/deep-K, do
 
 ## Graded relevance evaluation
 
-Exact-gold metrics cannot measure this system. QA questions state general legal rules, and none of the 76,142 intellectual-property questions names a case number or document title, so hundreds of decisions can answer a question the gold document happens to answer. The graded evaluation asks instead whether retrieved chunks are relevant, judged by a local LLM that is checked against human labels. Design: `docs/superpowers/specs/2026-09-17-graded-relevance-eval-design.md`.
+Exact-gold metrics cannot measure this system. QA questions state general legal rules, and none of the 76,142 intellectual-property questions names a case number or document title, so hundreds of decisions can answer a question the gold document happens to answer. The graded evaluation asks instead whether retrieved chunks are relevant, judged by a local LLM that is checked against reference labels (Codex, GPT 6 Astra). Design: `docs/superpowers/specs/2026-09-17-graded-relevance-eval-design.md`.
 
 Grades are defined by whether the chunk answers the question's legal issue. The reference answer is only a hint about the expected rule and may contain errors, such as a wrong article number: **2** the chunk itself states the rule, standard or requirement that answers the issue (any decision stating it qualifies, not only the gold); **1** the same issue or provision, but the rule is not stated fully enough to answer alone, or a related field where facts are applied without stating the rule; **0** a different issue, institution, procedure or right (보정 vs 정정, 저작권 vs 특허권, 출원 거절 vs 등록 후 무효·정정), or shared vocabulary only.
 
@@ -100,7 +100,7 @@ Before grading, the judge copies one sentence of the chunk into `evidence_quote`
 
 - `pool.json`, `pool.jsonl` — provenance and one row per (case, chunk): each mode's top-20 union plus the gold document's chunks. Only the first 10 chunks (`--max-gold-chunks`) of a gold document are pooled.
 - `runs/<mode>.jsonl` — each mode's ranking to depth 100.
-- `calibration.csv`, `calibration.json` — 50 stratified pairs for human grading; strata stay in the JSON.
+- `calibration.csv`, `calibration.json` — 50 stratified pairs for reference grading (`codex_grade`, `codex_note`); strata stay in the JSON.
 - `judgments.jsonl` — append-only, keyed by judge model and prompt hash (which covers prompt text, schema, truncation, temperature, token and context limits, thinking mode and the quote verification rule). Changing any of these starts a new key; nothing is overwritten.
 - `judge_runs.jsonl` — one provenance line per completed judge run that passed the calibration check: judge key, Ollama model digest (best effort, not part of the key), `calibration.csv` hash, flags and counts.
 - `agreement-<hash12>.json`, `calibration_review-<hash12>.csv` — judge versus reference labels, one pair per judge key (`<hash12>` is the prompt hash prefix). The JSON records the hashes of `calibration.csv`, `calibration.json` and `pool.jsonl`, the think mode, `reference_source`, `quote_downgrades` (calibration pairs whose grade 2 became 1 by quote verification) and `agreement_before_quote_check` (the same statistics on `model_grade`). The review CSV adds `evidence_quote`, `quote_verified` and `model_grade`. The unsuffixed `agreement.json`/`calibration_review.csv` come from the first prompt and are left alone.
@@ -116,13 +116,13 @@ uv run python scripts/build_relevance_pool.py --profile local --root "$PWD" --co
   --target data/eval/reports/retrieval_diagnostics/ip-v1/intellectual_property/hybrid-seed42-final/target.jsonl \
   --output $P
 
-# 2. Calibration sample, then a human fills human_grade (0/1/2) in calibration.csv.
+# 2. Calibration sample, then the reference labeller fills codex_grade (0/1/2) and codex_note in calibration.csv.
 uv run python scripts/sample_calibration.py --pool-dir $P
 
 # 3. Judge the same 50 and measure agreement (exit 1 unless all 50 have a judge grade and
 #    binary grade-2 kappa >= 0.6; rerun with --retry-failed after parse failures).
 uv run python scripts/judge_relevance.py --pool-dir $P --calibration-only
-uv run python scripts/judge_agreement.py --pool-dir $P --reference-source human
+uv run python scripts/judge_agreement.py --pool-dir $P --reference-source "GPT 6 Astra"
 
 # 4. Judge the whole pool (hours; interrupt and rerun freely).
 uv run python scripts/judge_relevance.py --pool-dir $P
@@ -142,7 +142,7 @@ T=data/eval/relevance/ip-v1-pilot-200-top10
 # there, unless --include-unretrieved-gold), copies runs/, judgments.jsonl and judge_runs.jsonl.
 uv run python scripts/derive_relevance_pool.py --from $P --output $T --pool-depth 10
 
-# Fresh calibration sample that never repeats the first one; fill human_grade, then judge it.
+# Fresh calibration sample that never repeats the first one; fill codex_grade, then judge it.
 uv run python scripts/sample_calibration.py --pool-dir $T --seed 43 \
   --quota rank_1_3=25 --quota rank_4_10=25 --exclude-calibration $P
 uv run python scripts/judge_relevance.py --pool-dir $T --calibration-only --think
@@ -154,7 +154,7 @@ uv run python scripts/eval_graded.py --pool-dir $T --think --threshold 1 --outpu
 
 `pool.json` of a derived pool records `derived_from` (source directory, its `pool.jsonl` hash and depth), `include_unretrieved_gold` and `judgments_copied_from`; deepening is refused. Without a `gold` quota, `sample_calibration.py` places gold chunks by rank like any other pair. Only gold chunks retrieved in the top 10 stay in the derived pool (10 of 461 for the pilot), so `gold_llm_grades` in its agreement JSON is close to empty and no longer checks the judge against the source. `judge_agreement.py` always reports `binary_relevant` (grade ≥1) and `binary_grade2`; `--pass-boundary 1|2` (default 2) picks which kappa must reach 0.6 and is recorded as `pass_boundary`. `eval_graded.py --threshold 1|2` (default 2) sets the grade that success@k, MRR, `precision@10` and `ndcg@10_binary` (gain 1, ideal from judged chunks at or above the threshold) count as relevant; it is recorded in `graded.json` and `cases.csv` and stated in the markdown header. At threshold 1, graded `ndcg@10` and `precision@10_grade1/2` move to a "Reference (graded)" table. The copied `judgments.jsonl` also holds grades for pairs outside the top-10 pool; `eval_graded.py` scores only judgments whose pair is in the directory's `pool.jsonl` (grades, documents and failures alike), so they never enter the nDCG ideal, and reports the ignored count as `out_of_pool_judgments` in `graded.json` and the markdown header. `failed parses` likewise counts in-pool failures only. At threshold 1, `cases_without_relevant` (graded nDCG) also moves to the Reference table.
 
-`calibration.csv` leads with `case_number` and `search_query` (for example `특허법원 2021허2359`, `상표법 제35조`) so each source can be looked up quickly. A statute label ending in `앞` means the chunk sits just before that article. Save the file from Excel as "CSV UTF-8". `judge_relevance.py` refuses to run until every calibration pair has a human grade, so the human never sees judge grades first. If the `human_grade` column was filled by a model rather than a person, say so with `--reference-source "<model>"`: it is recorded in the agreement JSON and printed as `reference labels: <source>`, because agreement with AI labels is inter-model agreement, not human validation.
+`calibration.csv` leads with `case_number` and `search_query` (for example `특허법원 2021허2359`, `상표법 제35조`) so each source can be looked up quickly. A statute label ending in `앞` means the chunk sits just before that article. Save the file from Excel as "CSV UTF-8". `judge_relevance.py` refuses to run until every calibration pair has a `codex_grade`, so the labeller never sees judge grades first. The reference labels in this project come from Codex (GPT 6 Astra), not a person; name the source with `--reference-source` (default `codex`). It is recorded in the agreement JSON and printed as `reference labels: <source>`, because agreement with AI labels is inter-model agreement, not human validation. Calibration files written before the column rename use `human_grade`/`human_note`; they are still read, and a row that fills both names with different grades is refused.
 
 ### Reading results
 

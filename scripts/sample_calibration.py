@@ -40,7 +40,7 @@ def main(
         typer.echo(f'{type(exc).__name__}: {exc}', err=True)
         raise typer.Exit(1) from exc
     typer.echo(f'wrote {pool_dir / "calibration.csv"}: {len(sample)} pairs {quotas}, seed {seed}, '
-               f'excluded {len(exclude)} earlier calibration pairs; fill human_grade (0/1/2) '
+               f'excluded {len(exclude)} earlier calibration pairs; fill codex_grade (0/1/2) '
                'before running judge_relevance.py')
 
 

@@ -4,7 +4,7 @@ import json
 import pytest
 
 from legal_rag.evaluation.calibration import (
-    STRATA, agreement, read_human_grades, sample_calibration, write_calibration)
+    STRATA, agreement, read_reference_grades, sample_calibration, write_calibration)
 
 
 def pool(n_cases=30):
@@ -45,9 +45,9 @@ def test_csv_leads_with_searchable_case_number_and_hides_strata(tmp_path):
         reader = csv.DictReader(handle)
         rows = list(reader)
     assert reader.fieldnames[:4] == ['pair_id', 'case_number', 'search_query', 'authority']
-    assert reader.fieldnames[-2:] == ['human_grade', 'human_note']
+    assert reader.fieldnames[-2:] == ['codex_grade', 'codex_note']
     assert not {'stratum', 'ranks', 'is_gold_chunk'} & set(reader.fieldnames)
-    assert rows[0]['human_grade'] == ''
+    assert rows[0]['codex_grade'] == ''
     manifest = json.loads((tmp_path / 'calibration.json').read_text())
     assert len(manifest['pairs']) == 50
     with pytest.raises(FileExistsError):
@@ -62,20 +62,20 @@ def test_write_refuses_before_creating_either_file(tmp_path):
     assert (tmp_path / 'calibration.csv').read_text() == 'existing'
 
 
-def test_human_grades_reject_values_outside_0_1_2(tmp_path):
+def test_reference_grades_reject_values_outside_0_1_2(tmp_path):
     path = tmp_path / 'calibration.csv'
-    path.write_text('pair_id,human_grade\nc1|k1,2\nc1|k2,\nc1|k3,5\n', encoding='utf-8-sig')
+    path.write_text('pair_id,codex_grade\nc1|k1,2\nc1|k2,\nc1|k3,5\n', encoding='utf-8-sig')
     with pytest.raises(ValueError, match='c1\\|k3'):
-        read_human_grades(path)
-    path.write_text('pair_id,human_grade\nc1|k1,2\nc1|k2,\n', encoding='utf-8-sig')
-    assert read_human_grades(path) == {('c1', 'k1'): 2}
+        read_reference_grades(path)
+    path.write_text('pair_id,codex_grade\nc1|k1,2\nc1|k2,\n', encoding='utf-8-sig')
+    assert read_reference_grades(path) == {('c1', 'k1'): 2}
 
 
-def test_human_grades_non_utf8_file_explains_how_to_resave(tmp_path):
+def test_reference_grades_non_utf8_file_explains_how_to_resave(tmp_path):
     path = tmp_path / 'calibration.csv'
-    path.write_bytes('pair_id,human_grade,human_note\nc1|k1,2,관련 없음\n'.encode('cp949'))
+    path.write_bytes('pair_id,codex_grade,codex_note\nc1|k1,2,관련 없음\n'.encode('cp949'))
     with pytest.raises(ValueError, match='CSV UTF-8'):
-        read_human_grades(path)
+        read_reference_grades(path)
 
 
 def test_agreement_on_known_matrix():
@@ -99,7 +99,7 @@ def _graded_calibration(tmp_path, grades):
     with path.open(newline='', encoding='utf-8-sig') as handle:
         rows = list(csv.DictReader(handle))
     for row, grade in zip(rows, grades):
-        row['human_grade'] = grade
+        row['codex_grade'] = grade
     with path.open('w', newline='', encoding='utf-8-sig') as handle:
         writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
         writer.writeheader()
@@ -107,19 +107,19 @@ def _graded_calibration(tmp_path, grades):
     return rows
 
 
-def test_require_human_grades_refuses_missing_or_partial_labels(tmp_path):
-    from legal_rag.evaluation.calibration import require_human_grades
+def test_require_reference_grades_refuses_missing_or_partial_labels(tmp_path):
+    from legal_rag.evaluation.calibration import require_reference_grades
     with pytest.raises(ValueError, match='missing'):
-        require_human_grades(tmp_path)
+        require_reference_grades(tmp_path)
     _graded_calibration(tmp_path, ['1'] * 49)
     with pytest.raises(ValueError, match='1 of 50'):
-        require_human_grades(tmp_path)
+        require_reference_grades(tmp_path)
 
 
-def test_require_human_grades_accepts_complete_labels(tmp_path):
-    from legal_rag.evaluation.calibration import require_human_grades
+def test_require_reference_grades_accepts_complete_labels(tmp_path):
+    from legal_rag.evaluation.calibration import require_reference_grades
     _graded_calibration(tmp_path, ['0'] * 50)
-    assert require_human_grades(tmp_path) == 50
+    assert require_reference_grades(tmp_path) == 50
 
 
 def test_disagreement_rows_and_review_csv(tmp_path):
@@ -132,7 +132,7 @@ def test_disagreement_rows_and_review_csv(tmp_path):
            key(rows[2]): {'grade': None, 'reason': 'parse failure'},
            key(rows[3]): {'grade': 1, 'reason': 'no human grade'}}
     review = disagreement_rows(tmp_path / 'calibration.csv', llm)
-    assert [(r['pair_id'], r['human_grade'], r['llm_grade'], r['llm_reason']) for r in review] == [
+    assert [(r['pair_id'], r['codex_grade'], r['llm_grade'], r['llm_reason']) for r in review] == [
         (rows[1]['pair_id'], 1, 0, 'differs'), (rows[2]['pair_id'], 0, None, 'parse failure')]
     write_review(tmp_path / 'review.csv', review)
     with (tmp_path / 'review.csv').open(newline='', encoding='utf-8-sig') as handle:
@@ -151,7 +151,7 @@ def test_judge_passes_threshold():
     assert not judge_passes({'binary_grade2': {'kappa': None}, 'missing_llm': 0})
 
 
-def test_judge_fails_when_a_human_graded_pair_has_no_llm_grade():
+def test_judge_fails_when_a_reference_graded_pair_has_no_llm_grade():
     from legal_rag.evaluation.calibration import agreement, judge_passes, missing_llm_message
     human = {('c', str(i)): g for i, g in enumerate([2, 2, 0, 0, 1])}
     llm = {('c', str(i)): g for i, g in enumerate([2, 2, 0, 0])}      # pair 4 failed or not judged
@@ -211,7 +211,7 @@ def test_agreement_script_writes_per_key_files_with_reference_source(tmp_path):
     store = JudgmentStore(tmp_path / 'judgments.jsonl')
     for number, row in enumerate(rows):
         case_id, chunk_id = row['pair_id'].split('|', 1)
-        human = int(row['human_grade'])
+        human = int(row['codex_grade'])
         downgraded = number == 0
         store.append(key, case_id=case_id, chunk_id=chunk_id, document_id='d', reason='r',
                      grade=1 if downgraded else human,
@@ -231,7 +231,7 @@ def test_agreement_script_writes_per_key_files_with_reference_source(tmp_path):
     assert (tmp_path / 'agreement.json').read_text(encoding='utf-8') == 'v1'
     assert (tmp_path / 'calibration_review.csv').read_text(encoding='utf-8') == 'v1'
     default = CliRunner().invoke(script.app, ['--pool-dir', str(tmp_path)])
-    assert 'reference labels: human' in default.output and default.exit_code == 1   # no think-off judgments
+    assert 'reference labels: codex' in default.output and default.exit_code == 1   # no think-off judgments
 
 
 def test_scripts_help_exits_zero():
@@ -334,7 +334,7 @@ def test_agreement_script_pass_boundary(tmp_path):
     store = JudgmentStore(tmp_path / 'judgments.jsonl')
     for row in rows:                                   # judge swaps 1 and 2: >=1 perfect, grade 2 poor
         case_id, chunk_id = row['pair_id'].split('|', 1)
-        grade = {'2': 1, '1': 2, '0': 0}[row['human_grade']]
+        grade = {'2': 1, '1': 2, '0': 0}[row['codex_grade']]
         store.append(key, case_id=case_id, chunk_id=chunk_id, document_id='d', reason='r', grade=grade)
     script = _load_script('judge_agreement')
     passed = CliRunner().invoke(script.app, ['--pool-dir', str(tmp_path), '--think', '--pass-boundary', '1'])
@@ -347,3 +347,24 @@ def test_agreement_script_pass_boundary(tmp_path):
     assert failed.exit_code == 1 and 'FAIL: binary grade≥2 kappa' in failed.output
     assert json.loads((tmp_path / f'agreement-{key.prompt_sha256[:12]}.json').read_text())['pass_boundary'] == 2
     assert CliRunner().invoke(script.app, ['--pool-dir', str(tmp_path), '--think', '--pass-boundary', '3']).exit_code != 0
+
+
+def test_reference_grades_fall_back_to_legacy_human_columns(tmp_path):
+    path = tmp_path / 'calibration.csv'
+    path.write_text('pair_id,human_grade,human_note\nc1|k1,1,old\n', encoding='utf-8-sig')
+    assert read_reference_grades(path) == {('c1', 'k1'): 1}
+
+
+def test_codex_columns_win_over_empty_legacy_columns(tmp_path):
+    # A file whose labeller added codex_* next to the original, still empty human_* columns.
+    path = tmp_path / 'calibration.csv'
+    path.write_text('pair_id,human_grade,human_note,codex_grade,codex_note\nc1|k1,,,2,근거\nc1|k2,,,,\n',
+                    encoding='utf-8-sig')
+    assert read_reference_grades(path) == {('c1', 'k1'): 2}
+
+
+def test_conflicting_codex_and_legacy_grades_are_refused(tmp_path):
+    path = tmp_path / 'calibration.csv'
+    path.write_text('pair_id,human_grade,codex_grade\nc1|k1,1,2\n', encoding='utf-8-sig')
+    with pytest.raises(ValueError, match='conflicting'):
+        read_reference_grades(path)

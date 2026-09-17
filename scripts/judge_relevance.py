@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Grade pool pairs with an Ollama judge, appending to judgments.jsonl. Safe to interrupt and rerun.
 
-The human labels calibration.csv first; the judge refuses to run until every calibration pair
-has a human grade (override with --skip-calibration-check). Runs that pass the check append a
+The reference labeller fills codex_grade in calibration.csv first; the judge refuses to run until every
+calibration pair has a codex_grade (override with --skip-calibration-check). Runs that pass the check append a
 provenance line (calibration CSV hash, model digest, flags, counts) to judge_runs.jsonl.
 
 Example:
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import typer
 
-from legal_rag.evaluation.calibration import calibration_fingerprint, require_human_grades
+from legal_rag.evaluation.calibration import calibration_fingerprint, require_reference_grades
 from legal_rag.evaluation.judgment_store import JudgmentStore
 from legal_rag.evaluation.relevance_judge import (
     JUDGE_THINK, append_judge_run, describe_key, generation_settings, judge_key, judge_pool, judge_run_record,
@@ -35,13 +35,13 @@ def main(
                                    help='Pairs to judge instead of pool.jsonl; must come from the same target.'),
     retry_failed: bool = typer.Option(False, help='Judge again pairs whose stored judgment failed to parse.'),
     skip_calibration_check: bool = typer.Option(
-        False, help='Judge even though the human calibration grades are incomplete.'),
+        False, help='Judge even though the codex_grade calibration labels are incomplete.'),
     think: bool = typer.Option(JUDGE_THINK, '--think/--no-think',
                                help='Let the model think first; a separate judgment key with more output tokens.'),
 ) -> None:
     try:
         if not skip_calibration_check:
-            require_human_grades(pool_dir)
+            require_reference_grades(pool_dir)
         # Hashed when the guard passes, so later edits to the labels do not change the record.
         calibration_csv_sha256 = calibration_fingerprint(pool_dir)['calibration_csv_sha256']
         pairs = read_jsonl(pool_file or pool_dir / 'pool.jsonl')
