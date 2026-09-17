@@ -135,3 +135,9 @@ def test_coverage_at_20_is_reported_and_summarized():
                              {('c1', k): g for k, g in grades.items()},
                              {('c1', k): 'D' + k[1:] for k in grades}, depth=10)['dense']['chunk']
     assert 'min_judged_coverage@20' not in shallow and 'mrr@10' in shallow
+
+
+def test_coverage_cutoffs_never_exceed_a_shallow_pool_depth():
+    hits = ranked(*[(f'k{i}', f'D{i}') for i in range(1, 11)])
+    result = case_metrics(hits, {f'k{i}': 0 for i in range(1, 6)}, level='chunk', depth=5)
+    assert result['judged_coverage@5'] == 1.0 and 'judged_coverage@10' not in result

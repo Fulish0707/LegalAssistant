@@ -94,7 +94,7 @@ Grades are defined against the QA reference answer: **2** the chunk alone states
 
 `data/eval/relevance/<name>/`:
 
-- `pool.json`, `pool.jsonl` — provenance and one row per (case, chunk): each mode's top-20 union plus the gold document's chunks. Only the first 10 chunks of a gold document are pooled.
+- `pool.json`, `pool.jsonl` — provenance and one row per (case, chunk): each mode's top-20 union plus the gold document's chunks. Only the first 10 chunks (`--max-gold-chunks`) of a gold document are pooled.
 - `runs/<mode>.jsonl` — each mode's ranking to depth 100.
 - `calibration.csv`, `calibration.json` — 50 stratified pairs for human grading; strata stay in the JSON.
 - `judgments.jsonl` — append-only, keyed by judge model and prompt hash (which covers prompt text, truncation, temperature, token and context limits, and thinking mode). Changing any of these starts a new key; nothing is overwritten.
