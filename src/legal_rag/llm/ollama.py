@@ -14,8 +14,9 @@ _FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 
 
 class OllamaChatModel:
-    def __init__(self, model: str, base_url: str, timeout: float = 120.0, transport: httpx.BaseTransport | None = None, think: bool = False) -> None:
+    def __init__(self, model: str, base_url: str, timeout: float = 120.0, transport: httpx.BaseTransport | None = None, think: bool = False, num_ctx: int | None = None) -> None:
         self.model = model
+        self.num_ctx = num_ctx
         self.name = f"ollama:{model}"
         self.think = think
         self._client = httpx.Client(base_url=base_url, timeout=timeout, transport=transport)
@@ -30,6 +31,8 @@ class OllamaChatModel:
         }
         if response_schema is not None:
             payload["format"] = response_schema.model_json_schema()
+        if self.num_ctx is not None:
+            payload["options"]["num_ctx"] = self.num_ctx
         response = self._client.post("/api/chat", json=payload)
         response.raise_for_status()
         body = response.json()

@@ -36,6 +36,19 @@ def test_ollama_model_sends_schema_and_parses():
     assert seen["options"] == {"temperature": 0.0, "num_predict": 99}
 
 
+def test_ollama_num_ctx_in_options_only_when_set():
+    seen = []
+
+    def handler(request: httpx.Request):
+        seen.append(json.loads(request.read()))
+        return httpx.Response(200, json={"message": {"content": "x"}})
+
+    OllamaChatModel(model="m", base_url="http://t", transport=httpx.MockTransport(handler), num_ctx=8192).generate([Message(role="user", content="q")])
+    OllamaChatModel(model="m", base_url="http://t", transport=httpx.MockTransport(handler)).generate([Message(role="user", content="q")])
+    assert seen[0]["options"]["num_ctx"] == 8192
+    assert "num_ctx" not in seen[1]["options"]
+
+
 def test_ollama_plain_text_without_schema():
     handler = lambda req: httpx.Response(200, json={"message": {"content": "안녕"}})
     m = OllamaChatModel(model="m", base_url="http://t", transport=httpx.MockTransport(handler))
