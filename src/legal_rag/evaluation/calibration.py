@@ -133,8 +133,14 @@ def require_human_grades(pool_dir: Path) -> int:
 
 
 def judge_passes(result: dict, threshold: float = PASS_KAPPA) -> bool:
+    """Pass only when every human-graded pair has a judge grade and binary grade-2 kappa meets the threshold."""
     kappa = result['binary_grade2']['kappa']
-    return kappa is not None and kappa >= threshold
+    return result['missing_llm'] == 0 and kappa is not None and kappa >= threshold
+
+
+def missing_llm_message(result: dict) -> str:
+    return (f"{result['missing_llm']} calibration pairs have no judge grade (failed parse or not judged); "
+            'run judge_relevance.py --calibration-only [--retry-failed]')
 
 
 def disagreement_rows(csv_path: Path, llm_rows: dict[tuple[str, str], dict]) -> list[dict]:

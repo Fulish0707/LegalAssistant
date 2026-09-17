@@ -114,7 +114,8 @@ uv run python scripts/build_relevance_pool.py --profile local --root "$PWD" --co
 # 2. Calibration sample, then a human fills human_grade (0/1/2) in calibration.csv.
 uv run python scripts/sample_calibration.py --pool-dir $P
 
-# 3. Judge the same 50 and measure agreement (exit 1 unless binary grade-2 kappa >= 0.6).
+# 3. Judge the same 50 and measure agreement (exit 1 unless all 50 have a judge grade and
+#    binary grade-2 kappa >= 0.6; rerun with --retry-failed after parse failures).
 uv run python scripts/judge_relevance.py --pool-dir $P --calibration-only
 uv run python scripts/judge_agreement.py --pool-dir $P
 
