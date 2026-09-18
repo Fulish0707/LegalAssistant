@@ -11,3 +11,7 @@ qdrant:
 retrieval:
   corpora: [criminal-v1, civil-v1, administrative-v1, ip-v1]
   k_fused: 50
+  # Measured on the ip-v1 200-case graded pool (docs/retrieval-diagnostics.md): equal weights cost
+  # 0.096 Precision@10 against dense alone (95% CI [0.069, 0.122]); at 0.75 the hybrid matches dense
+  # (+0.011, CI [-0.000, 0.022]), so sparse is kept as insurance for lexical queries, not for gain.
+  sparse_weight: 0.75
