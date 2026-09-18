@@ -23,8 +23,10 @@ class CrossEncoderReranker:
     """Scores every (query, chunk text) pair and re-sorts the candidates by that score.
 
     The model is loaded on first use, so importing or constructing the reranker stays cheap and
-    offline; ``loader`` replaces the load for tests. Scores are raw logits — negative ones are
-    ordinary and are never dropped. Ties keep the fused order, so a run is reproducible.
+    offline; ``loader`` replaces the load for tests. Scores are whatever the model emits —
+    sentence-transformers applies a model's own activation, so bge-reranker-v2-m3 yields [0, 1]
+    while another model may yield signed logits — and none are dropped whatever their sign.
+    Ties keep the fused order, so a run is reproducible.
     """
 
     name = 'cross_encoder'
