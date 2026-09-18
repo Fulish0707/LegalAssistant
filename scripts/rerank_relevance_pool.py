@@ -140,10 +140,10 @@ def main(
     write_pool(output, pool, runs, {
         **provenance, 'pool_depth': depth, 'run_depth': run_depth,
         'reranker': 'cross_encoder',
+        # settings_hash stays the source pool's: it names the settings that retrieved the runs.
         'rerank': {'model': rerank_model, 'device': device, 'batch_size': batch_size, 'max_length': max_length,
                    'fused_run': fused_run, 'run_name': run_name, 'baselines': list(baseline),
-                   'seconds': round(elapsed, 1)},
-        'settings_hash': settings.hash(),
+                   'seconds': round(elapsed, 1), 'settings_hash': settings.hash()},
         'derived_from': {'pool_dir': str(pool_dir), 'pool_jsonl_sha256': _sha256(pool_dir / 'pool.jsonl'),
                          'pool_depth': source_depth,
                          'runs_sha256': {name: _sha256(pool_dir / 'runs' / f'{name}.jsonl')

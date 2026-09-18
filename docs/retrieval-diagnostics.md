@@ -187,10 +187,10 @@ uv sync --extra rerank      # torch + sentence-transformers, several GB
 rerank:
   backend: cross_encoder    # noop | cross_encoder
   model: BAAI/bge-reranker-v2-m3
-  device: cuda              # cpu works, roughly an order of magnitude slower
+  device: cuda              # cpu works: 68 s per 100 candidates against 6 s on the 4060
 ```
 
-`CrossEncoderReranker` loads the model on first use, never in the constructor, so importing it or building a retriever stays cheap and offline; tests inject a fake loader. Scores are the model's raw outputs, kept as they are: none are dropped, ties keep the fused order, and the returned hits carry `retriever='reranked'` with the rerank score, which the diagnostics writer records as `rerank_score`. Raise `retrieval.k_fused` when enabling it — the reranker only sees the fused top `k_fused`, and reranking 5 candidates buys nothing. On an RTX 4060 Laptop, `BAAI/bge-reranker-v2-m3` loads in about 9 s and scores 100 candidates in about 6 s per query at `batch_size` 16 and `max_length` 512, using roughly 2.9 GB of VRAM.
+`CrossEncoderReranker` loads the model on first use, never in the constructor, so importing it or building a retriever stays cheap and offline; tests inject a fake loader. Scores are whatever the model emits — sentence-transformers applies the model's own activation, so `bge-reranker-v2-m3` scores fall in [0, 1] while another model may return signed logits — and none are dropped whatever their sign: ties keep the fused order, and the returned hits carry `retriever='reranked'` with the rerank score, which the diagnostics writer records as `rerank_score`. Raise `retrieval.k_fused` when enabling it — the reranker only sees the fused top `k_fused`, and reranking 5 candidates buys nothing. On an RTX 4060 Laptop, `BAAI/bge-reranker-v2-m3` loads in about 9 s and scores 100 candidates in about 6 s per query at `batch_size` 16 and `max_length` 512, using roughly 2.9 GB of VRAM.
 
 Evaluating it needs a recorded run, and reranking is a function of the query and the candidates' text alone, so a pool's recorded fused run can be reranked without retrieving again — the same shortcut the fusion sweep uses, and the comparison stays paired because every run ranks the same candidates:
 
