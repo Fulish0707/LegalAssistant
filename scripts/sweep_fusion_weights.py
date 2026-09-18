@@ -89,8 +89,12 @@ def main(
         raise typer.BadParameter(f'depth {depth} > source pool_depth {source_depth}: the source pool holds no '
                                  'rows for deeper ranks and its judgments would not cover them')
     legs = {leg: read_jsonl(pool_dir / 'runs' / f'{leg}.jsonl') for leg in LEGS}
-    runs = {**legs, **{variant_name(w): refuse(legs, {'dense': dense_weight, 'sparse': w}, rrf_k=rrf_k, depth=depth)
-                       for w in weights}}
+    # Variants are written at the legs' own depth, not at --depth. Document-level metrics take a
+    # document's rank from its first chunk and never truncate the ranked list, so a shorter run
+    # yields fewer distinct documents in its top 10 and would score below the legs by construction.
+    run_depth = int(provenance['run_depth'])
+    runs = {**legs, **{variant_name(w): refuse(legs, {'dense': dense_weight, 'sparse': w}, rrf_k=rrf_k,
+                                               depth=run_depth) for w in weights}}
 
     key = judge_key(f'ollama:{model}', think=think)
     _progress(describe_key(key, think=think))
@@ -101,8 +105,10 @@ def main(
         total = len(pair_ranks({name: runs[name]}, depth))
         typer.echo(f'{name}: {total - len(pending)} of {total} top-{depth} pairs judged, {len(pending)} pending')
     pending = pending_pairs(runs, judged, depth)
+    seconds = len(pending) * SECONDS_PER_PAIR
+    cost = f'{seconds / 3600:.1f} h' if seconds >= 3600 else f'{seconds / 60:.1f} min'
     typer.echo(f'{len(pending)} distinct pending pairs across every run '
-               f'(~{len(pending) * SECONDS_PER_PAIR / 3600:.1f} h at {SECONDS_PER_PAIR} s/pair)')
+               f'(~{cost} at {SECONDS_PER_PAIR} s/pair)')
 
     source_rows = read_jsonl(pool_dir / 'pool.jsonl')
     ranks = pair_ranks(runs, depth)
@@ -123,7 +129,8 @@ def main(
     copied = [name for name in JUDGMENT_FILES if (pool_dir / name).exists()]
     write_pool(output, pool, runs, {
         **provenance, 'pool_depth': depth,
-        'fusion_sweep': {'rrf_k': rrf_k, 'dense_weight': dense_weight, 'sparse_weights': weights,
+        'fusion_sweep': {'rrf_k': rrf_k, 'run_depth': run_depth, 'dense_weight': dense_weight,
+                         'sparse_weights': weights,
                          'legs': list(LEGS), 'variants': {variant_name(w): {'dense': dense_weight, 'sparse': w}
                                                           for w in weights}},
         'derived_from': {'pool_dir': str(pool_dir), 'pool_jsonl_sha256': _sha256(pool_dir / 'pool.jsonl'),
