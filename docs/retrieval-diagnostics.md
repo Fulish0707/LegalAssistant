@@ -175,10 +175,45 @@ The new directory holds the copied `dense.jsonl` and `sparse.jsonl` plus one `ru
 
 `hybrid_s0.00` is byte-identical to `dense.jsonl` (a chunk only the zero-weighted sparse leg saw scores 0 and `RRFFuser` drops it), and `hybrid_s1.00` is byte-identical to the source `hybrid.jsonl`, so both are fully judged and serve as anchors: their metrics reproduce dense's 0.785 and hybrid's 0.693 at chunk level and dense's 0.789 at document level. Comparing those two files with `cmp` is the check that the sweep is sound. **The intermediate variants must be judged before they are compared.** Until then their `min_judged_coverage@10` is below 1.0, `eval_graded.py` prints the coverage warning and refuses `--output`, and the unjudged chunks count as grade 0, which understates exactly the variants under test.
 
+### Cross-encoder reranking
+
+The reranker is the last stage of `HybridRetriever`: it scores every (query, chunk text) pair with a cross-encoder and re-sorts the fused candidates, so it can only reorder what fusion already found. Install the optional extra and switch the backend:
+
+```bash
+uv sync --extra rerank      # torch + sentence-transformers, several GB
+```
+
+```yaml
+rerank:
+  backend: cross_encoder    # noop | cross_encoder
+  model: BAAI/bge-reranker-v2-m3
+  device: cuda              # cpu works, roughly an order of magnitude slower
+```
+
+`CrossEncoderReranker` loads the model on first use, never in the constructor, so importing it or building a retriever stays cheap and offline; tests inject a fake loader. Scores are the model's raw outputs, kept as they are: none are dropped, ties keep the fused order, and the returned hits carry `retriever='reranked'` with the rerank score, which the diagnostics writer records as `rerank_score`. Raise `retrieval.k_fused` when enabling it — the reranker only sees the fused top `k_fused`, and reranking 5 candidates buys nothing. On an RTX 4060 Laptop, `BAAI/bge-reranker-v2-m3` loads in about 9 s and scores 100 candidates in about 6 s per query at `batch_size` 16 and `max_length` 512, using roughly 2.9 GB of VRAM.
+
+Evaluating it needs a recorded run, and reranking is a function of the query and the candidates' text alone, so a pool's recorded fused run can be reranked without retrieving again — the same shortcut the fusion sweep uses, and the comparison stays paired because every run ranks the same candidates:
+
+```bash
+W=data/eval/relevance/ip-v1-pilot-200-sweep
+R=data/eval/relevance/ip-v1-pilot-200-rerank
+
+# Reranks runs/hybrid_s0.75.jsonl (top 100 per case) and records the new order to depth 100.
+uv run python scripts/rerank_relevance_pool.py --pool-dir $W --output $R \
+  --profile local --corpus-version ip-v1 --root . --device cuda --think
+
+uv run python scripts/judge_relevance.py --pool-dir $R --think          # only the pending pairs
+uv run python scripts/eval_graded.py --pool-dir $R --think --threshold 1 --output $R/graded-rerank
+```
+
+The new directory holds `runs/reranked.jsonl` beside the copied `dense.jsonl`, `sparse.jsonl` and `hybrid_s0.75.jsonl`, the source pool rows extended with the chunks the reranked run newly lifts into the top 10 (chunk text from the processed corpus; a chunk missing there is an error, never an unjudgeable pair), and the copied `judgments.jsonl`, `judge_runs.jsonl`, `calibration.csv` and `calibration.json`. `pool.json` records the source directory with the sha256 of its `pool.jsonl` and of every run read, plus the rerank model, device, batch size, max length and the settings hash. Like the sweep's variants, the reranked run is written at the source `run_depth` of 100, not at `--depth`, so document-level metrics are not truncated by construction.
+
+A reranker reorders deeply, so it promotes far more unjudged chunks than re-weighting does: for the pilot, reranking the fused top 100 lifted 1,315 new pairs into a top 10 and left 1,313 distinct pairs pending (~5.6 h at 15.3 s/pair) against the sweep's 7, while the three baselines stayed fully judged. Reranking 200 cases x 100 candidates itself took 20.1 min on the 4060 (6.0 s per case). Pass the same judge flags here as when the pool was judged (`--think` for the pilot): the pending count is computed for that judge key, and the wrong one reports every pair as pending. **Judge them before reading any metric.** Until coverage is complete, `min_judged_coverage@10` is below 1.0, `eval_graded.py --output` refuses, and the unjudged chunks count as grade 0 — which understates exactly the run under test.
+
 ### Reading results
 
 Lead with nDCG@10 (gain 2^grade − 1, ideal from every judged chunk for the case) and Success@k (a chunk at or above `--threshold`, grade 2 by default, in the top k). Success@k and MRR (`mrr@20`) stop at the pool depth, since deeper ranks were never pooled; with a pool shallower than 20, Success@20 is not reported. Each is reported per chunk and per document. Pooled recall is not reported, because its denominator depends on the pool.
 
-`min_judged_coverage@10` and `min_judged_coverage@20` must be 1.0 at chunk level for a comparison to be valid; `eval_graded.py --output` refuses otherwise. A new retrieval configuration, such as a reranker, surfaces chunks nobody judged. Only one such extension is scripted: `sweep_fusion_weights.py`, for re-weighted RRF under a single-corpus filter (see above). For anything that needs real retrieval, build a new pool directory with `build_relevance_pool.py` (same target, including the new mode), copy `judgments.jsonl` into it, and run `judge_relevance.py` there: judgments are keyed by (model, prompt hash, case, chunk), not by pool directory, so pairs already judged are skipped and only the new ones are sent to the judge. `--pool-file` only selects which pairs to judge; it must come from the same target as the pool directory. Parse failures are stored as `grade: null`. They count as judged for coverage, so they never block a comparison, but take gain 0, stay out of the ideal ranking, and are reported as `failed@10` per case and `failed_top10_total` per mode. `judge_relevance.py --retry-failed` judges them again and appends a new row, which replaces the failure.
+`min_judged_coverage@10` and `min_judged_coverage@20` must be 1.0 at chunk level for a comparison to be valid; `eval_graded.py --output` refuses otherwise. A new retrieval configuration, such as a reranker, surfaces chunks nobody judged. Two such extensions are scripted, both reusing a pool's recorded runs: `sweep_fusion_weights.py`, for re-weighted RRF under a single-corpus filter, and `rerank_relevance_pool.py`, for a cross-encoder reranking a recorded fused run (see above). For anything that needs real retrieval, build a new pool directory with `build_relevance_pool.py` (same target, including the new mode), copy `judgments.jsonl` into it, and run `judge_relevance.py` there: judgments are keyed by (model, prompt hash, case, chunk), not by pool directory, so pairs already judged are skipped and only the new ones are sent to the judge. `--pool-file` only selects which pairs to judge; it must come from the same target as the pool directory. Parse failures are stored as `grade: null`. They count as judged for coverage, so they never block a comparison, but take gain 0, stay out of the ideal ranking, and are reported as `failed@10` per case and `failed_top10_total` per mode. `judge_relevance.py --retry-failed` judges them again and appends a new row, which replaces the failure.
 
 Scope: this pilot is ip-v1 with the `legal_domain=intellectual_property` filter, under which the other corpora's legs return nothing, so multi-corpus fan-out is not measured.
