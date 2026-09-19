@@ -56,8 +56,10 @@ def render_markdown(summary: dict, *, judge: dict, pool: dict, threshold: int = 
         f"- Judge: `{judge['model']}`, prompt `{judge['prompt_sha256'][:12]}`, failed parses: {judge['failed_parses']}"
         + (f", out-of-pool judgments ignored: {judge['out_of_pool_judgments']}"
            if 'out_of_pool_judgments' in judge else ''),
-        f"- Pool: corpus_version `{pool.get('corpus_version')}`, filters `{pool.get('filters')}`, "
-        f"pool_depth {pool.get('pool_depth')}, settings_hash `{pool.get('settings_hash')}`",
+        '- Pool: '
+        + (f"corpus_version `{pool['corpus_version']}`, filters `{pool.get('filters')}`, "
+           if pool.get('corpus_version') else '')
+        + f"pool_depth {pool.get('pool_depth')}, settings_hash `{pool.get('settings_hash')}`",
         f'- Headline relevance: grade ≥ {threshold} (success@k, mrr, precision@10, ndcg@10_binary)',
         _scope(pool),
     ]

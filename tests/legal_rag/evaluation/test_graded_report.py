@@ -147,3 +147,13 @@ def test_the_scope_line_describes_a_fan_out_when_the_pool_records_one():
     assert line == ('- Corpora per run: `ip_only` ip-v1, `fanout` criminal-v1 + ip-v1, '
                     '`oracle` each case’s own corpus; filters None.')
     assert 'not measured' not in line
+
+
+def test_the_pool_line_omits_a_corpus_version_the_pool_does_not_have():
+    pool = {'pool_depth': 10, 'settings_hash': 'abc', 'filters': None,
+            'runs_corpora': {'fanout': ['ip-v1', 'criminal-v1']}}
+    summary = summarize_runs(RUNS, {('c1', 'k1'): 2, ('c1', 'k2'): 0},
+                             {('c1', 'k1'): 'd1', ('c1', 'k2'): 'd2'})
+    line = next(line for line in render_markdown(
+        summary, judge=JUDGE, pool=pool).splitlines() if line.startswith('- Pool:'))
+    assert line == '- Pool: pool_depth 10, settings_hash `abc`'
