@@ -227,7 +227,12 @@ uv run python scripts/rerank_relevance_pool.py --pool-dir $R --output $R-1024 \
 
 `configs/local.yaml` enables it: `rerank.backend: cross_encoder`, `rerank.device: cuda`, `retrieval.sparse_weight: 0.75`.
 
-**`k_dense`, `k_sparse` and `k_fused` must be raised together.** The reranker was measured on a fused top-100 built from 100-deep legs; setting `k_fused: 100` alone leaves the legs at their default 20, so the reranker sees roughly 40 candidates and produces a different ranking. With all three at 100, live retrieval reproduces the recorded `reranked_512` top-10 in order for every case checked (20/20), and costs a median 6.7 s per query on an RTX 4060 (15.7 s for the first query, which loads the cross-encoder). Diagnostic and pool scripts raise all three through `deepen_retrieval`, which is why their runs were unaffected by this trap.
+**The leg depths and `k_fused` set two different things, and a served configuration must match the one that was measured.** `k_dense`/`k_sparse` decide which candidates fusion sees; `k_fused` decides how many the reranker scores, and therefore the cost. Two ways to get this wrong, both found by spot-checking live retrieval against a recorded run:
+
+- Raising `k_fused` alone leaves the legs at their default 20, so the reranker sees ~40 candidates instead of 100 (top-10 overlap with the recorded run: 5.25/10).
+- Lowering the legs to 50 along with `k_fused` is not the same as fusing 100-deep legs and reranking the top 50: chunks ranked 51-100 in a leg can still reach the fused top 50 (overlap 9.55/10).
+
+The served settings are legs at 100 and `k_fused: 50`, which reproduce the recorded `reranked_k50` top-10 in order for every case checked (20/20) at a median 3.5 s per query on an RTX 4060 (12 s for the first query, which loads the cross-encoder). Reranking 100 candidates instead costs 6.7 s per query and was indistinguishable in quality (Precision@10 -0.006, 95% CI [-0.019, +0.008]). Diagnostic and pool scripts raise all three depths together through `deepen_retrieval`, which is why their runs never hit either trap.
 
 ## Reading results
 
