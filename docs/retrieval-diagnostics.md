@@ -223,7 +223,13 @@ uv run python scripts/rerank_relevance_pool.py --pool-dir $R --output $R-1024 \
 
 **nDCG is comparable only within one report.** Its ideal ranking is built from the chunks judged for that case, so a round of judging can only raise the ideal, and can only lower the nDCG of a mode whose own top 10 is already fully judged — including a mode whose ranking never changed. A mode with pending pairs gains in both its own DCG and the ideal, so its nDCG may move either way. A mode's nDCG from one pool version therefore cannot be set beside its nDCG from another; only the columns printed by a single `eval_graded.py` run may be compared. Precision@k and Success@k have no such denominator: they count graded chunks in a fixed number of slots and stay comparable across pool versions, which is why the reranking result is quoted as Precision@10 and Success@5. Adding the 1024 run is the check: every metric of the four already-judged runs, nDCG included, reproduces the 512 directory's report to three decimals, because the 686 new pool rows carry no grades yet. Whenever a run is added to a directory, re-read the baselines' nDCG from the new report rather than the old one.
 
-### Reading results
+#### Serving with the reranker
+
+`configs/local.yaml` enables it: `rerank.backend: cross_encoder`, `rerank.device: cuda`, `retrieval.sparse_weight: 0.75`.
+
+**`k_dense`, `k_sparse` and `k_fused` must be raised together.** The reranker was measured on a fused top-100 built from 100-deep legs; setting `k_fused: 100` alone leaves the legs at their default 20, so the reranker sees roughly 40 candidates and produces a different ranking. With all three at 100, live retrieval reproduces the recorded `reranked_512` top-10 in order for every case checked (20/20), and costs a median 6.7 s per query on an RTX 4060 (15.7 s for the first query, which loads the cross-encoder). Diagnostic and pool scripts raise all three through `deepen_retrieval`, which is why their runs were unaffected by this trap.
+
+## Reading results
 
 Lead with nDCG@10 (gain 2^grade − 1, ideal from every judged chunk for the case) and Success@k (a chunk at or above `--threshold`, grade 2 by default, in the top k). Success@k and MRR (`mrr@20`) stop at the pool depth, since deeper ranks were never pooled; with a pool shallower than 20, Success@20 is not reported. Each is reported per chunk and per document. Pooled recall is not reported, because its denominator depends on the pool.
 
