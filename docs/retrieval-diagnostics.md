@@ -210,6 +210,19 @@ The new directory holds `runs/reranked.jsonl` beside the copied `dense.jsonl`, `
 
 A reranker reorders deeply, so it promotes far more unjudged chunks than re-weighting does: for the pilot, reranking the fused top 100 lifted 1,315 new pairs into a top 10 and left 1,313 distinct pairs pending (~5.6 h at 15.3 s/pair) against the sweep's 7, while the three baselines stayed fully judged. Reranking 200 cases x 100 candidates itself took 20.1 min on the 4060 (6.0 s per case). Pass the same judge flags here as when the pool was judged (`--think` for the pilot): the pending count is computed for that judge key, and the wrong one reports every pair as pending. **Judge them before reading any metric.** Until coverage is complete, `min_judged_coverage@10` is below 1.0, `eval_graded.py --output` refuses, and the unjudged chunks count as grade 0 — which understates exactly the run under test.
 
+`--max-length` (default 512) sets the cross-encoder's input budget, a `CrossEncoder` constructor argument, not a `predict` one. Korean legal chunks often run past 512 tokens, so at the default the model scores a truncated prefix. Doubling it to 1024 costs roughly twice the time and a little more memory: 42.2 min against 20.1 min for 200 cases x 100 candidates (12.65 s per case against 6.0), peaking at 3.4 GB of VRAM against 2.9 GB at `--batch-size` 16, which still leaves headroom on an 8 GB 4060 — lower the batch size before abandoning a longer window. It is not a cosmetic change: the 1024 run shares only 50.8% of its top-10 slots with the 512 run (1,015 of 2,000; one case in 200 keeps the same ten chunks, none the same order), so it must be judged before it can be read. Recording it beside the 512 run keeps the comparison paired: `--baseline reranked_512=reranked` copies the source run under a new name, and `--run-name reranked_1024` writes the new one next to it.
+
+```bash
+uv run python scripts/rerank_relevance_pool.py --pool-dir $R --output $R-1024 \
+  --corpus-version ip-v1 --device cuda --max-length 1024 --think \
+  --baseline dense --baseline sparse --baseline hybrid_s0.75 --baseline reranked_512=reranked \
+  --run-name reranked_1024
+```
+
+`pool.json` keeps `derived_from.runs_sha256` keyed by the source names, since it hashes source files, while `modes` and `rerank.baselines` carry the output names, `baselines` mapping each output name back to its source. Because the copied `judgments.jsonl` already covers everything the 512 run reached, the 1024 run lifted 686 new pairs into a top 10 and left 686 pending (~2.9 h at 15.3 s/pair), well under the 1,313 the first reranked run needed.
+
+**nDCG is comparable only within one report.** Its ideal ranking is built from the chunks judged for that case, so every round of judging adds chunks that can only raise the ideal and lower every mode's nDCG — including modes whose ranking never changed. A mode's nDCG from one pool version therefore cannot be set beside its nDCG from another; only the columns printed by a single `eval_graded.py` run may be compared. Precision@k and Success@k have no such denominator: they count graded chunks in a fixed number of slots and stay comparable across pool versions, which is why the reranking result is quoted as Precision@10 and Success@5. Whenever a run is added to a directory, re-read the baselines' nDCG from the new report rather than the old one.
+
 ### Reading results
 
 Lead with nDCG@10 (gain 2^grade − 1, ideal from every judged chunk for the case) and Success@k (a chunk at or above `--threshold`, grade 2 by default, in the top k). Success@k and MRR (`mrr@20`) stop at the pool depth, since deeper ranks were never pooled; with a pool shallower than 20, Success@20 is not reported. Each is reported per chunk and per document. Pooled recall is not reported, because its denominator depends on the pool.
