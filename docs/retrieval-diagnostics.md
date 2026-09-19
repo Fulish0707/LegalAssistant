@@ -234,10 +234,57 @@ uv run python scripts/rerank_relevance_pool.py --pool-dir $R --output $R-1024 \
 
 The served settings are legs at 100 and `k_fused: 50`, which reproduce the recorded `reranked_k50` top-10 in order for every case checked (20/20) at a median 3.5 s per query on an RTX 4060 (12 s for the first query, which loads the cross-encoder). Reranking 100 candidates instead costs 6.7 s per query and was indistinguishable in quality (Precision@10 -0.006, 95% CI [-0.019, +0.008]). Diagnostic and pool scripts raise all three depths together through `deepen_retrieval`, which is why their runs never hit either trap.
 
+### Multi-corpus fan-out
+
+Every graded result above was retrieved under `legal_domain=intellectual_property`, and each corpus is single-domain — all 166,519 ip-v1 chunks are labelled `intellectual_property`, as criminal-v1, civil-v1 and administrative-v1 are labelled with theirs — so that filter left only the ip-v1 legs answering. The served configuration fans out instead (`retrieval.corpora: [criminal-v1, civil-v1, administrative-v1, ip-v1]`, no filter), which none of those results measured. Two questions:
+
+- **Cost.** On IP questions, does fanning out to four corpora dilute the ranking against querying ip-v1 alone?
+- **Benefit.** On questions from the other domains, does unfiltered fan-out find the right corpus, against oracle routing that queries only that question's own corpus?
+
+Two targets, two pool directories, all runs at the served settings with the reranker inside each retrieval (legs 100, `k_fused` 50, `sparse_weight` 0.75, cross-encoder on cuda at `max_length` 512, depth 50 recorded, top 10 pooled):
+
+- `data/eval/relevance/ip-200-fanout/` reuses the 200-case IP target and holds `ip_only` (ip-v1 alone, unfiltered), `fanout` (all four) and `filtered_ip_only`, the recorded `reranked_k50` run adopted from `ip-v1-pilot-200-rerank-k50` so the filtered ranking sits in the same report.
+- `data/eval/relevance/crossdomain-60-fanout/` holds 20 criminal, 20 civil and 20 administrative cases with `oracle_corpus` (each case's own corpus) and `fanout`.
+
+```bash
+# 20 cases per domain, drawn under a seed from rows whose gold document has chunks.
+uv run python scripts/build_crossdomain_target.py --profile local --seed 42 --per-domain 20 \
+  --domain criminal=criminal-v1 --domain civil=civil-v1 --domain administrative=administrative-v1 \
+  --qa-root ~/Documents/legal-rag/data/processed --output data/eval/targets/crossdomain-60
+
+# Retrieve every run in one pass; --adopt records a run retrieved elsewhere over the same cases.
+uv run python scripts/build_fanout_pool.py --profile local --think \
+  --qa-root ~/Documents/legal-rag/data/processed \
+  --case-source intellectual_property=ip-v1=<the IP target.jsonl> \
+  --run ip_only=ip-v1 --run fanout=criminal-v1,civil-v1,administrative-v1,ip-v1 \
+  --adopt filtered_ip_only=data/eval/relevance/ip-v1-pilot-200-rerank-k50=reranked_k50 \
+  --copy-judgments data/eval/relevance/ip-v1-pilot-200-rerank-k50 --copy-calibration \
+  --output data/eval/relevance/ip-200-fanout
+```
+
+`build_fanout_pool.py` retrieves unfiltered by default (`--domain-filter` restores the old behaviour), and a run may span any corpora or, with `own`, each case's own one; per-corpus retrievers share a single embedder and a single cross-encoder, since four copies of the reranker do not fit on the 4060. `--adopt` also copies the pool rows the adopted run needs: `restrict_to_pool` drops judgments for unpooled pairs, which would score that run's own hits as irrelevant.
+
+The IP set retrieved in 30.6 min (4.58 s per query over 600 queries, 4,145 pairs pooled). `ip_only` reproduces `filtered_ip_only` **exactly** — identical top-10 and top-50 chunk ids, in order, for all 200 cases — so the domain filter is a no-op on a single-domain corpus, every one of its top-10 pairs was already judged, and its Precision@10 is 0.824, the recorded number to three decimals. That is the check that the pipeline still retrieves what it used to; a gap there would have meant something other than the filter had changed.
+
+`fanout` shares only 1.5 of its 10 top slots with `ip_only` (4.6 of 50), and just 31.8% of its top-10 slots hold ip-v1 chunks against 50.1% administrative-v1. **Its graded numbers cannot be read yet, and not merely because they are provisional: 1,460 of its 2,000 top-10 pairs are unjudged, and unjudged counts as grade 0, so the metric penalises exactly the run that surfaced new chunks.** Judging them costs about 6.2 h at 15.3 s per pair.
+
+`summarize_fanout_runs.py` answers both questions without a judge, from the recorded runs alone: gold-document Success@k and MRR, and the share of each run's top-10 slots per corpus (attributed by document id against the processed corpora, since document ids carry no corpus prefix).
+
+```bash
+uv run python scripts/summarize_fanout_runs.py --pool-dir data/eval/relevance/ip-200-fanout \
+  --profile local --corpus ip-v1 --corpus criminal-v1 --corpus civil-v1 --corpus administrative-v1
+```
+
+The cross-domain set retrieved in 10.0 min (4.99 s per query, 1,146 pairs pooled, 897 pending, ~3.8 h to judge). There the gold document does discriminate, because the question is which corpus answers. Unfiltered fan-out keeps most of its top 10 inside the question's own corpus — 0.725 of slots for administrative, 0.625 for civil, 0.490 for criminal — and finds the gold document in the top 10 for 0.533 of cases against oracle routing's 0.633 (MRR@10 0.394 against 0.455). The loss is uneven: administrative is unchanged at 0.850, criminal falls from 0.800 to 0.650, civil from 0.250 to 0.100. Civil is low even under oracle routing because its drawn golds are judgments and hundreds of decisions answer the same general question — the weak-gold effect again, spot-checked by hand on five cases, not a routing failure. Fan-out overlaps oracle routing on 5.05 of 10 top slots. Across both sets administrative-v1 takes more than its share of fan-out slots — 0.427 of the cross-domain top 10 against the 0.333 an even split would give, and 0.501 of the IP top 10 — which is the first thing to look at if fan-out proves to cost quality once judged.
+
+On the IP set, read the corpus mix and not the gold-document row: that row is 0.020 Success@10 even for the filtered run whose judged Precision@10 is 0.824, the same weakness of exact-gold labels the graded evaluation was built to replace (the diagnostic report's own recall@10 is 0.025). It discriminates only where a case's corpus is the question, which is the cross-domain set. **Judging before conclusions.** Until `min_judged_coverage@10` is 1.0 for every run in the report, the graded tables rank the judged runs above the unjudged one by construction, `eval_graded.py --output` refuses to write, and no conclusion about fan-out may be drawn from them. The cross-domain directory has no applicable judgments at all: its pairs come from corpora the IP pilot never touched, so the copied `judgments.jsonl` covers none of them.
+
+The cross-domain directory deliberately has **no** `calibration.csv`/`calibration.json`. The guard in `judge_relevance.py` only checks that every pair in `calibration.json` has a `codex_grade`, never that those pairs belong to this pool, so copying the IP calibration would pass vacuously while recording a fingerprint that describes IP labels. Judge it with `--skip-calibration-check` — which also suppresses the `judge_runs.jsonl` provenance line — or draw and label its own calibration sample first, which is the sound option.
+
 ## Reading results
 
 Lead with nDCG@10 (gain 2^grade − 1, ideal from every judged chunk for the case) and Success@k (a chunk at or above `--threshold`, grade 2 by default, in the top k). Success@k and MRR (`mrr@20`) stop at the pool depth, since deeper ranks were never pooled; with a pool shallower than 20, Success@20 is not reported. Each is reported per chunk and per document. Pooled recall is not reported, because its denominator depends on the pool.
 
 `min_judged_coverage@10` and `min_judged_coverage@20` must be 1.0 at chunk level for a comparison to be valid; `eval_graded.py --output` refuses otherwise. A new retrieval configuration, such as a reranker, surfaces chunks nobody judged. Two such extensions are scripted, both reusing a pool's recorded runs: `sweep_fusion_weights.py`, for re-weighted RRF under a single-corpus filter, and `rerank_relevance_pool.py`, for a cross-encoder reranking a recorded fused run (see above). For anything that needs real retrieval, build a new pool directory with `build_relevance_pool.py` (same target, including the new mode), copy `judgments.jsonl` into it, and run `judge_relevance.py` there: judgments are keyed by (model, prompt hash, case, chunk), not by pool directory, so pairs already judged are skipped and only the new ones are sent to the judge. `--pool-file` only selects which pairs to judge; it must come from the same target as the pool directory. Parse failures are stored as `grade: null`. They count as judged for coverage, so they never block a comparison, but take gain 0, stay out of the ideal ranking, and are reported as `failed@10` per case and `failed_top10_total` per mode. `judge_relevance.py --retry-failed` judges them again and appends a new row, which replaces the failure.
 
-Scope: this pilot is ip-v1 with the `legal_domain=intellectual_property` filter, under which the other corpora's legs return nothing, so multi-corpus fan-out is not measured.
+Scope: the judged pilot is ip-v1 with the `legal_domain=intellectual_property` filter, under which the other corpora's legs return nothing. The served multi-corpus fan-out is now retrieved and pooled (see "Multi-corpus fan-out"), but not yet judged, so no graded conclusion about it stands.
