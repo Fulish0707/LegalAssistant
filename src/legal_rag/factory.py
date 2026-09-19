@@ -109,13 +109,17 @@ def check_index_compatibility(settings: Settings, *, embedder_name: str | None =
     return metadata
 
 
-def build_hybrid_retriever(settings: Settings, *, embedder: Embedder | None = None) -> HybridRetriever:
+def build_hybrid_retriever(
+    settings: Settings, *, embedder: Embedder | None = None, reranker: Reranker | None = None
+) -> HybridRetriever:
+    """Supply an ``embedder`` or ``reranker`` to share one instance across several retrievers;
+    a cross-encoder is a GPU-resident model and one copy per corpus would not fit."""
     embedder = embedder or build_embedder(settings)
     legs = build_corpus_legs(settings, embedder=embedder)
     return HybridRetriever(
         legs,
         RRFFuser(rrf_k=settings.retrieval.rrf_k, weights=fusion_weights(settings)),
-        build_reranker(settings),
+        reranker or build_reranker(settings),
         k_leg=max(settings.retrieval.k_dense, settings.retrieval.k_sparse),
         k_fused=settings.retrieval.k_fused,
     )
