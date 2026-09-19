@@ -34,6 +34,18 @@ def _cell(row: str, value) -> str:
     return str(value) if row in COUNT_ROWS else f'{value:.3f}'
 
 
+def _scope(pool: dict) -> str:
+    """What the runs were retrieved over: one filtered corpus, or a corpus fan-out per run."""
+    corpora = pool.get('runs_corpora')
+    if not corpora:
+        return (f"- Scoped to {pool.get('corpus_version')} with filter {pool.get('filters')}; "
+                'multi-corpus fan-out is not measured.')
+    described = ', '.join(
+        f"`{name}` {'each case’s own corpus' if spec == 'own' else ' + '.join(spec)}"
+        for name, spec in corpora.items())
+    return f"- Corpora per run: {described}; filters {pool.get('filters')}."
+
+
 def render_markdown(summary: dict, *, judge: dict, pool: dict, threshold: int = 2) -> str:
     """``summary`` is ``{mode: {level: metrics}}``; ``judge`` has model, prompt_sha256, failed_parses;
     ``pool`` is pool.json; ``threshold`` is the grade the summary counted as relevant. At threshold 1
@@ -47,8 +59,7 @@ def render_markdown(summary: dict, *, judge: dict, pool: dict, threshold: int = 
         f"- Pool: corpus_version `{pool.get('corpus_version')}`, filters `{pool.get('filters')}`, "
         f"pool_depth {pool.get('pool_depth')}, settings_hash `{pool.get('settings_hash')}`",
         f'- Headline relevance: grade ≥ {threshold} (success@k, mrr, precision@10, ndcg@10_binary)',
-        f"- Scoped to {pool.get('corpus_version')} with filter {pool.get('filters')}; "
-        'multi-corpus fan-out is not measured.',
+        _scope(pool),
     ]
 
     def table(level: str, rows: list[str]) -> list[str]:
