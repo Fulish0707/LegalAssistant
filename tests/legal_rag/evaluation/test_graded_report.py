@@ -135,3 +135,15 @@ def test_eval_graded_script_threshold_is_recorded_in_every_output(tmp_path):
     default = CliRunner().invoke(script.app, ['--pool-dir', str(pool_dir), '--think'])
     assert default.exit_code == 0 and 'Headline relevance: grade ≥ 2' in default.output
     assert CliRunner().invoke(script.app, ['--pool-dir', str(pool_dir), '--threshold', '3']).exit_code != 0
+
+
+def test_the_scope_line_describes_a_fan_out_when_the_pool_records_one():
+    from legal_rag.evaluation.graded_report import _scope
+    assert _scope({'corpus_version': 'ip-v1', 'filters': {'legal_domain': 'intellectual_property'}}) == (
+        "- Scoped to ip-v1 with filter {'legal_domain': 'intellectual_property'}; "
+        'multi-corpus fan-out is not measured.')
+    line = _scope({'filters': None, 'runs_corpora': {'ip_only': ['ip-v1'],
+                                                     'fanout': ['criminal-v1', 'ip-v1'], 'oracle': 'own'}})
+    assert line == ('- Corpora per run: `ip_only` ip-v1, `fanout` criminal-v1 + ip-v1, '
+                    '`oracle` each case’s own corpus; filters None.')
+    assert 'not measured' not in line

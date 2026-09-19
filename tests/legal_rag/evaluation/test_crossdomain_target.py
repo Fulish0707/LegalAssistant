@@ -68,7 +68,7 @@ def _script(name):
     return module
 
 
-@pytest.mark.parametrize('name', ['build_crossdomain_target', 'build_fanout_pool'])
+@pytest.mark.parametrize('name', ['build_crossdomain_target', 'build_fanout_pool', 'summarize_fanout_runs'])
 def test_script_help_exits_zero(name):
     from typer.testing import CliRunner
     assert CliRunner().invoke(_script(name).app, ['--help']).exit_code == 0
