@@ -161,3 +161,23 @@ def test_a_narrowed_retriever_reports_which_leg_it_is(tmp_path):
     retriever = build_hybrid_retriever(settings(tmp_path, "alpha"))
     assert select_legs(retriever, "sparse").name == "sparse"
     assert select_legs(retriever, "hybrid").name == "hybrid"
+
+
+def test_a_supplied_reranker_and_embedder_are_shared_rather_than_rebuilt(tmp_path):
+    # One reranker per corpus would put several copies of a cross-encoder on the same GPU.
+    from legal_rag.factory import build_embedder, build_hybrid_retriever, close_legs
+    from legal_rag.reranking import NoopReranker
+    make_corpus(tmp_path, "alpha", ["특허"])
+    make_corpus(tmp_path, "beta", ["절도"])
+    cfg = settings(tmp_path, "alpha")
+    shared, embedder = NoopReranker(), build_embedder(cfg)
+    first = build_hybrid_retriever(cfg, embedder=embedder, reranker=shared)
+    second = build_hybrid_retriever(settings(tmp_path, "beta"), embedder=embedder, reranker=shared)
+    assert first.reranker is shared and second.reranker is shared
+    # Closing one retriever's stores leaves the shared reranker usable by the other.
+    close_legs(first)
+    assert second.reranker is shared
+    close_legs(second)
+    unshared = build_hybrid_retriever(cfg)
+    assert unshared.reranker is not shared
+    close_legs(unshared)

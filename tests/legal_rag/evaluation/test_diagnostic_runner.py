@@ -128,3 +128,38 @@ def test_mixed_domain_dataset_is_filtered(tmp_path):
     dataset = jsonl(tmp_path/'eval.jsonl', [dict(query='Q', relevant_document_ids=['A', 'B'])])
     rows, _, _ = load_diagnostic_rows(source, domain='civil', dataset=dataset)
     assert [row['document_id'] for row in rows] == ['A']
+
+
+def _mini_corpus(directory, chunks):
+    from legal_rag.ingestion.corpus import Corpus
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / 'documents.jsonl').write_text('', encoding='utf-8')
+    (directory / 'chunks.jsonl').write_text(
+        ''.join(chunk.model_dump_json() + '\n' for chunk in chunks), encoding='utf-8')
+    return Corpus.load(directory)
+
+
+def _mini_chunk(chunk_id, document_id, text='본문'):
+    from legal_rag.schemas import Chunk, ChunkMetadata, DocumentType
+    return Chunk(id=chunk_id, document_id=document_id, document_type=DocumentType.statute, path='p',
+                 order=0, text=text, title='제목',
+                 metadata=ChunkMetadata(dataset='d', corpus_version='v'))
+
+
+def test_gold_chunks_are_found_in_whichever_corpus_holds_the_document(tmp_path):
+    from legal_rag.evaluation.diagnostic_runner import gold_chunks_across_corpora
+    corpora = {'criminal-v1': _mini_corpus(tmp_path / 'c', [_mini_chunk('c#0', 'crime', '형사 본문'),
+                                                            _mini_chunk('c#1', 'other')]),
+               'civil-v1': _mini_corpus(tmp_path / 'v', [_mini_chunk('v#0', 'civil', '민사 본문')])}
+    found = gold_chunks_across_corpora(corpora, {'crime', 'civil'}, max_gold_chunks=10, preview_chars=10 ** 9)
+    assert sorted(found) == ['civil', 'crime']
+    assert [chunk.text for chunk in found['crime']] == ['형사 본문']
+    assert [chunk.text for chunk in found['civil']] == ['민사 본문']
+
+
+def test_a_gold_document_in_two_corpora_is_refused(tmp_path):
+    from legal_rag.evaluation.diagnostic_runner import gold_chunks_across_corpora
+    corpora = {'a-v1': _mini_corpus(tmp_path / 'a', [_mini_chunk('a#0', 'shared')]),
+               'b-v1': _mini_corpus(tmp_path / 'b', [_mini_chunk('b#0', 'shared')])}
+    with pytest.raises(ValueError, match='ambiguous'):
+        gold_chunks_across_corpora(corpora, {'shared'}, max_gold_chunks=10, preview_chars=100)

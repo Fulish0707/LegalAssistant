@@ -4,7 +4,7 @@ import pytest
 
 from legal_rag.config import Settings
 from legal_rag.evaluation.diagnostic_runner import deepen_retrieval
-from legal_rag.evaluation.relevance_pool import build_pool, read_jsonl, write_pool
+from legal_rag.evaluation.relevance_pool import build_pool, no_filters, read_jsonl, write_pool
 from legal_rag.schemas import Chunk, ChunkMetadata, DocumentType, ScoredChunk
 
 
@@ -53,10 +53,28 @@ def test_retrieved_gold_chunk_keeps_its_ranks():
 
 
 def test_retrieval_uses_run_depth_and_the_domain_filter():
+    # The default stays the filtered single-mode retrieval that earlier pools were built with.
     dense = ListRetriever(['a#0'])
     build_pool(CASES, {'dense': dense}, gold_chunks={}, pool_depth=1, run_depth=100)
     query, k, filters = dense.calls[0]
     assert (query, k, filters.legal_domain) == ('질문', 100, 'intellectual_property')
+
+
+def test_unfiltered_retrieval_passes_no_filters():
+    dense = ListRetriever(['a#0'])
+    build_pool(CASES, {'dense': dense}, gold_chunks={}, pool_depth=1, run_depth=10, case_filters=no_filters)
+    assert dense.calls[0][2] is None
+
+
+def test_a_mode_may_route_to_a_retriever_chosen_per_case():
+    cases = [dict(CASES[0], case_id='c1', legal_domain='criminal'),
+             dict(CASES[0], case_id='c2', legal_domain='civil')]
+    by_domain = {'criminal': ListRetriever(['a#0']), 'civil': ListRetriever(['b#0'])}
+    pool, runs = build_pool(cases, {'oracle': lambda case: by_domain[case['legal_domain']]},
+                            gold_chunks={}, pool_depth=1, run_depth=1, case_filters=no_filters)
+    assert [row['chunk_id'] for row in pool] == ['a#0', 'b#0']
+    assert [len(retriever.calls) for retriever in by_domain.values()] == [1, 1]
+    assert [row['case_id'] for row in runs['oracle']] == ['c1', 'c2']
 
 
 def test_pool_depth_cannot_exceed_run_depth():
@@ -191,3 +209,35 @@ def test_derive_script_writes_pool_and_refuses_existing_output(tmp_path):
     assert json.loads((tmp_path / 'out' / 'pool.json').read_text(encoding='utf-8'))['pairs'] == 4
     assert CliRunner().invoke(script.app, args).exit_code == 1
     assert CliRunner().invoke(script.app, ['--help']).exit_code == 0
+
+
+def _adopt_fixture():
+    from legal_rag.evaluation.relevance_pool import adopt_run
+    pool, runs = build_pool(CASES, {'fanout': ListRetriever(['a#0', 'b#0'])}, gold_chunks={},
+                            pool_depth=2, run_depth=2, case_filters=no_filters)
+    source_pool = [dict(row, ranks={'old': 1}) for row in
+                   build_pool(CASES, {'old': ListRetriever(['b#0', 'z#0'])}, gold_chunks={},
+                              pool_depth=2, run_depth=2)[0]]
+    copied = [{'case_id': 'c1', 'ranked': [{'chunk_id': 'z#0', 'document_id': 'z'},
+                                           {'chunk_id': 'a#0', 'document_id': 'a'}]}]
+    return adopt_run, pool, runs, source_pool, copied
+
+
+def test_adopt_run_brings_in_the_pool_rows_the_copied_run_needs():
+    adopt_run, pool, runs, source_pool, copied = _adopt_fixture()
+    merged, runs = adopt_run(pool, runs, 'filtered', copied, source_pool, pool_depth=2)
+    rows = {row['chunk_id']: row for row in merged}
+    assert set(rows) == {'a#0', 'b#0', 'z#0'}
+    assert rows['z#0']['ranks'] == {'filtered': 1} and rows['a#0']['ranks'] == {'fanout': 1, 'filtered': 2}
+    assert rows['b#0']['ranks'] == {'fanout': 2}
+    assert set(runs) == {'fanout', 'filtered'} and runs['filtered'] == copied
+    assert [row['ranks'] for row in pool] == [{'fanout': 1}, {'fanout': 2}]      # inputs untouched
+
+
+def test_adopt_run_refuses_a_pair_no_pool_can_describe():
+    adopt_run, pool, runs, source_pool, copied = _adopt_fixture()
+    with pytest.raises(ValueError, match='neither pool'):
+        adopt_run(pool, runs, 'filtered', [{'case_id': 'c1', 'ranked': [
+            {'chunk_id': 'unknown#0', 'document_id': 'unknown'}]}], source_pool, pool_depth=2)
+    with pytest.raises(ValueError, match='already recorded'):
+        adopt_run(pool, runs, 'fanout', copied, source_pool, pool_depth=2)

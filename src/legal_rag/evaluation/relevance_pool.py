@@ -27,16 +27,39 @@ def _pair(case: dict, chunk: Chunk) -> dict:
                 ranks={}, is_gold_chunk=chunk.document_id == case['document_id'])
 
 
-def build_pool(cases: list[dict], retrievers: dict[str, Retriever], *, gold_chunks: dict[str, list[Chunk]],
-               pool_depth: int, run_depth: int, progress: Callable[[str], None] | None = None,
+def domain_filters(case: dict) -> RetrievalFilters:
+    """The default: each case is retrieved inside its own legal domain."""
+    return RetrievalFilters(legal_domain=case['legal_domain'])
+
+
+def no_filters(case: dict) -> None:
+    """Unfiltered retrieval, as a multi-corpus fan-out is served."""
+    return None
+
+
+def _retriever_for(mode: Retriever | Callable[[dict], Retriever], case: dict) -> Retriever:
+    return mode if hasattr(mode, 'retrieve') else mode(case)
+
+
+def build_pool(cases: list[dict], retrievers: dict[str, Retriever | Callable[[dict], Retriever]], *,
+               gold_chunks: dict[str, list[Chunk]], pool_depth: int, run_depth: int,
+               progress: Callable[[str], None] | None = None,
+               case_filters: Callable[[dict], RetrievalFilters | None] = domain_filters,
                ) -> tuple[list[dict], dict[str, list[dict]]]:
+    """Retrieve every case in every mode, pooling the top ``pool_depth`` of each for judging.
+
+    A mode's value is a retriever, or a callable returning the retriever for a case, which is how
+    a run can query only that case's own corpus. ``case_filters`` returns the filters a case is
+    retrieved under, or None for unfiltered retrieval.
+    """
     if not 1 <= pool_depth <= run_depth:
         raise ValueError('require 1 <= pool_depth <= run_depth')
     pool: dict[tuple[str, str], dict] = {}
     runs: dict[str, list[dict]] = {mode: [] for mode in retrievers}
     for index, case in enumerate(cases, 1):
-        filters = RetrievalFilters(legal_domain=case['legal_domain'])
-        for mode, retriever in retrievers.items():
+        filters = case_filters(case)
+        for mode, chosen in retrievers.items():
+            retriever = _retriever_for(chosen, case)
             hits = retriever.retrieve(case['question'], run_depth, filters)[:run_depth]
             runs[mode].append({'case_id': case['case_id'], 'ranked': [
                 {'chunk_id': hit.chunk.id, 'document_id': hit.chunk.document_id} for hit in hits]})
@@ -49,6 +72,37 @@ def build_pool(cases: list[dict], retrievers: dict[str, Retriever], *, gold_chun
         if progress and (index % 10 == 0 or index == len(cases)):
             progress(f'Pooled {index}/{len(cases)} cases; {len(pool)} pairs')
     return list(pool.values()), runs
+
+
+def adopt_run(pool: list[dict], runs: dict[str, list[dict]], name: str, rows: list[dict],
+              source_pool: list[dict], *, pool_depth: int) -> tuple[list[dict], dict[str, list[dict]]]:
+    """Add a run recorded elsewhere over the same cases, with the pool rows it needs.
+
+    A copied run only measures correctly when every pair it ranks within ``pool_depth`` has a pool
+    row: ``graded_metrics.restrict_to_pool`` drops judgments for unpooled pairs, which would score
+    the copied run's hits as grade 0. Rows missing from ``pool`` are taken from ``source_pool``
+    (the pool directory the run was copied from); a pair in neither raises. Inputs are not mutated.
+    """
+    if name in runs:
+        raise ValueError(f'run {name!r} is already recorded')
+    merged = [dict(row, ranks=dict(row['ranks'])) for row in pool]
+    by_pair = {(row['case_id'], row['chunk_id']): row for row in merged}
+    source = {(row['case_id'], row['chunk_id']): row for row in source_pool}
+    added: list[dict] = []
+    for row in rows:
+        for rank, hit in enumerate(row['ranked'][:pool_depth], 1):
+            pair = (row['case_id'], hit['chunk_id'])
+            adopted = by_pair.get(pair)
+            if adopted is None:
+                origin = source.get(pair)
+                if origin is None:
+                    raise ValueError(f'{pair} is ranked by {name!r} but is in neither pool; its judgment '
+                                     'would be dropped and the hit scored as irrelevant')
+                adopted = dict(origin, ranks={})
+                by_pair[pair] = adopted
+                added.append(adopted)
+            adopted['ranks'][name] = rank
+    return merged + added, {**runs, name: rows}
 
 
 def write_pool(output: Path, pool: list[dict], runs: dict[str, list[dict]], provenance: dict) -> Path:

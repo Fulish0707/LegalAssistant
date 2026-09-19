@@ -145,6 +145,27 @@ def _gold_chunk_index(corpus: Corpus, document_ids: set[str], *, max_gold_chunks
     return previews, counts
 
 
+def gold_chunks_across_corpora(corpora: dict[str, Corpus], document_ids: set[str], *,
+                               max_gold_chunks: int, preview_chars: int) -> dict[str, list]:
+    """Gold chunks for documents that may live in any of several processed corpora.
+
+    A fan-out target draws its cases from more than one corpus, so no single corpus holds every
+    gold document. A document found in two corpora is an ambiguous gold and raises.
+    """
+    found: dict[str, list] = {}
+    owner: dict[str, str] = {}
+    for version, corpus in corpora.items():
+        previews, _ = _gold_chunk_index(corpus, document_ids, max_gold_chunks=max_gold_chunks,
+                                        preview_chars=preview_chars)
+        for document_id, chunks in previews.items():
+            if document_id in owner:
+                raise ValueError(f'gold document {document_id} has chunks in both {owner[document_id]} '
+                                 f'and {version}; the corpora overlap and the gold is ambiguous')
+            owner[document_id] = version
+            found[document_id] = chunks
+    return found
+
+
 def deepen_retrieval(settings: Settings, deep_k: int) -> Settings:
     """Raise candidate depths on a copy; fusion weights, models and reranker are unchanged."""
     return settings.model_copy(update={'retrieval': settings.retrieval.model_copy(update={
