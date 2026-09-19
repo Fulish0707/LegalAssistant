@@ -45,6 +45,21 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def _baseline_map(entries: list[str]) -> dict[str, str]:
+    """``name``, or ``output=source`` to copy a source run under a different name.
+
+    Renaming keeps a comparison paired when two directories record the same run name for
+    different settings, e.g. ``reranked_512=reranked`` beside a fresh ``reranked_1024``.
+    """
+    mapping: dict[str, str] = {}
+    for entry in entries:
+        output_name, _, source_name = entry.partition('=')
+        if not output_name or (_ and not source_name):
+            raise typer.BadParameter(f'--baseline {entry!r}: expected NAME or OUTPUT=SOURCE')
+        mapping[output_name] = source_name or output_name
+    return mapping
+
+
 def _needed_chunks(settings, chunk_ids: set[str]) -> dict:
     """Stream the processed corpus once, keeping the chunks the reranker and the pool need."""
     found = {}
@@ -66,7 +81,8 @@ def main(
     output: Path = typer.Option(..., help='New directory; must not exist.'),
     fused_run: str = typer.Option('hybrid_s0.75', help='Run whose candidates the reranker sees.'),
     baseline: list[str] = typer.Option(['dense', 'sparse', 'hybrid_s0.75'], '--baseline',
-                                       help='Repeatable; runs copied from the source pool for comparison.'),
+                                       help='Repeatable; runs copied from the source pool for comparison. '
+                                            'NAME, or OUTPUT=SOURCE to copy a source run under another name.'),
     run_name: str = typer.Option('reranked', help='Name of the recorded reranked run.'),
     depth: int = typer.Option(10, min=1, help='Pool depth of the new directory.'),
     run_depth: int = typer.Option(100, min=1, help='Candidates reranked per case, and the recorded depth.'),
@@ -90,8 +106,11 @@ def main(
     if depth > source_depth:
         raise typer.BadParameter(f'depth {depth} > source pool_depth {source_depth}: the source pool holds no '
                                  'rows for deeper ranks and its judgments would not cover them')
+    baselines = _baseline_map(baseline)
+    if run_name in baselines:
+        raise typer.BadParameter(f'--run-name {run_name} collides with a baseline; the reranked run would hide it')
     source_runs = {name: read_jsonl(pool_dir / 'runs' / f'{name}.jsonl')
-                   for name in dict.fromkeys([fused_run, *baseline])}
+                   for name in dict.fromkeys([fused_run, *baselines.values()])}
     fused_rows = source_runs[fused_run]
 
     source_rows = read_jsonl(pool_dir / 'pool.jsonl')
@@ -104,7 +123,7 @@ def main(
                                     max_length=max_length)
     _progress(f'reranking {len(fused_rows)} cases x {run_depth} candidates with {rerank_model} on {device}')
     started = time.perf_counter()
-    runs = {**{name: rows for name, rows in source_runs.items() if name in baseline},
+    runs = {**{output_name: source_runs[source_name] for output_name, source_name in baselines.items()},
             run_name: rerank_run(fused_rows, chunks, reranker, questions, depth=run_depth, progress=_progress)}
     elapsed = time.perf_counter() - started
     _progress(f'reranked in {elapsed / 60:.1f} min ({elapsed / max(len(fused_rows), 1):.2f} s/case)')
@@ -142,7 +161,7 @@ def main(
         'reranker': 'cross_encoder',
         # settings_hash stays the source pool's: it names the settings that retrieved the runs.
         'rerank': {'model': rerank_model, 'device': device, 'batch_size': batch_size, 'max_length': max_length,
-                   'fused_run': fused_run, 'run_name': run_name, 'baselines': list(baseline),
+                   'fused_run': fused_run, 'run_name': run_name, 'baselines': baselines,
                    'seconds': round(elapsed, 1), 'settings_hash': settings.hash()},
         'derived_from': {'pool_dir': str(pool_dir), 'pool_jsonl_sha256': _sha256(pool_dir / 'pool.jsonl'),
                          'pool_depth': source_depth,
