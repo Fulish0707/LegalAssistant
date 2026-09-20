@@ -23,10 +23,11 @@ def main(
     root: Path = typer.Option(None),
     corpus_version: str = typer.Option(None),
     embedding_backend: str = typer.Option(None, help="ollama | fake"),
+    on_disk: bool = typer.Option(False, help="Memory-map vectors and the HNSW graph; for a corpus larger than the server's RAM."),
 ) -> None:
     extra = {"embedding": {"backend": embedding_backend}} if embedding_backend else None
     settings = settings_from_options(profile=profile, root=root, corpus_version=corpus_version, extra=extra)
-    report = build_index(settings, progress=lambda done, total: typer.echo(f"  indexed {done}/{total}", err=True))
+    report = build_index(settings, on_disk=on_disk, progress=lambda done, total: typer.echo(f"  indexed {done}/{total}", err=True))
     typer.echo(f"chunks={report.chunks} collection={report.collection} dimension={report.dimension} index_dir={report.index_dir}")
 
 
