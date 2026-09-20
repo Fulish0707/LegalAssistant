@@ -32,7 +32,8 @@ def batched(items: Iterable[T], size: int) -> Iterable[list[T]]:
         yield batch
 
 
-def build_index(settings: Settings, *, embedder: Embedder | None = None, progress: Callable[[int, int], None] | None = None) -> IndexReport:
+def build_index(settings: Settings, *, embedder: Embedder | None = None, on_disk: bool = False,
+                progress: Callable[[int, int], None] | None = None) -> IndexReport:
     corpus = Corpus.load(settings.processed_corpus_dir())
     embedder = embedder or build_embedder(settings)
     tokenizer = build_tokenizer_from_settings(settings)
@@ -48,7 +49,7 @@ def build_index(settings: Settings, *, embedder: Embedder | None = None, progres
     store = open_store(settings, embedder)
     done = 0
     try:
-        store.recreate()
+        store.recreate(on_disk=on_disk)
         for batch in batched(corpus.chunks(), max(1, settings.embedding.batch_size * 4)):
             dense = embedder.embed_documents([chunk.text for chunk in batch])
             sparse = [stats.document_vector(tokenizer.tokenize(chunk.text)) for chunk in batch]
@@ -68,6 +69,7 @@ def build_index(settings: Settings, *, embedder: Embedder | None = None, progres
         "corpus_version": settings.corpus.version,
         "config_hash": settings.hash(),
         "qdrant_mode": settings.qdrant.mode,
+        "on_disk": on_disk,
     }
     index_metadata_path(settings).write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     return IndexReport(done, metadata["collection"], embedder.dimension, index_dir)

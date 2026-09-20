@@ -77,3 +77,32 @@ def test_open_store_passes_the_configured_timeout():
         {"qdrant": {"mode": "server", "url": "http://localhost:6333", "timeout_seconds": 77.0}}
     )
     assert open_store(settings, FakeEmbedder(dimension=8)).client._client._timeout == 77.0
+
+
+class _RecordingClient:
+    """Captures create_collection kwargs; the embedded backend does not echo hnsw_config."""
+
+    def __init__(self):
+        self.kwargs = {}
+
+    def collection_exists(self, name):
+        return False
+
+    def create_collection(self, name, **kwargs):
+        self.kwargs = kwargs
+
+
+def test_recreate_can_keep_vectors_and_the_graph_on_disk():
+    """716k 1024-dim vectors do not fit in this host's Qdrant container alongside the
+    existing corpora; memory-mapped storage is what makes the build possible at all."""
+    store = VectorStore(_RecordingClient(), "c", 8)
+    store.recreate(on_disk=True)
+    assert store.client.kwargs["vectors_config"][VectorStore.DENSE].on_disk is True
+    assert store.client.kwargs["hnsw_config"].on_disk is True
+
+
+def test_recreate_keeps_vectors_in_memory_by_default(tmp_path):
+    store = VectorStore.embedded(tmp_path / "q2", collection="c", dimension=8)
+    store.recreate()
+    config = store.client.get_collection("c").config
+    assert not config.params.vectors[VectorStore.DENSE].on_disk

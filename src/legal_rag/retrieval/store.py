@@ -49,13 +49,18 @@ class VectorStore:
     def exists(self) -> bool:
         return self.client.collection_exists(self.collection)
 
-    def recreate(self) -> None:
+    def recreate(self, *, on_disk: bool = False) -> None:
+        """``on_disk`` memory-maps the vectors and the HNSW graph instead of holding them
+        in RAM: slower to query, but the only way a corpus larger than the server's memory
+        can be indexed at all."""
         if self.exists():
             self.client.delete_collection(self.collection)
         self.client.create_collection(
             self.collection,
-            vectors_config={self.DENSE: models.VectorParams(size=self.dimension, distance=models.Distance.COSINE)},
+            vectors_config={self.DENSE: models.VectorParams(size=self.dimension, distance=models.Distance.COSINE,
+                                                            on_disk=on_disk or None)},
             sparse_vectors_config={self.SPARSE: models.SparseVectorParams()},
+            hnsw_config=models.HnswConfigDiff(on_disk=True) if on_disk else None,
         )
         if self._server:  # payload indexes are a no-op in embedded mode
             for key in ("document_type", "metadata.law_name", "metadata.court", "metadata.legal_domain"):
