@@ -57,7 +57,8 @@ class TestHeaderLine:
         doc = _document(DECISION_TEXT, "patent_trial_decision", id="2011101003196", title="게시 시스템")
         chunks, _ = chunk_imported_document(doc, "ip-v2", OPTS)
         headers = [c.text.split("\n")[0] for c in chunks]
-        assert any("1. 기초사실 > 나. 청구범위" in h for h in headers)
+        assert any("1. 기초사실 > 가–나" in h for h in headers)
+        assert any(h.endswith("2. 판단") for h in headers)
         assert any(" · " in h for h in headers)
 
 
@@ -72,7 +73,7 @@ class TestSizing:
         chunks, _ = chunk_imported_document(doc, "ip-v2", OPTS)
         merged = [c for c in chunks if "특허출원" in c.text and "거절결정" in c.text]
         assert len(merged) == 1
-        assert "가. 절차의 경위" in merged[0].text.split("\n")[0]
+        assert merged[0].text.split("\n")[0].endswith("1. 기초사실 > 가–나")
 
     def test_a_merged_header_never_names_only_one_of_its_sections(self):
         doc = _document(DECISION_TEXT, "patent_trial_decision")
@@ -86,6 +87,17 @@ class TestSizing:
         doc = _document("제1조(목적)\n짧다.\n제2조(정의)\n짧다.\n제3조(적용)\n짧다.\n", "statute")
         chunks, _ = chunk_imported_document(doc, "ip-v2", OPTS)
         assert len(chunks) == 3
+
+    def test_a_small_leading_group_merges_forward(self):
+        """가. is 60 characters and 나. is long; an orphan 60-char chunk helps nobody."""
+        doc = _document(DECISION_TEXT, "patent_trial_decision")
+        chunks, _ = chunk_imported_document(doc, "ip-v2", OPTS)
+        assert not any(len(c.text) < 100 and "절차의 경위" in c.text for c in chunks)
+
+    def test_bare_enumerators_prefix_their_text_rather_than_own_a_line(self):
+        doc = _document(DECISION_TEXT, "patent_trial_decision")
+        chunks, _ = chunk_imported_document(doc, "ip-v2", OPTS)
+        assert any("(1) 특허출원" in c.text for c in chunks)
 
     def test_oversized_leaf_splits_at_sentence_boundaries(self):
         doc = _document(STATUTE_TEXT, "statute")
@@ -155,7 +167,9 @@ class TestIdentityAndMetadata:
 
     def test_section_metadata_holds_the_readable_path(self):
         chunks, _ = chunk_imported_document(_document(DECISION_TEXT, "judgment"), "ip-v2", OPTS)
-        assert any(" > " in (c.metadata.section or "") for c in chunks)
+        sections = [c.metadata.section for c in chunks]
+        assert "1. 기초사실 > 가–나" in sections
+        assert "주문·청구취지" in sections
 
 
 class TestCoverage:

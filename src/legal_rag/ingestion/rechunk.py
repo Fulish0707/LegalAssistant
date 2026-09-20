@@ -8,6 +8,7 @@ leaves no half-written corpus and an existing destination is never overwritten.
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import asdict
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -97,6 +98,8 @@ def rechunk_corpus(
                 else:
                     fallback[kind] += 1
                 for chunk in chunks:
+                    if len(chunk.text) > options.max_chars:
+                        raise ValueError(f"chunk {chunk.id!r} is {len(chunk.text)} chars, over max_chars")
                     chunk_out.write(chunk.model_dump_json() + "\n")
                     lengths.append(len(chunk.text))
                     per_type_lengths.setdefault(kind, []).append(len(chunk.text))
@@ -114,7 +117,7 @@ def rechunk_corpus(
             "corpus_version": corpus_version,
             "pipeline_version": PIPELINE_VERSION,
             "source": str(source.resolve()),
-            "options": options.__dict__,
+            "options": asdict(options),
             "documents": total_documents,
             "chunks": total_chunks,
             "chunks_per_document": round(total_chunks / total_documents, 3),
