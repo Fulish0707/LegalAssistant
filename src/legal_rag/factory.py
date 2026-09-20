@@ -50,7 +50,8 @@ def open_store(settings: Settings, embedder: Embedder) -> VectorStore:
     name = collection_name(settings, embedder)
     if settings.qdrant.mode == "server":
         api_key = settings.qdrant.api_key.get_secret_value() if settings.qdrant.api_key else None
-        return VectorStore.server(settings.qdrant.url, api_key, name, embedder.dimension)
+        return VectorStore.server(settings.qdrant.url, api_key, name, embedder.dimension,
+                                  timeout_seconds=settings.qdrant.timeout_seconds)
     return VectorStore.embedded(settings.qdrant_path(), name, embedder.dimension)
 
 
