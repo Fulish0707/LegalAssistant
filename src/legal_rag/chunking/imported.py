@@ -13,7 +13,8 @@ the section path, because dense retrieval and the reranker only ever see chunk t
 Sizing choices (all options):
 
 * ``target_chars=1200`` — a section subtree at or below this is emitted whole.
-* ``max_chars=2000`` — hard ceiling; only a leaf above it is split.
+* ``max_chars=2000`` — hard ceiling. A leaf is split only when it exceeds this, but
+  once split the windows are packed to ``target_chars``, not to the ceiling.
 * ``merge_threshold=400`` — a packed group below this joins a neighbour when the
   result still fits ``max_chars``.
 * No overlap. Overlap exists to rescue a boundary that cuts an argument in half;
@@ -29,6 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+import re
 
 from legal_rag.schemas import Chunk, ChunkMetadata, CitationKind, DocumentType, citation_kind
 from legal_rag.schemas.documents import ImportedDocument
@@ -65,13 +67,21 @@ def _date(value: object) -> date | None:
         return None
 
 
+_BARE_ENUMERATOR = re.compile(r"^(?:\(\d{1,2}\)|[①-⑮]|\d{1,2}\.)$")
+
+
+def _render_child(child: Section) -> str:
+    """A bare enumerator heading — ``(1)``, ``①`` — reads as a prefix, not as its own line."""
+    nested = _render_body(child)
+    if not nested:
+        return child.heading
+    separator = " " if _BARE_ENUMERATOR.match(child.heading) else "\n"
+    return f"{child.heading}{separator}{nested}"
+
+
 def _render_body(section: Section) -> str:
     parts = [section.body] if section.body else []
-    for child in section.children:
-        parts.append(child.heading)
-        nested = _render_body(child)
-        if nested:
-            parts.append(nested)
+    parts.extend(_render_child(child) for child in section.children)
     return "\n".join(parts)
 
 
@@ -110,7 +120,7 @@ class _Builder:
 
     # -- chunk construction ---------------------------------------------------
 
-    def _metadata(self, path: list[Section]) -> ChunkMetadata:
+    def _metadata(self, path: list[Section], headings: list[str]) -> ChunkMetadata:
         kind = self.doc.document_type
         authority = self.original.get("authority")
         article = next((s.label for s in path if s.label.startswith("제") and "조" in s.label), None)
@@ -128,7 +138,7 @@ class _Builder:
             case_number=self.nested.get("case_number"),
             decision_date=_date(self.nested.get("decision_date")),
             effective_date=_date(self.nested.get("effective_date")),
-            section=" > ".join(s.heading for s in path) or None,
+            section=" > ".join(headings) or None,
         )
 
     def _unique(self, path_id: str) -> str:
@@ -156,15 +166,17 @@ class _Builder:
                     order=len(self.chunks),
                     text=f"{header}\n{piece}" if piece else header,
                     title=self.doc.title,
-                    metadata=self._metadata(sections),
+                    metadata=self._metadata(sections, headings),
                 )
             )
 
 
 def _split_body(body: str, header: str, options: ChunkingOptions) -> list[str]:
     """Whole-sentence windows; a single sentence longer than the ceiling is hard-cut."""
-    room = max(options.target_chars - len(header) - 1, 200)
-    ceiling = max(options.max_chars - len(header) - 1, 200)
+    # The ceiling is what keeps the finished chunk (header + newline + piece) inside
+    # max_chars, so it can never be widened; room only decides how full a window is packed.
+    ceiling = max(options.max_chars - len(header) - 1, 1)
+    room = min(max(options.target_chars - len(header) - 1, 200), ceiling)
     windows: list[str] = []
     current = ""
     for sentence in split_korean_sentences(body) or [body]:
@@ -203,6 +215,11 @@ def _pack(sizes: list[int], options: ChunkingOptions, header_cost: int) -> list[
             merged[-1].extend(group)
         else:
             merged.append(group)
+    # The pass above only looks backwards; a small *first* group has nothing behind it.
+    if len(merged) > 1 and sum(sizes[i] for i in merged[0]) < options.merge_threshold:
+        joined = sum(sizes[i] for i in merged[0] + merged[1])
+        if joined + header_cost <= options.max_chars:
+            merged[:2] = [merged[0] + merged[1]]
     return merged
 
 
@@ -223,8 +240,7 @@ def _emit(builder: _Builder, section: Section, ancestors: list[Section], path_id
     if section.body:
         items.append((_OWN_BODY_LABEL, section.body, None))
     for child in section.children:
-        nested = _render_body(child)
-        items.append((child.label, f"{child.heading}\n{nested}" if nested else child.heading, child))
+        items.append((child.label, _render_child(child), child))
 
     for group in _pack([len(text) for _, text, _ in items], options, header_cost):
         first, last = items[group[0]], items[group[-1]]
