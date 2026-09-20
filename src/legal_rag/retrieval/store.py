@@ -40,8 +40,10 @@ class VectorStore:
         return cls(QdrantClient(path=str(path)), collection, dimension)
 
     @classmethod
-    def server(cls, url: str, api_key: str | None, collection: str, dimension: int) -> "VectorStore":
-        return cls(QdrantClient(url=url, api_key=api_key), collection, dimension, server=True)
+    def server(cls, url: str, api_key: str | None, collection: str, dimension: int,
+               *, timeout_seconds: float = 120.0) -> "VectorStore":
+        client = QdrantClient(url=url, api_key=api_key, timeout=timeout_seconds)
+        return cls(client, collection, dimension, server=True)
 
     # Lifecycle ------------------------------------------------------------------
     def exists(self) -> bool:

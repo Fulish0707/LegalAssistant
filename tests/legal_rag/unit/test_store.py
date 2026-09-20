@@ -61,3 +61,19 @@ def test_store_round_trips_chunk_payload(tmp_path):
     hit = DenseRetriever(store, embedder).retrieve("손해배상", k=1)[0]
     assert hit.chunk.metadata.law_name == "민법" and hit.chunk.id == "d2#p"
     assert hit.chunk == _chunks()[1]
+
+
+def test_server_store_gets_a_write_timeout_long_enough_for_a_large_upsert():
+    """qdrant-client defaults to 5 seconds; a 700k-chunk build times out mid-upsert."""
+    store = VectorStore.server("http://localhost:6333", None, "c", 4, timeout_seconds=90.0)
+    assert store.client._client._timeout == 90.0
+
+
+def test_open_store_passes_the_configured_timeout():
+    from legal_rag.config import Settings
+    from legal_rag.factory import open_store
+
+    settings = Settings.model_validate(
+        {"qdrant": {"mode": "server", "url": "http://localhost:6333", "timeout_seconds": 77.0}}
+    )
+    assert open_store(settings, FakeEmbedder(dimension=8)).client._client._timeout == 77.0

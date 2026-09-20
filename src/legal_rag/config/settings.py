@@ -52,6 +52,9 @@ class QdrantSettings(_Section):
     path: Path | None = None  # defaults to <index_dir>/<corpus_version>/qdrant
     url: str = "http://localhost:6333"
     api_key: SecretStr | None = None  # environment only, never YAML
+    # qdrant-client defaults to 5 seconds. Upserting a large corpus keeps the server busy
+    # building payload indexes, and a 5-second write timeout kills the build mid-run.
+    timeout_seconds: float = 120.0
 
 
 class RetrievalSettings(_Section):
