@@ -57,8 +57,7 @@ class TestHeaderLine:
         doc = _document(DECISION_TEXT, "patent_trial_decision", id="2011101003196", title="게시 시스템")
         chunks, _ = chunk_imported_document(doc, "ip-v2", OPTS)
         headers = [c.text.split("\n")[0] for c in chunks]
-        assert any("1. 기초사실 > 가–나" in h for h in headers)
-        assert any(h.endswith("2. 판단") for h in headers)
+        assert any("주문·청구취지–2. 판단" in h for h in headers)
         assert any(" · " in h for h in headers)
 
 
@@ -73,7 +72,8 @@ class TestSizing:
         chunks, _ = chunk_imported_document(doc, "ip-v2", OPTS)
         merged = [c for c in chunks if "특허출원" in c.text and "거절결정" in c.text]
         assert len(merged) == 1
-        assert merged[0].text.split("\n")[0].endswith("1. 기초사실 > 가–나")
+        # 주문 is one line, so it rides along; the header states the range it now covers.
+        assert merged[0].text.split("\n")[0].endswith("주문·청구취지–2. 판단")
 
     def test_a_merged_header_never_names_only_one_of_its_sections(self):
         doc = _document(DECISION_TEXT, "patent_trial_decision")
@@ -168,8 +168,9 @@ class TestIdentityAndMetadata:
     def test_section_metadata_holds_the_readable_path(self):
         chunks, _ = chunk_imported_document(_document(DECISION_TEXT, "judgment"), "ip-v2", OPTS)
         sections = [c.metadata.section for c in chunks]
-        assert "1. 기초사실 > 가–나" in sections
-        assert "주문·청구취지" in sections
+        assert "주문·청구취지–2. 판단" in sections
+        # 주문 is a single line; it rides with its neighbour instead of standing alone.
+        assert "주문·청구취지" not in sections
 
 
 class TestCoverage:
@@ -193,3 +194,28 @@ class TestOptions:
         big, _ = chunk_imported_document(doc, "ip-v2", ChunkingOptions(2400, 3000, 400))
         small, _ = chunk_imported_document(doc, "ip-v2", ChunkingOptions(400, 800, 100))
         assert len(small) > len(big)
+
+
+class TestMergedHeaderRange:
+    def test_range_drops_the_path_the_two_sections_share(self):
+        from legal_rag.chunking.imported import _range
+
+        deep = "3. 판단 > 가. 진보성이 부정되는지 여부 > (2)"
+        assert _range(deep, "3. 판단 > 가. 진보성이 부정되는지 여부 > (3)") == f"{deep}–(3)"
+        assert _range(deep, "4. 결론") == f"{deep}–4. 결론"
+
+    def test_a_third_section_extends_the_range_instead_of_chaining(self):
+        from legal_rag.chunking.imported import _range
+
+        first = _range("2. 청구인 주장", "3. 판단")
+        assert _range(first, "4. 결론") == "2. 청구인 주장–4. 결론"
+
+    def test_merging_into_a_neighbour_that_already_covers_a_range(self):
+        from legal_rag.chunking.imported import _range
+
+        assert _range("(2)", "3. 판단 > 가. 진보성 > (3)–4. 결론") == "(2)–4. 결론"
+
+    def test_a_repeat_of_the_same_path_changes_nothing(self):
+        from legal_rag.chunking.imported import _range
+
+        assert _range("1. 기초사실 > 가", "가") == "1. 기초사실 > 가"

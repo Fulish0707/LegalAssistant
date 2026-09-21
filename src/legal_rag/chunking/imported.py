@@ -45,10 +45,13 @@ class ChunkingOptions:
     target_chars: int = 1200
     max_chars: int = 2000
     merge_threshold: int = 400
+    min_chars: int = 400
 
     def __post_init__(self) -> None:
         if not 0 < self.merge_threshold <= self.target_chars <= self.max_chars:
             raise ValueError("require 0 < merge_threshold <= target_chars <= max_chars")
+        if not 0 <= self.min_chars <= self.target_chars:
+            raise ValueError("require 0 <= min_chars <= target_chars")
 
 
 @dataclass(frozen=True)
@@ -229,7 +232,7 @@ _OWN_BODY_LABEL = "본문"
 def _emit(builder: _Builder, section: Section, ancestors: list[Section], path_id: str) -> None:
     options = builder.options
     path = ancestors + [section]
-    headings = [s.heading for s in path]
+    headings = [s.heading for s in path if s.heading]
     body = _render_body(section)
     header_cost = len(builder.header(headings)) + 1
     if header_cost + len(body) <= options.target_chars or not section.children:
@@ -257,6 +260,78 @@ def _emit(builder: _Builder, section: Section, ancestors: list[Section], path_id
         )
 
 
+def _merge_short_chunks(chunks: list[Chunk], options: ChunkingOptions) -> list[Chunk]:
+    """Fold a chunk shorter than ``min_chars`` into its neighbour, extending the header range.
+
+    A 주문 of one line ("이 사건 심판청구를 기각한다.") cannot support an answer on its own; it only
+    costs a retrieval slot. The merged chunk keeps the first header and appends the neighbour's
+    deepest path, so the header still describes everything inside it.
+    """
+    merged: list[Chunk] = []
+    pending: Chunk | None = None
+    for chunk in chunks:
+        if pending is not None:
+            joined = _join(pending, chunk)
+            if joined is not None and len(joined.text) <= options.max_chars:
+                chunk, pending = joined, None
+            else:
+                merged.append(pending)
+                pending = None
+        body = chunk.text.split("\n", 1)[1] if "\n" in chunk.text else ""
+        if len(body) < options.min_chars:
+            pending = chunk
+            continue
+        merged.append(chunk)
+    if pending is not None:
+        tail = _join(merged[-1], pending) if merged else None
+        if tail is not None and len(tail.text) <= options.max_chars:
+            merged[-1] = tail
+        else:
+            merged.append(pending)
+    return [chunk.model_copy(update={"order": order}) for order, chunk in enumerate(merged)]
+
+
+_PATH_STEP = " > "
+
+
+def _range(first: str, second: str) -> str:
+    """The path covering both, written once: `3. 판단 > 가. 진보성 > (2)–(3)`, not the full path twice.
+
+    Only one range survives per header, so merging a third section extends the end rather
+    than adding `A–B–C`.
+    """
+    if second in first:
+        return first
+    start = first.split("\u2013")[0]
+    # The neighbour may already cover a range; only its end point extends ours.
+    second = second.split("\u2013")[-1]
+    shared = []
+    for left, right in zip(start.split(_PATH_STEP), second.split(_PATH_STEP)):
+        if left != right:
+            break
+        shared.append(left)
+    tail = _PATH_STEP.join(second.split(_PATH_STEP)[len(shared):]) or second
+    return f"{start}\u2013{tail}"
+
+
+def _join(first: Chunk, second: Chunk) -> Chunk | None:
+    """Concatenate two chunks, heading the result with the range they now cover."""
+    head_first, _, body_first = first.text.partition("\n")
+    head_second, _, body_second = second.text.partition("\n")
+    prefix, separator, path_first = head_first.rpartition(" \u00b7 ")
+    path_second = head_second.rpartition(" \u00b7 ")[-1]
+    path = _range(path_first, path_second)
+    header = f"{prefix}{separator}{path}" if separator else path
+    if len(header) > MAX_HEADER_CHARS:
+        return None
+    # The second header only survives in the range above, so keep its path as a body line;
+    # otherwise the merge would silently drop a heading the source text had.
+    middle = path_second if path_second and path_second not in body_first else ""
+    body = "\n".join(part for part in (body_first, middle, body_second) if part)
+    metadata = first.metadata.model_copy(update={"section": path})
+    return first.model_copy(update={"text": f"{header}\n{body}", "metadata": metadata})
+
+
 def _fallback(builder: _Builder, options: ChunkingOptions) -> None:
     for number, window in enumerate(_split_body(builder.doc.text, builder.header([]), options), start=1):
         builder.add(path_id=f"win:{number:04d}", headings=[], sections=[], body=window)
@@ -274,6 +349,11 @@ def chunk_imported_document(
         return builder.chunks, ChunkingReport(parsed=False, reason="no structure")
     for index, section in enumerate(parsed.sections, start=1):
         _emit(builder, section, [], f"sec:{index}")
+    if parsed.kind != "statute":
+        # An article is the citation unit, so statutes keep one chunk per article. Elsewhere a
+        # one-line 주문 is not evidence on its own: fold anything below min_chars into its
+        # neighbour, and say so in the header.
+        builder.chunks = _merge_short_chunks(builder.chunks, options)
     if not builder.chunks:
         builder = _Builder(doc, corpus_version, options, None)
         _fallback(builder, options)
