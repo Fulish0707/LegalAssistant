@@ -23,7 +23,7 @@ from pathlib import Path
 import typer
 
 from legal_rag.evaluation.calibration import (
-    PASS_KAPPA, agreement, agreement_paths, boundary_kappa, calibration_fingerprint, disagreement_rows,
+    BOUNDARY_KEYS, PASS_KAPPA, agreement, agreement_paths, boundary_kappa, calibration_fingerprint, disagreement_rows,
     judge_passes, missing_llm_message, model_grades, quote_downgrades, read_reference_grades, require_reference_grades,
     write_review)
 from legal_rag.evaluation.judgment_store import JudgmentStore
@@ -41,7 +41,10 @@ def main(pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
          reference_source: str = typer.Option(
              'codex', help='Who produced the codex_grade column (e.g. "GPT 6 Astra"); recorded in the report.'),
          pass_boundary: int = typer.Option(
-             2, min=1, max=2, help='Pass on binary kappa at grade >= this: 1 (relevant vs 0) or 2 (grade 2 vs 0/1).'),
+             2, min=1, max=2, help='Pass on the binary statistic at grade >= this: 1 (relevant vs 0) or 2 (grade 2 vs 0/1).'),
+         pass_metric: str = typer.Option(
+             'kappa', help="Agreement statistic the pass uses: 'kappa', or 'ac1' (Gwet) when the sample's "
+                           'prevalence is lopsided. Choose it before reading the numbers.'),
          ) -> None:
     key = judge_key(f'ollama:{model}', think=think)
     typer.echo(describe_key(key, think=think))
@@ -63,7 +66,7 @@ def main(pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
               'generation': generation_settings(think=think), 'quote_rule_version': QUOTE_RULE_VERSION,
               'reference_source': reference_source,
               'computed_at': datetime.now(timezone.utc).isoformat(), 'pass_kappa': PASS_KAPPA,
-              'pass_boundary': pass_boundary,
+              'pass_boundary': pass_boundary, 'pass_metric': pass_metric,
               **calibration_fingerprint(pool_dir), **result,
               'quote_downgrades': quote_downgrades(llm_rows, reference.keys()),
               'agreement_before_quote_check': before}
@@ -72,9 +75,9 @@ def main(pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
     write_review(review_path, review)
     typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
     typer.echo(f'wrote {report_path.name} and {review_path.name} ({len(review)} disagreements)', err=True)
-    kappa = boundary_kappa(result, pass_boundary)
-    stat = f"binary grade≥{pass_boundary} kappa {'—' if kappa is None else f'{kappa:.3f}'}"
-    if not judge_passes(result, pass_boundary):
+    score = result[BOUNDARY_KEYS[pass_boundary]].get(pass_metric)
+    stat = f"binary grade≥{pass_boundary} {pass_metric} {'—' if score is None else f'{score:.3f}'}"
+    if not judge_passes(result, pass_boundary, metric=pass_metric):
         if result['missing_llm']:
             typer.echo(f'FAIL: {missing_llm_message(result)}')
         else:

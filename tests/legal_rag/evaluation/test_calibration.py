@@ -368,3 +368,45 @@ def test_conflicting_codex_and_legacy_grades_are_refused(tmp_path):
     path.write_text('pair_id,human_grade,codex_grade\nc1|k1,1,2\n', encoding='utf-8-sig')
     with pytest.raises(ValueError, match='conflicting'):
         read_reference_grades(path)
+
+
+def test_deep_ranks_form_their_own_stratum():
+    from legal_rag.evaluation.calibration import _stratum
+
+    assert _stratum({'is_gold_chunk': False, 'ranks': {'hybrid': 15}}) == 'rank_11_20'
+    assert _stratum({'is_gold_chunk': False, 'ranks': {'hybrid': 21}}) == 'rank_21_50'
+    assert _stratum({'is_gold_chunk': False, 'ranks': {'hybrid': 50}}) == 'rank_21_50'
+    assert _stratum({'is_gold_chunk': False, 'ranks': {'hybrid': 51}}) is None
+
+
+class TestPrevalenceRobustAgreement:
+    def test_ac1_matches_a_hand_computed_value(self):
+        from legal_rag.evaluation.calibration import agreement
+
+        # 50 pairs: reference calls 40 relevant, judge 35, 33 of them shared, 8 shared zeros.
+        reference, llm, number = {}, {}, 0
+        for ref, judge, count in ((1, 1, 33), (1, 0, 7), (0, 1, 2), (0, 0, 8)):
+            for _ in range(count):
+                reference[('c', str(number))], llm[('c', str(number))] = ref, judge
+                number += 1
+        result = agreement(reference, llm, gold_pairs=set())['binary_relevant']
+        assert result['accuracy'] == pytest.approx(0.82)
+        assert result['prevalence'] == pytest.approx(0.80)
+        assert result['kappa'] == pytest.approx(0.526, abs=5e-4)      # dragged down by prevalence
+        assert result['ac1'] == pytest.approx(0.712, abs=5e-4)
+
+    def test_ac1_holds_where_kappa_collapses_on_the_same_accuracy(self):
+        from legal_rag.evaluation.calibration import _gwet_ac1, _kappa
+
+        balanced = ([1] * 25 + [0] * 25, [1] * 21 + [0] * 4 + [1] * 5 + [0] * 20)
+        skewed = ([1] * 45 + [0] * 5, [1] * 41 + [0] * 4 + [1] * 5 + [0] * 0)
+        for reference, judge in (balanced, skewed):
+            assert sum(x == y for x, y in zip(reference, judge)) / 50 == pytest.approx(0.82)
+        assert _kappa(*balanced, weighted=False) > 0.6 > _kappa(*skewed, weighted=False)
+        assert _gwet_ac1(*balanced) > 0.6 and _gwet_ac1(*skewed) > 0.6
+
+    def test_an_unknown_metric_is_refused(self):
+        from legal_rag.evaluation.calibration import judge_passes
+
+        with pytest.raises(ValueError, match='kappa'):
+            judge_passes({'missing_llm': 0, 'binary_relevant': {'kappa': 1.0}}, 1, metric='f1')
