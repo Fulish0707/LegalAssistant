@@ -11,7 +11,11 @@ import json
 import random
 from pathlib import Path
 
+# The default draw, and the names a --quota may use. rank_21_50 is not in the default because a
+# pool is usually built to depth 10 or 20; it exists for a deeper pool, where the lower ranks are
+# what make a sample carry irrelevant pairs.
 STRATA = {'gold': 10, 'rank_1_3': 15, 'rank_4_10': 15, 'rank_11_20': 10}
+STRATUM_NAMES = (*STRATA, 'rank_21_50')
 CSV_FIELDS = ['pair_id', 'case_number', 'search_query', 'authority', 'date', 'title', 'document_type',
               'document_id', 'question', 'reference_answer', 'chunk_text', 'codex_grade', 'codex_note']
 # Reference-label columns, newest name first; calibration files written before the rename use human_*.
@@ -27,15 +31,25 @@ def _stratum(row: dict, *, gold_stratum: bool = True) -> str | None:
     best = min(row['ranks'].values(), default=None)
     if best is None:
         return None
-    return 'rank_1_3' if best <= 3 else 'rank_4_10' if best <= 10 else 'rank_11_20' if best <= 20 else None
+    if best <= 3:
+        return 'rank_1_3'
+    if best <= 10:
+        return 'rank_4_10'
+    if best <= 20:
+        return 'rank_11_20'
+    # A deeper band so a calibration sample can carry irrelevant pairs: drawing only from a
+    # top-10 pool made 76% of one sample relevant, which caps kappa however well the judge agrees.
+    if best <= 50:
+        return 'rank_21_50'
+    return None
 
 
 def sample_calibration(pool: list[dict], *, seed: int, quotas: dict[str, int] = STRATA,
                        exclude: set[str] | frozenset = frozenset()) -> list[dict]:
     """Draw ``quotas`` pairs per stratum, in the quotas' order, skipping pair ids in ``exclude``."""
-    unknown = set(quotas) - set(STRATA)
+    unknown = set(quotas) - set(STRATUM_NAMES)
     if unknown:
-        raise ValueError(f'unknown stratum {sorted(unknown)}; choose from {list(STRATA)}')
+        raise ValueError(f'unknown stratum {sorted(unknown)}; choose from {list(STRATUM_NAMES)}')
     rng = random.Random(seed)
     ordered = sorted((row for row in pool if _pair_id(row) not in exclude),
                      key=lambda row: (row['case_id'], row['chunk_id']))
@@ -58,8 +72,8 @@ def parse_quotas(values: list[str]) -> dict[str, int]:
         name, sep, count = value.partition('=')
         if not sep or not count.strip().isdigit() or int(count) < 1:
             raise ValueError(f'quota must look like rank_1_3=25, got {value!r}')
-        if name not in STRATA:
-            raise ValueError(f'unknown stratum {name!r}; choose from {list(STRATA)}')
+        if name not in STRATUM_NAMES:
+            raise ValueError(f'unknown stratum {name!r}; choose from {list(STRATUM_NAMES)}')
         if name in quotas:
             raise ValueError(f'stratum {name!r} given twice')
         quotas[name] = int(count)
@@ -136,10 +150,30 @@ def _kappa(a: list[int], b: list[int], weighted: bool) -> float | None:
     return None if expected == 0 else 1 - observed / expected
 
 
+def _gwet_ac1(a: list[int], b: list[int]) -> float | None:
+    """Gwet's AC1: agreement corrected for chance, but not by the raters' own prevalence.
+
+    Cohen's kappa divides by a chance term built from each rater's marginals, so when nearly every
+    pair belongs to one class the term approaches the observed agreement and kappa collapses even
+    though the raters agree. AC1 estimates chance from how far the shared prevalence sits from an
+    even split, which keeps the statistic readable on a skewed sample. Same -1..1 scale as kappa.
+    """
+    n = len(a)
+    if not n:
+        return None
+    observed = sum(x == y for x, y in zip(a, b)) / n
+    prevalence = (sum(a) + sum(b)) / (2 * n)
+    expected = 2 * prevalence * (1 - prevalence)
+    return None if expected == 1 else (observed - expected) / (1 - expected)
+
+
 def _binary(h: list[int], l: list[int], *, boundary: int) -> dict:
     bh, bl = [int(x >= boundary) for x in h], [int(y >= boundary) for y in l]
     tp = sum(x and y for x, y in zip(bh, bl))
     return {'kappa': _kappa(bh, bl, weighted=False),
+            'ac1': _gwet_ac1(bh, bl),
+            'accuracy': sum(x == y for x, y in zip(bh, bl)) / len(bh) if bh else None,
+            'prevalence': sum(bh) / len(bh) if bh else None,
             'precision': tp / sum(bl) if sum(bl) else None,
             'recall': tp / sum(bh) if sum(bh) else None}
 
@@ -229,11 +263,20 @@ def boundary_kappa(result: dict, boundary: int) -> float | None:
     return result[BOUNDARY_KEYS[boundary]]['kappa']
 
 
-def judge_passes(result: dict, boundary: int = 2, *, threshold: float = PASS_KAPPA) -> bool:
-    """Pass only when every reference-graded pair has a judge grade and binary kappa at grade >= ``boundary``
-    meets the threshold."""
-    kappa = boundary_kappa(result, boundary)
-    return result['missing_llm'] == 0 and kappa is not None and kappa >= threshold
+def judge_passes(result: dict, boundary: int = 2, *, threshold: float = PASS_KAPPA,
+                 metric: str = 'kappa') -> bool:
+    """Pass only when every reference-graded pair has a judge grade and the chosen agreement
+    statistic at grade >= ``boundary`` meets the threshold.
+
+    ``metric`` is 'kappa' or 'ac1'. Pick it before reading the numbers: AC1 exists for samples whose
+    prevalence is lopsided, not as a second chance for a judge that failed on kappa.
+    """
+    if metric not in ('kappa', 'ac1'):
+        raise ValueError(f"metric must be 'kappa' or 'ac1', got {metric!r}")
+    score = result[BOUNDARY_KEYS[boundary]][metric] if boundary in BOUNDARY_KEYS else None
+    if boundary not in BOUNDARY_KEYS:
+        raise ValueError(f'boundary must be 1 or 2, got {boundary!r}')
+    return result['missing_llm'] == 0 and score is not None and score >= threshold
 
 
 def missing_llm_message(result: dict) -> str:

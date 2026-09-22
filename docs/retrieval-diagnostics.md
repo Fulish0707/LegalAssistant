@@ -223,7 +223,36 @@ uv run python scripts/rerank_relevance_pool.py --pool-dir $R --output $R-1024 \
 
 **nDCG is comparable only within one report.** Its ideal ranking is built from the chunks judged for that case, so a round of judging can only raise the ideal, and can only lower the nDCG of a mode whose own top 10 is already fully judged — including a mode whose ranking never changed. A mode with pending pairs gains in both its own DCG and the ideal, so its nDCG may move either way. A mode's nDCG from one pool version therefore cannot be set beside its nDCG from another; only the columns printed by a single `eval_graded.py` run may be compared. Precision@k and Success@k have no such denominator: they count graded chunks in a fixed number of slots and stay comparable across pool versions, which is why the reranking result is quoted as Precision@10 and Success@5. Adding the 1024 run is the check: every metric of the four already-judged runs, nDCG included, reproduces the 512 directory's report to three decimals, because the 686 new pool rows carry no grades yet. Whenever a run is added to a directory, re-read the baselines' nDCG from the new report rather than the old one.
 
-#### Serving with the reranker
+#### Judging a corpus whose chunks changed: kappa, prevalence and AC1
+
+`judge_agreement.py` reports two chance-corrected statistics at each boundary, and `--pass-metric`
+picks which one the pass uses (`kappa` by default, `ac1` for Gwet's AC1). **Choose the metric before
+reading the numbers.** AC1 exists for a sample whose prevalence is lopsided; it is not a second
+chance for a judge that failed on kappa.
+
+Structure-aware chunking (`ip-v2`) forced this choice. On the same 200 questions and the same judge,
+the reference labeller called 64% of pooled ip-v1 chunks relevant but 76-80% of ip-v2 chunks —
+shorter, section-scoped chunks are relevant more often, including at ranks 21-50 (62%). Cohen's
+kappa builds its chance term from the raters' marginals, so as prevalence rises the term approaches
+the observed agreement and kappa falls even where agreement holds:
+
+| Calibration | relevant | accuracy | kappa | AC1 |
+|---|---:|---:|---:|---:|
+| ip-v1 chunks | 64% | 0.88 | 0.757 | 0.766 |
+| ip-v2 chunks | 76% | 0.84 | 0.505 | 0.765 |
+
+Same judge, same prompt, same accuracy within noise; kappa halves, AC1 does not move. Drawing a
+deeper, deliberately harder calibration (ranks 21-50) did not help, because those chunks are still
+mostly relevant — prevalence here is a property of the corpus, not of the sample.
+
+Two warnings from that episode. First, a rubric edit that raised kappa (0.505 -> 0.560) *lowered*
+AC1 (0.765 -> 0.741): it traded false positives for false negatives, which kappa rewarded at this
+prevalence and AC1 did not. Chasing a prevalence-sensitive statistic can make the judge worse.
+Second, changing the prompt changes the judgment key, so a corpus judged under a new prompt cannot
+be compared with one judged under the old: the difference would mix the change under test with a
+change of judge. The revision was reverted for exactly that reason.
+
+### Serving with the reranker
 
 `configs/local.yaml` enables it: `rerank.backend: cross_encoder`, `rerank.device: cuda`, `retrieval.sparse_weight: 0.75`.
 
