@@ -25,3 +25,7 @@ data/**
 
 # agent execution scratch state
 .execute-protocol/
+
+# Local fine-tuning environments and model artifacts
+.venv-qlora/
+models/adapters/
