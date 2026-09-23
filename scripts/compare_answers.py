@@ -45,13 +45,17 @@ def main(
     model: str = typer.Option('qwen3:8b'),
     base_url: str = typer.Option('http://localhost:11434'),
     num_ctx: int = typer.Option(16384, min=2048, help='Context window; ip-v1 evidence runs to ~24k characters.'),
-    max_tokens: int = typer.Option(1024, min=128),
+    max_tokens: int = typer.Option(
+        2048, min=128, help='A 1024 limit truncated 18% of answers mid-JSON in the first run.'),
+    resume: bool = typer.Option(False, help='Keep answers already in the output and only fill the gaps.'),
     seed: int = typer.Option(42),
 ) -> None:
     if len(side) != 2:
         raise typer.BadParameter('exactly two --side entries are required')
-    if output.exists():
-        raise typer.BadParameter(f'{output} exists; choose a new --output')
+    answered_path = output / 'answers.jsonl'
+    if output.exists() and not resume:
+        raise typer.BadParameter(f'{output} exists; choose a new --output or pass --resume')
+    done = {row['case_id']: row for row in read_jsonl(answered_path)} if resume and answered_path.exists() else {}
     sides = [_side(entry) for entry in side]
 
     pools, runs = {}, {}
@@ -65,8 +69,16 @@ def main(
 
     chat = OllamaChatModel(model=model, base_url=base_url, timeout=600.0, think=False, num_ctx=num_ctx)
     generator = Generator(chat, max_tokens=max_tokens)
-    answers, failures = [], []
+    answers, failures = list(done.values()), []
+    output.mkdir(parents=True, exist_ok=True)
+    # Answers are appended as they are generated: a run of this length should never be lost to a
+    # crash, and --resume then starts from what is already on disk.
+    handle = answered_path.open('a', encoding='utf-8')
+    if done:
+        typer.echo(f'resuming: {len(done)} answers already on disk', err=True)
     for number, case_id in enumerate(cases, 1):
+        if case_id in done:
+            continue
         question = questions[case_id]
         row = {'case_id': case_id, 'question': question}
         for name in pools:
@@ -79,16 +91,27 @@ def main(
                 break
         if row is not None:
             answers.append(row)
+            handle.write(json.dumps(row, ensure_ascii=False) + '\n')
+            handle.flush()
         if number % 5 == 0 or number == len(cases):
             typer.echo(f'  {number}/{len(cases)} answered, {len(failures)} failed', err=True)
 
+    handle.close()
     rows, key = pairwise_rows(answers, seed=seed)
-    output.mkdir(parents=True, exist_ok=False)
-    with (output / 'answers.jsonl').open('x', encoding='utf-8') as handle:
-        for answer in answers:
-            handle.write(json.dumps(answer, ensure_ascii=False) + '\n')
-    with (output / 'pairwise.csv').open('x', newline='', encoding='utf-8-sig') as handle:
-        writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
+    # Sides are seeded per case, so verdicts already collected still describe the same pair.
+    verdicts = {}
+    csv_path = output / 'pairwise.csv'
+    if csv_path.exists():
+        with csv_path.open(newline='', encoding='utf-8-sig') as existing:
+            verdicts = {row['case_id']: row for row in csv.DictReader(existing) if (row.get('winner') or '').strip()}
+    for row in rows:
+        kept = verdicts.get(row['case_id'])
+        if kept:
+            row['winner'], row['reason'] = kept['winner'], kept.get('reason', '')
+    if verdicts:
+        typer.echo(f'carried {len(verdicts)} verdicts forward', err=True)
+    with csv_path.open('w', newline='', encoding='utf-8-sig') as csv_handle:
+        writer = csv.DictWriter(csv_handle, fieldnames=CSV_FIELDS)
         writer.writeheader()
         writer.writerows(rows)
     (output / 'pairwise_key.json').write_text(json.dumps(

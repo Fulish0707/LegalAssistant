@@ -54,3 +54,11 @@ def test_sampling_is_deterministic_and_bounded():
            sample_cases([f'c{i}' for i in range(10)], limit=3, seed=1)
     assert len(sample_cases([f'c{i}' for i in range(10)], limit=3, seed=1)) == 3
     assert len(sample_cases(['a', 'b'], limit=5, seed=1)) == 2
+
+
+def test_a_case_keeps_its_sides_when_the_sample_changes():
+    small, key_small = pairwise_rows(answers(2), seed=42)
+    large, key_large = pairwise_rows(answers(6), seed=42)
+    assert key_small['c1'] == key_large['c1']
+    by_case = {row['case_id']: row for row in large}
+    assert by_case['c1']['answer_a'] == next(r for r in small if r['case_id'] == 'c1')['answer_a']

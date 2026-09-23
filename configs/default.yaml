@@ -49,7 +49,7 @@ llm:
   model: qwen3:4b
   base_url: http://localhost:11434
   temperature: 0.2
-  max_tokens: 1024
+  max_tokens: 2048        # 1024 truncated 18% of answers mid-JSON when given five chunks of evidence
 
 rag:
   allow_clarification: true
