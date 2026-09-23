@@ -40,12 +40,14 @@ def pairwise_rows(answers: list[dict], *, seed: int) -> tuple[list[dict], dict[s
     ``answers`` rows carry ``case_id``, ``question``, and one answer per side name. The mapping is
     written separately so the judge never sees which corpus wrote which answer.
     """
-    rng = random.Random(seed)
     rows, key = [], {}
     for answer in sorted(answers, key=lambda row: row['case_id']):
         sides = sorted(name for name in answer if name not in ('case_id', 'question'))
         if len(sides) != 2:
             raise ValueError(f"{answer['case_id']}: expected two answers, got {sides}")
+        # Seeded per case, not per sequence: a case keeps its sides when the sample around it
+        # changes, so verdicts collected on an earlier, smaller run stay valid.
+        rng = random.Random(f"{seed}:{answer['case_id']}")
         first, second = (sides if rng.random() < 0.5 else sides[::-1])
         key[answer['case_id']] = f'A={first},B={second}'
         rows.append({'case_id': answer['case_id'], 'question': answer['question'],
