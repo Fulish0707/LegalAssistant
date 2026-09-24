@@ -223,7 +223,41 @@ uv run python scripts/rerank_relevance_pool.py --pool-dir $R --output $R-1024 \
 
 **nDCG is comparable only within one report.** Its ideal ranking is built from the chunks judged for that case, so a round of judging can only raise the ideal, and can only lower the nDCG of a mode whose own top 10 is already fully judged — including a mode whose ranking never changed. A mode with pending pairs gains in both its own DCG and the ideal, so its nDCG may move either way. A mode's nDCG from one pool version therefore cannot be set beside its nDCG from another; only the columns printed by a single `eval_graded.py` run may be compared. Precision@k and Success@k have no such denominator: they count graded chunks in a fixed number of slots and stay comparable across pool versions, which is why the reranking result is quoted as Precision@10 and Success@5. Adding the 1024 run is the check: every metric of the four already-judged runs, nDCG included, reproduces the 512 directory's report to three decimals, because the 686 new pool rows carry no grades yet. Whenever a run is added to a directory, re-read the baselines' nDCG from the new report rather than the old one.
 
-#### Judging a corpus whose chunks changed: kappa, prevalence and AC1
+#### Structure-aware chunking (ip-v2): measured, not adopted
+
+The upstream corpus is cut into fixed 3,500-character windows, 71% of which start mid-sentence.
+Judged pairs showed relevance falling with chunk length (shortest quartile 0.80 relevant against
+0.64 for the longest), and reference notes kept saying a chunk "cuts off before the ruling". So the
+IP corpus was re-cut on its own structure — statute articles, and the `1.` / `가.` / `(1)` hierarchy
+of decisions — with every chunk headed by its document and section path (`scripts/rechunk_corpus.py`,
+`src/legal_rag/chunking/{korean_structure,imported}.py`). Median chunk length fell from 3,151 to 945
+characters, 99.9% of decisions parsed structurally, and 100% of chunks open with a heading.
+
+It did not pay off:
+
+| | ip-v1 | ip-v2 |
+|---|---:|---:|
+| Precision@10 (relevance >= 1) | 0.824 | 0.823 |
+| Success@5 | 0.990 | 0.960 |
+| Answer win rate, 199 blind pairs | — | 52.3% (95% CI 46.5-58.3%) |
+| Generator context at k=5 | 11,607 chars | 4,054 chars |
+| Generation time | 66.7 s | 60.8 s |
+| Chunks indexed | 166,519 | 443,194 |
+
+Retrieval and answers are indistinguishable; Success@5 is slightly worse. Cutting the evidence to a
+third only bought 9% of generation time, because generation is dominated by output tokens, not input.
+Meanwhile the index grew 2.7x, took ~7 hours to build, and ran Qdrant out of memory four times until
+it was rebuilt with `--on-disk`. **ip-v1 remains the served corpus.**
+
+The tooling stays because the measurement is worth more than the code: `scripts/compare_answers.py`
+and `scripts/score_answers.py` run the blind pairwise comparison for any two recorded runs, and
+`rechunk_corpus.py` can re-cut a corpus if a future question needs it.
+
+Two bugs surfaced while measuring, both fixed: `llm.max_tokens: 1024` truncated 18% of answers
+mid-JSON when the generator received five chunks of evidence, and a short leading section (a one-line
+주문) was becoming its own chunk instead of joining its neighbour.
+
+### Judging a corpus whose chunks changed: kappa, prevalence and AC1
 
 `judge_agreement.py` reports two chance-corrected statistics at each boundary, and `--pass-metric`
 picks which one the pass uses (`kappa` by default, `ac1` for Gwet's AC1). **Choose the metric before
