@@ -1,6 +1,7 @@
 import pytest
 
-from legal_rag.evaluation.answer_compare import CSV_FIELDS, pairwise_rows, sample_cases, win_rate
+from legal_rag.evaluation.answer_compare import (
+    CSV_FIELDS, CSV_FIELDS_WITH_REFERENCE, pairwise_rows, sample_cases, win_rate)
 
 
 def answers(count=4):
@@ -62,3 +63,10 @@ def test_a_case_keeps_its_sides_when_the_sample_changes():
     assert key_small['c1'] == key_large['c1']
     by_case = {row['case_id']: row for row in large}
     assert by_case['c1']['answer_a'] == next(r for r in small if r['case_id'] == 'c1')['answer_a']
+
+
+def test_a_reference_answer_is_carried_for_the_judge():
+    rows, _ = pairwise_rows([dict(row, reference_answer=f'참조 {i}') for i, row in enumerate(answers(2))], seed=1)
+    assert [row['reference_answer'] for row in rows] == ['참조 0', '참조 1']
+    assert set(rows[0]) == set(CSV_FIELDS_WITH_REFERENCE)
+    assert CSV_FIELDS_WITH_REFERENCE.index('reference_answer') < CSV_FIELDS_WITH_REFERENCE.index('answer_a')

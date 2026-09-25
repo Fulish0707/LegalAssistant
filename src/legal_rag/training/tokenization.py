@@ -4,12 +4,17 @@ from collections import Counter
 from .dataset import DOMAINS, digest
 
 
+def generation_prompt(messages, tokenizer):
+    """The templated prompt the model continues, thinking disabled as in training."""
+    return tokenizer.apply_chat_template(messages, tokenize=False,
+                                         add_generation_prompt=True, enable_thinking=False)
+
+
 def prompt_text(example, tokenizer):
     messages = example['messages']
     if [m['role'] for m in messages] != ['system', 'user', 'assistant']:
         raise ValueError('expected one system, user and assistant turn')
-    return tokenizer.apply_chat_template(messages[:-1], tokenize=False,
-                                         add_generation_prompt=True, enable_thinking=False)
+    return generation_prompt(messages[:-1], tokenizer)
 
 
 def encode_example(example, tokenizer, *, max_length=1536):

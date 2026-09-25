@@ -79,8 +79,10 @@ environment, so the stages exchange files.
 3. `scripts/compare_sft_answers.py` (uv): write `pairwise.csv` and `pairwise_key.json` for one
    condition, adapter vs base.
 
-Pure logic lives in `src/legal_rag/evaluation/sft_eval.py` and imports neither torch nor
-transformers, so it is tested offline with a fake tokenizer.
+Pure logic lives in `src/legal_rag/training/adapter_eval.py` and imports neither torch nor
+transformers, so it is tested offline with a fake tokenizer. It sits in `training`, not
+`evaluation`, because the conda environment has no pydantic and importing `legal_rag.evaluation`
+loads the pydantic schemas; `legal_rag.training` is kept free of them for the notebook.
 
 ## Testing
 
