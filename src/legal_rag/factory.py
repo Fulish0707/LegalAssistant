@@ -193,7 +193,12 @@ def build_chat_model(settings: Settings):
     if settings.llm.backend == "ollama":
         return OllamaChatModel(model=settings.llm.model, base_url=settings.llm.base_url, timeout=settings.llm.timeout_seconds)
     if settings.llm.backend == "transformers":
-        raise RuntimeError("the transformers backend arrives with V0.4 (QLoRA adapters)")
+        from legal_rag.llm.transformers import TransformersChatModel
+
+        return TransformersChatModel(
+            model_id=settings.llm.model,
+            adapter=settings.llm.adapter,
+        )
     raise ValueError(f"unknown llm backend {settings.llm.backend!r}")
 
 
