@@ -1,0 +1,13 @@
+{
+  "contexts_sha256": "5e7378bef7ff782563230eeabf60acbb129888ae3d1af2b9ada622aba1d84a24",
+  "model_id": "Qwen/Qwen3-4B",
+  "model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+  "adapter": "/home/layke/Documents/MyLLMAgent/models/adapters/qwen3-4b-legal-full/20260924T105613457564Z/adapter",
+  "adapter_sha256": "d3d6245444cf1ba4adbf1b23c36389dd3d92614a29812ce81d940e868bd52912",
+  "quantization": "4-bit nf4, double quant",
+  "decoding": {
+    "do_sample": false,
+    "max_new_tokens": 384,
+    "enable_thinking": false
+  }
+}
