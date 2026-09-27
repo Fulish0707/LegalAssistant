@@ -11,14 +11,20 @@ venv-310/
 
 uploads/
 sqlite_db/*.db
+# SQLite side files (WAL, shared memory, rollback journal) next to the app DBs
+sqlite_db/*.db-*
 chroma_db/
 
 .ipynb_checkpoints/
 .vscode/
 .worktrees/
+.claude/worktrees/
 
-# legal_rag data and env
-.venv/
+# Tool caches (they also write their own .gitignore, but do not rely on that)
+.pytest_cache/
+.ruff_cache/
+
+# legal_rag data
 data/**
 !data/**/
 !data/**/.gitkeep
