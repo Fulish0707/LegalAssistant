@@ -45,6 +45,12 @@ rerank:
   # the cost. Needs the `rerank` extra: uv sync --extra rerank
   backend: cross_encoder
   device: cuda
+  # Cached locally; skipping the Hub checks loads it in 1.9 s instead of 5.6 s (2026-09-27).
+  local_files_only: true
   # Half precision: 0.8 s vs 3.0 s per query and 1.2 GB vs 2.5 GB of VRAM, identical top 10
   # on 50 civil judgments (2026-09-27). The 8 GB card also holds qwen3:4b and bge-m3.
   dtype: float16
+
+api:
+  # Load BM25, bge-m3 and the reranker at startup instead of on the first request.
+  warmup: true

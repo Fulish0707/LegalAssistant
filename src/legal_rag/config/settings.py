@@ -82,6 +82,9 @@ class RerankSettings(_Section):
     # float16 needs a GPU. On the 4060 it reranks 50 candidates in 0.8 s instead of 3.0 s
     # with 1.2 GB instead of 2.5 GB, and the same top 10 (docs/legal-rag-backend.md).
     dtype: Literal["float32", "float16"] = "float32"
+    # Load from the local Hugging Face cache without Hub checks: 1.9 s instead of 5.6 s.
+    # Needs the model downloaded once; a fresh machine keeps the default.
+    local_files_only: bool = False
 
 
 class LLMSettings(_Section):
@@ -105,6 +108,9 @@ class RagSettings(_Section):
 class ApiSettings(_Section):
     host: str = "127.0.0.1"
     port: int = 8000
+    # Run one search in the background at startup so BM25, the embedder and the
+    # reranker load before the first user request (~18 s cold, 2.2 s warm).
+    warmup: bool = False
 
 
 class TraceSettings(_Section):

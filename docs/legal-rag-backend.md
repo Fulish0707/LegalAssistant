@@ -121,6 +121,8 @@ Frequently changed keys:
 | `retrieval.k_dense`, `k_sparse`, `k_fused`, `k_final` | 20, 20, 20, 5 | Depth per leg, after fusion, and into the answer |
 | `rerank.backend` | `noop` | `cross_encoder` needs the extra |
 | `rerank.device` / `rerank.dtype` | `cpu` / `float32` | `local.yaml` uses `cuda` / `float16`, see below |
+| `rerank.local_files_only` | `false` | Load the cached model without Hub checks (1.9 s instead of 5.6 s); `local.yaml` sets it |
+| `api.warmup` | `false` | Run one search in the background at startup; `/health` reports `warm`. `local.yaml` sets it: first search after warm-up 2.3 s instead of ~18 s cold |
 | `llm.backend` / `llm.model` | `ollama` / `qwen3:4b` | `transformers` arrives with V0.4 |
 | `rag.allow_clarification` | `true` | Ask for facts instead of answering when the analyzer flags them |
 | `rag.llm_rewrite` | `false` | Add LLM-generated search phrasings |
