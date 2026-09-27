@@ -164,9 +164,6 @@
             if (data.report_suggestion) P.extra.push({ role:'agent', text:'검토 의견 제안:\n' + data.report_suggestion });
             pending = null; streamed = ''; P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
           }
-          else if (data.type === 'update_draft') {
-            LC.S.statementDraft = data.content; P.thinking = false; sse.close(); LC.render(); LC.saveDraft();
-          }
           else if (data.type === 'error') {
             P.extra.push({ role:'agent', text:'오류: ' + data.content }); P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
           }

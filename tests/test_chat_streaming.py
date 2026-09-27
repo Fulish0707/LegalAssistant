@@ -16,12 +16,11 @@ from unittest import mock
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 
 
-# Exactly the set static/lc-chat.js branches on (sse.onmessage, lines 266-282).
+# Exactly the set static/lc-chat.js branches on (sendMessage, sse.onmessage).
 FRONTEND_EVENT_TYPES = {
     "token_chunk",
     "thought",
     "final_response",
-    "update_draft",
     "error",
     "stream_end",
 }
