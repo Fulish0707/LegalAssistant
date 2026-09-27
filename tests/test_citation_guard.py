@@ -30,6 +30,11 @@ class UnsupportedCitationTests(unittest.TestCase):
         answer = "대법원 2010다95062 판결과 2099다1 판결"
         self.assertEqual(unsupported_citations(answer, ["… 대법원 2010다95062 참조"]), ["2099다1"])
 
+    def test_generic_words_are_not_law_names(self):
+        """"관련 법령 제48조" was read as a law named 법령 and flagged although 제48조 was in evidence."""
+        self.assertEqual(unsupported_citations("장관의 권한 관련 법령 제48조에 따라", ["… 제48조(권한의 위임) …"]), [])
+        self.assertEqual(unsupported_citations("같은 법률 제9조", ["없음"]), ["제9조"])
+
     def test_the_users_own_text_counts_as_evidence(self):
         self.assertEqual(unsupported_citations("말씀하신 민법 제750조는", ["민법 제750조가 적용되나요?"]), [])
 

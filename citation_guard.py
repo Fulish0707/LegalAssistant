@@ -23,12 +23,18 @@ def _squash(text):
     return re.sub(r"\s+", "", text or "")
 
 
+# Words the law-name pattern matches that refer to a law without naming it.
+_GENERIC_LAW_WORDS = {"법", "법령", "법률", "동법", "본법", "이법", "같은법", "관련법", "관련법령", "시행령", "시행규칙", "규정", "규칙"}
+
+
 def unsupported_citations(answer, evidence_texts):
     """Citations in answer (in order, deduplicated) that no evidence text contains."""
     evidence = _squash(" ".join(t for t in evidence_texts if t))
     missing = []
     for match in STATUTE_RE.finditer(answer or ""):
         article, law = _squash(match.group("art")), match.group("law")
+        if law and _squash(law) in _GENERIC_LAW_WORDS:
+            law = None
         # 제3조 must not be satisfied by 제3조의3.
         found = re.search(re.escape(article) + r"(?!의)", evidence) and (not law or _squash(law) in evidence)
         label = f"{law} {match.group('art')}" if law else match.group("art")
