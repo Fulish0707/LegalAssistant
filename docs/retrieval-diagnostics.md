@@ -363,6 +363,29 @@ Live, "전세 계약이 끝났는데 집주인이 보증금을 안 돌려줘요.
 
 The gains are one case per domain at n = 20, within noise. With floor 3 at k 50, administrative Success@10 is unchanged but MRR@10 falls 0.025, a single rank shift and also noise at n = 20. Precision against the judged pool is unmeasured for every variant except production, because coverage is below 1.0. A strict per-corpus quota (13 each) did not help: 0.533, and the 전세 question was unchanged, because civil's good chunk was in its sparse leg and 0.75 sparse weight kept it out of civil's own top 13. The floor fixes the 전세 question (top-1 becomes the civil 0.821 chunk) at no extra cost: 1.34 s per `retrieve` vs 1.46 s over the 10 questions. `k_fused: 100` adds about 0.7 s (2.15 s) and put more civil/criminal judgments into the top 5 of 5 of the 10 everyday questions (unjudged), but the crossdomain-60 gain is within noise. The earlier 50-vs-100 measurement was single-corpus (two lists); with eight lists, 50 slots are thinner. The floor fills at most half of `k_fused`. On a single query, 8 lists × 3 gives at most 24 unique admissions, 24 at most across all 70 measured queries, so the cap never bound in these measurements. It exists for `/v1/chat`, whose `retrieve_many` fuses rewritten queries × legs (16–32 lists), where an uncapped floor would be almost pure round-robin. That multi-query path is unmeasured. `local.yaml` sets `leg_floor: 3` and keeps `k_fused: 50`; `transformers.yaml` (adapter serving) is left unchanged.
 
+### Serving configuration check, 2026-09-27
+
+Before and after the day's serving changes, on the full fan-out pipeline (4 corpora,
+hybrid, cross-encoder). A: fp32 reranker, plain RRF, `k_fused` 50. B: `configs/local.yaml`
+as committed, fp16 reranker, `leg_floor` 3, `k_fused` 100. The query set was the four
+pilot-200 sets plus crossdomain-60 (860 queries). Scoring is gold document within the top 10
+(document ids deduplicated in rank order). The 95% intervals are paired bootstraps
+(2,000 resamples).
+
+| Set | S@10 A→B | MRR@10 A→B | ΔS@10 95% CI | ΔMRR@10 95% CI |
+|---|---|---|---|---|
+| All (860) | 0.440→0.458 | 0.319→0.330 | [+0.006, +0.033] | [+0.003, +0.022] |
+| administrative-pilot-200 | 0.805→0.825 | 0.587→0.594 | [−0.005, +0.050] | [−0.011, +0.028] |
+| civil-pilot-200 | 0.125→0.155 | 0.090→0.121 | [−0.005, +0.065] | [+0.009, +0.059] |
+| criminal-pilot-200 | 0.790→0.805 | 0.568→0.572 | [−0.010, +0.040] | [−0.013, +0.024] |
+| crossdomain-60 | 0.533→0.567 | 0.396→0.418 | [+0.000, +0.083] | [−0.002, +0.065] |
+| ip-pilot-200 | 0.010→0.015 | 0.006→0.008 | [−0.010, +0.025] | [−0.001, +0.007] |
+
+- **Rank changes:** 24 golds entered the top 10 and 8 dropped out. Rank 1 was gained 12 times and lost 5. 38 moved down inside the top 10, 33 of those by one or two places, which is the floor admitting extra candidates.
+- **Latency:** 3.60 s to 2.14 s per query.
+- **What was not measured:** the three changes were not separated. Exact-document scoring is near zero on ip under fan-out in both configurations, so graded precision is still the measure for ip, and it was not rerun.
+- **What does not affect ranking:** `embedding.query_num_ctx` 1024 gave identical query embeddings (cosine 1.000000 on 20 queries), and `api.warmup` and `rerank.local_files_only` only change when things load.
+
 ## Reading results
 
 Lead with nDCG@10 (gain 2^grade − 1, ideal from every judged chunk for the case) and Success@k (a chunk at or above `--threshold`, grade 2 by default, in the top k). Success@k and MRR (`mrr@20`) stop at the pool depth, since deeper ranks were never pooled; with a pool shallower than 20, Success@20 is not reported. Each is reported per chunk and per document. Pooled recall is not reported, because its denominator depends on the pool.

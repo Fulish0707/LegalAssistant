@@ -28,6 +28,7 @@ def health(request: Request) -> HealthResponse:
         embedder=metadata.get("embedder"),
         llm=settings.llm.backend if settings.llm.backend == "fake" else f"{settings.llm.backend}:{settings.llm.model}",
         tokenizer=metadata.get("tokenizer"),
+        warm=state.warm,
     )
 
 

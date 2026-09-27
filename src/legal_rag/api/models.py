@@ -37,3 +37,4 @@ class HealthResponse(BaseModel):
     embedder: str | None = None
     llm: str
     tokenizer: str | None = None
+    warm: bool = False  # the startup warm-up search has completed

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
-from threading import Lock
+import logging
+from contextlib import asynccontextmanager
+from threading import Lock, Thread
 
 from fastapi import FastAPI
 
@@ -13,10 +15,31 @@ from legal_rag.factory import build_hybrid_retriever, build_orchestrator, index_
 
 from .routes import router
 
+logger = logging.getLogger(__name__)
+WARMUP_QUERY = "임대차 보증금 반환"
+
+
+def _warm_up(state) -> None:
+    try:
+        state.get_retriever().retrieve(WARMUP_QUERY, 1, None)
+        state.warm = True
+        logger.info("search stack warmed up")
+    except Exception:  # a failed warm-up must not take the API down with it
+        logger.exception("warm-up search failed; the first request will load lazily")
+
+
+@asynccontextmanager
+async def _warmup_lifespan(app: FastAPI):
+    """Start the warm-up search in the background; the API serves /health meanwhile."""
+    if app.state.settings.api.warmup:
+        app.state.warmup_thread = Thread(target=_warm_up, args=(app.state,), name="search-warmup", daemon=True)
+        app.state.warmup_thread.start()
+    yield
+
 
 def create_app(settings: Settings | None = None, orchestrator=None, retriever=None) -> FastAPI:
     settings = settings or load_settings()
-    app = FastAPI(title="Korean Legal RAG", version=__version__)
+    app = FastAPI(title="Korean Legal RAG", version=__version__, lifespan=_warmup_lifespan)
     state = app.state
     state.settings = settings
     state.retriever = retriever
@@ -47,6 +70,9 @@ def create_app(settings: Settings | None = None, orchestrator=None, retriever=No
     state.get_retriever = get_retriever
     state.get_orchestrator = get_orchestrator
     state.index_metadata = index_metadata
+    state.warm = False
+    state.warmup_thread = None
+
     app.include_router(router)
     return app
 
