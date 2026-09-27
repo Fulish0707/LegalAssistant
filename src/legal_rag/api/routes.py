@@ -7,6 +7,7 @@ import uuid
 from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 
+from legal_rag.retrieval.labels import document_labels
 from legal_rag.schemas import ChatResponse
 
 from .models import ChatRequest, HealthResponse, SearchRequest, SearchResponse
@@ -34,7 +35,9 @@ def health(request: Request) -> HealthResponse:
 async def search(body: SearchRequest, request: Request) -> SearchResponse:
     retriever = request.app.state.get_retriever()
     hits = await run_in_threadpool(retriever.retrieve, body.query, body.k, body.filters)
-    return SearchResponse(hits=hits)
+    stores = {leg.name.rsplit(":", 1)[0]: leg.store for leg in getattr(retriever, "legs", []) if hasattr(leg, "store")}
+    labels = await run_in_threadpool(document_labels, hits, stores)
+    return SearchResponse(hits=hits, labels=labels)
 
 
 @router.post("/v1/chat", response_model=ChatResponse, response_model_exclude_none=True)

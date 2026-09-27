@@ -39,6 +39,9 @@ class EmbeddingSettings(_Section):
     batch_size: int = 16
     fake_dimension: int = 64
     timeout_seconds: float = 120.0
+    # Ollama context window for query embeddings; None keeps Ollama's default. Must match
+    # the chat app's OLLAMA_EMBED_NUM_CTX or Ollama reloads bge-m3 between the two clients.
+    query_num_ctx: int | None = Field(default=None, ge=1)
 
 
 class SparseSettings(_Section):
@@ -67,12 +70,18 @@ class RetrievalSettings(_Section):
     corpus_weights: dict[str, float] = Field(default_factory=dict)  # absent corpora weigh 1.0
     dense_weight: float = 1.0
     sparse_weight: float = 1.0
+    # Top hits of every leg that always reach the reranker, whatever their fused score. 0 is plain
+    # RRF; see RRFFuser and docs/retrieval-diagnostics.md for why fan-out needs it.
+    leg_floor: int = Field(default=0, ge=0)
 
 
 class RerankSettings(_Section):
     backend: Literal["noop", "cross_encoder"] = "noop"
     model: str = "BAAI/bge-reranker-v2-m3"
     device: str = "cpu"
+    # float16 needs a GPU. On the 4060 it reranks 50 candidates in 0.8 s instead of 3.0 s
+    # with 1.2 GB instead of 2.5 GB, and the same top 10 (docs/legal-rag-backend.md).
+    dtype: Literal["float32", "float16"] = "float32"
 
 
 class LLMSettings(_Section):

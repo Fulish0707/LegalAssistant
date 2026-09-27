@@ -32,6 +32,8 @@ def test_search_endpoint(indexed):
     filtered = client.post("/v1/search", json={"query": "보증금", "k": 3, "filters": {"document_types": ["court_decision"]}}).json()
     assert {h["chunk"]["document_type"] for h in filtered["hits"]} == {"court_decision"}
     assert client.post("/v1/search", json={"query": "", "k": 3}).status_code == 422
+    # Every hit already carries court/law metadata here, so nothing needs a derived label.
+    assert body["labels"] == {}
 
 
 def test_chat_endpoint_round_trip(indexed):

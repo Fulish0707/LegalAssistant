@@ -38,6 +38,7 @@ retrieval:
   corpus_weights: {}       # e.g. {ip-v1: 0.5}; absent corpora weigh 1.0
   dense_weight: 1.0
   sparse_weight: 1.0
+  leg_floor: 0             # top hits of every leg guaranteed a fused slot; 0 is plain RRF
 
 rerank:
   backend: noop            # noop | cross_encoder (requires the `rerank` extra)

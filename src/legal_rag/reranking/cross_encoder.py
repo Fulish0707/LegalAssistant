@@ -13,10 +13,12 @@ class _Encoder(Protocol):
 Loader = Callable[..., _Encoder]
 
 
-def _load_cross_encoder(model: str, *, device: str, max_length: int) -> _Encoder:
+def _load_cross_encoder(model: str, *, device: str, max_length: int, dtype: str) -> _Encoder:
+    import torch
     from sentence_transformers import CrossEncoder  # heavy import, optional extra
 
-    return CrossEncoder(model, device=device, max_length=max_length)
+    return CrossEncoder(model, device=device, max_length=max_length,
+                        model_kwargs={'torch_dtype': getattr(torch, dtype)})
 
 
 class CrossEncoderReranker:
@@ -32,9 +34,10 @@ class CrossEncoderReranker:
     name = 'cross_encoder'
 
     def __init__(self, model: str, device: str = 'cpu', *, batch_size: int = 16, max_length: int = 512,
-                 loader: Loader | None = None) -> None:
+                 dtype: str = 'float32', loader: Loader | None = None) -> None:
         self.model = model
         self.device = device
+        self.dtype = dtype
         self.batch_size = batch_size
         self.max_length = max_length
         self._loader = loader or _load_cross_encoder
@@ -46,7 +49,7 @@ class CrossEncoderReranker:
 
     def encoder(self) -> _Encoder:
         if self._encoder is None:
-            self._encoder = self._loader(self.model, device=self.device, max_length=self.max_length)
+            self._encoder = self._loader(self.model, device=self.device, max_length=self.max_length, dtype=self.dtype)
         return self._encoder
 
     def rerank(self, query: str, candidates: list[ScoredChunk], k: int) -> list[ScoredChunk]:

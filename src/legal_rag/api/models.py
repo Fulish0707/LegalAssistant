@@ -25,6 +25,8 @@ class SearchRequest(BaseModel):
 
 class SearchResponse(BaseModel):
     hits: list[ScoredChunk]
+    # document_id -> display label, for hits whose chunk names no court, case, law or title.
+    labels: dict[str, str] = Field(default_factory=dict)
 
 
 class HealthResponse(BaseModel):
