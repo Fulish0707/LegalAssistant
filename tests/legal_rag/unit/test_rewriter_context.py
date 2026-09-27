@@ -3,7 +3,8 @@ from datetime import date
 from legal_rag.llm import FakeChatModel
 from legal_rag.rag.context import ContextBuilder
 from legal_rag.rag.rewriter import QueryRewriter
-from legal_rag.schemas import Chunk, ChunkMetadata, DocumentType, QueryAnalysis, RewrittenQueries, ScoredChunk
+from legal_rag.retrieval.filters import to_conditions
+from legal_rag.schemas import Chunk, ChunkMetadata, CitationKind, DocumentType, QueryAnalysis, RewrittenQueries, ScoredChunk
 from tests.legal_rag.unit.test_store import _chunks
 
 
@@ -25,11 +26,25 @@ def test_llm_rewrite_appends_model_queries_and_survives_failure():
 
 def test_filters_from_analysis():
     f = QueryRewriter.filters(QueryAnalysis(domain="민사", document_types_needed=[DocumentType.court_decision]))
-    assert f.document_types == [DocumentType.court_decision] and f.legal_domain is None
+    assert f.citation_kind is CitationKind.case and f.document_types is None and f.legal_domain is None
     assert QueryRewriter.filters(QueryAnalysis(domain="민사")) is None
     two = QueryRewriter.filters(QueryAnalysis(document_types_needed=[DocumentType.statute, DocumentType.court_decision]))
     assert two is None
     assert QueryRewriter.filters(QueryAnalysis()) is None
+
+
+def test_case_filter_admits_the_imported_case_types():
+    """The analyzer names the native court_decision type, but the imported corpora store
+    cases as judgment, decision, constitutional_decision and patent_trial_decision. An exact
+    document_type filter matched nothing and /v1/chat answered with no evidence (2026-09-27)."""
+    f = QueryRewriter.filters(QueryAnalysis(document_types_needed=[DocumentType.court_decision]))
+    (condition,) = to_conditions(f)
+    assert {"judgment", "decision", "constitutional_decision", "patent_trial_decision"} <= set(condition.values)
+
+
+def test_several_types_of_one_kind_still_filter_by_that_kind():
+    f = QueryRewriter.filters(QueryAnalysis(document_types_needed=[DocumentType.judgment, DocumentType.court_decision]))
+    assert f.citation_kind is CitationKind.case
 
 
 def test_context_builder_assigns_ids_and_headers():

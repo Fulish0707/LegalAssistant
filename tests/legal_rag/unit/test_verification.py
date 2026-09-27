@@ -116,3 +116,20 @@ def test_backfilled_citation_kind_follows_document_type():
                             document_type=document_type, header={"Type": "Case"},
                             text="대법원 2018다12345 판결", score=1.0)
         assert _kind(evidence) is CitationKind.case
+
+
+def test_statutes_in_issue_and_follow_up_lists_are_verified():
+    """answer_text skipped legal_issues and additional_information_needed, so "헌법 제11조"
+    in a follow-up list passed verification (2026-09-27, 80-question run)."""
+    for field in ("legal_issues", "additional_information_needed"):
+        report = Verifier().verify(_answer(**{field: ["헌법 제11조 위반 여부"]}), _bundle())
+        assert not report.ok and any("제11조" in issue.detail for issue in report.issues), field
+
+
+def test_strip_cleans_issue_and_follow_up_lists():
+    ans = _answer(legal_issues=["보증금 반환", "의료법 제12조 설명의무"],
+                  additional_information_needed=["헌법 제11조 적용 여부", "계약 만료일"])
+    report = Verifier().verify(ans, _bundle())
+    stripped = VerificationPolicy().strip(ans, report)
+    assert stripped.legal_issues == ["보증금 반환"]
+    assert stripped.additional_information_needed == ["계약 만료일"]

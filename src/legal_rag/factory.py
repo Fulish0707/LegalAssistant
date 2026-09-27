@@ -195,7 +195,8 @@ def build_chat_model(settings: Settings):
     if settings.llm.backend == "fake":
         return FakeChatModel({})
     if settings.llm.backend == "ollama":
-        return OllamaChatModel(model=settings.llm.model, base_url=settings.llm.base_url, timeout=settings.llm.timeout_seconds)
+        return OllamaChatModel(model=settings.llm.model, base_url=settings.llm.base_url,
+                               timeout=settings.llm.timeout_seconds, num_ctx=settings.llm.num_ctx)
     if settings.llm.backend == "transformers":
         from legal_rag.llm.transformers import TransformersChatModel
 

@@ -81,3 +81,37 @@ def test_history_is_stored_but_evidence_text_is_not(retriever):
     assert [t.role for t in turns] == ["user", "assistant", "user", "assistant"]
     assert turns[1].evidence_ids and "LEGAL SOURCE" not in turns[1].content
     assert "질문" in model.calls[2].messages[-1].content and "이전 대화" in model.calls[2].messages[-1].content
+
+
+def _capture_filters(monkeypatch, hybrid):
+    seen = []
+    original = hybrid.retrieve_many
+
+    def spy(queries, k, filters=None, **kwargs):
+        seen.append(filters)
+        return original(queries, k, filters, **kwargs)
+
+    monkeypatch.setattr(hybrid, "retrieve_many", spy)
+    return seen
+
+
+def test_analyzer_document_type_is_not_a_hard_filter_by_default(retriever, monkeypatch):
+    """On 210 eval questions the analyzer asked for statutes 201 times; filtering on it cut
+    gold Success@10 from 0.557 to 0.414 (95% CI of the change [-0.205, -0.086])."""
+    settings, r = retriever
+    seen = _capture_filters(monkeypatch, r)
+    analysis = QueryAnalysis(issues=["보증금 반환"], document_types_needed=["statute"])
+    model = FakeChatModel({"QueryAnalysis": [analysis], "LegalAnswer": [_answer()]})
+    _orchestrator(settings, r, model).handle("보증금 반환 요건은?", conversation_id="f1")
+    assert seen == [None]
+
+
+def test_hard_filter_can_be_enabled(retriever, monkeypatch):
+    settings, r = retriever
+    settings = settings.model_copy(update={"rag": settings.rag.model_copy(update={"hard_filter": True})})
+    seen = _capture_filters(monkeypatch, r)
+    analysis = QueryAnalysis(issues=["보증금 반환"], document_types_needed=["statute"])
+    # Filtered evidence may fail verification and regenerate; only the filter is under test.
+    model = FakeChatModel({"QueryAnalysis": [analysis], "LegalAnswer": [_answer(), _answer()]})
+    _orchestrator(settings, r, model).handle("보증금 반환 요건은?", conversation_id="f2")
+    assert seen[0] is not None and seen[0].citation_kind == "statute"

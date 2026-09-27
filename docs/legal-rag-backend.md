@@ -124,8 +124,10 @@ Frequently changed keys:
 | `rerank.local_files_only` | `false` | Load the cached model without Hub checks (1.9 s instead of 5.6 s); `local.yaml` sets it |
 | `api.warmup` | `false` | Run one search in the background at startup; `/health` reports `warm`. `local.yaml` sets it: first search after warm-up 2.3 s instead of ~18 s cold |
 | `llm.backend` / `llm.model` | `ollama` / `qwen3:4b` | `transformers` arrives with V0.4 |
+| `llm.num_ctx` | unset (Ollama's 4096) | `local.yaml` sets 8192: answer prompts measure 5,900–6,300 tokens |
 | `rag.allow_clarification` | `true` | Ask for facts instead of answering when the analyzer flags them |
-| `rag.llm_rewrite` | `false` | Add LLM-generated search phrasings |
+| `rag.llm_rewrite` | `false` | Add LLM-generated search phrasings; no measurable retrieval gain (below) |
+| `rag.hard_filter` | `false` | Use the analyzer's single needed document kind as a hard filter; harmful (below) |
 | `rag.max_regenerations` | `1` | Regeneration attempts after a failed verification |
 | `trace.path` / `trace.include_text` | unset / `false` | JSONL audit log; user text is excluded unless enabled |
 
@@ -356,4 +358,46 @@ judgment chunks (2,855 characters on average) at `max_length` 512 and batch 16.
 `local.yaml` runs float16 on cuda. The card also holds the chat model (qwen3:4b, ~3.4 GB)
 and bge-m3 (~1.9 GB), so float32 does not fit alongside them. CPU is too slow for chat,
 where the agent may search more than once per turn.
+
+## Chat pipeline evaluation, 2026-09-27
+
+Components of `/v1/chat`, run under the local profile with qwen3:4b at `num_ctx` 8192.
+
+**Two bugs were fixed before measuring.**
+- The analyzer names the native `court_decision` type. As an exact `document_type` filter that
+  matched no imported corpus, so every such turn answered with zero evidence. The filter now
+  uses the citation kind.
+- `build_chat_model` passed no `num_ctx`, so answer prompts (5,900–6,300 tokens) were cut at
+  Ollama's default 4096 without a warning.
+
+**Analysis and rewriting against retrieval.** 210 questions: 50 each from the administrative,
+civil and criminal pilot-200 sets, plus crossdomain-60. ip is left out because it sits at the
+exact-gold floor. Scoring is gold document in the top 10; intervals are paired bootstraps.
+
+| Condition | S@10 | MRR@10 | ΔS@10 95% CI vs question only |
+|---|---|---|---|
+| Question only (`/v1/search`) | 0.557 | 0.399 | — |
+| + rule rewrite | 0.567 | 0.397 | [−0.010, +0.029] |
+| + LLM rewrite | 0.571 | 0.396 | [−0.005, +0.038] |
+| + rule rewrite + analyzer hard filter | 0.414 | 0.309 | [−0.205, −0.086] |
+
+- **The hard filter:** it fired on 207 of 210 questions, and 201 of those were statute-only.
+  That is why `rag.hard_filter` is now off.
+- **Clarification:** the analyzer asked for more facts on 2 of 210 questions.
+- **Scope:** these are formal, document-derived questions. Conversational phrasing, which the
+  rewriter targets, is untested.
+
+**Verification policy.** 80 questions: 20 each from administrative, civil, criminal and
+crossdomain.
+- **First drafts:** the verifier flagged 10 (12.5%). There were 10 `source_id_mismatch` issues
+  (the right authority under the wrong source id) and 6 `statute_not_in_evidence`.
+- **Policy outcome:** all 10 were regenerated. 4 then passed, 3 were stripped and answered, and
+  3 were rejected, a 3.75% refusal rate.
+- **Independent check:** `citation_guard` on the answer text flagged 7 of 80 first drafts and
+  4 of 77 final answers.
+- **Hand check of the 5 remaining flags:** 2 were genuinely unsupported. Both were in
+  `legal_issues` or `additional_information_needed`, which the verifier and strip then skipped
+  (fixed since). The other 3 were checker artefacts: a shortened law name, and the generic word
+  "법령" read as a law name (fixed since).
+- **Latency:** 24.8 s per turn on average.
 

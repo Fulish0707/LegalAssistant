@@ -10,7 +10,10 @@ __all__ = ["StatuteRef", "answer_text", "article_only", "extract_case_refs", "ex
 
 def answer_text(answer: LegalAnswer) -> str:
     """Every free-text field in which the model could assert a legal authority."""
-    return "\n".join([answer.summary, answer.analysis, *answer.possible_actions, answer.uncertainty])
+    # legal_issues and additional_information_needed were once skipped, and "헌법 제11조" in a
+    # follow-up list passed verification (2026-09-27).
+    return "\n".join([answer.summary, *answer.legal_issues, answer.analysis, *answer.possible_actions,
+                      *answer.additional_information_needed, answer.uncertainty])
 
 
 def article_only(reference: str) -> str:
