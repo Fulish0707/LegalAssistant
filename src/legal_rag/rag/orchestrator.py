@@ -88,7 +88,7 @@ class Orchestrator:
 
         with recorder.stage("rewrite"):
             queries = self.rewriter.rewrite(message, analysis)
-            filters = self.rewriter.filters(analysis)
+            filters = self.rewriter.filters(analysis) if self.settings.rag.hard_filter else None
         trace.search_queries = list(queries.search_queries)
 
         k = self.settings.retrieval.k_final

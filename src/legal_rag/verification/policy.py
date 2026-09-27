@@ -50,6 +50,8 @@ class VerificationPolicy:
                 "summary": clean(answer.summary),
                 "analysis": clean(answer.analysis),
                 "possible_actions": [action for action in answer.possible_actions if not tainted(action)],
+                "legal_issues": [issue for issue in answer.legal_issues if not tainted(issue)],
+                "additional_information_needed": [item for item in answer.additional_information_needed if not tainted(item)],
                 "confidence": Confidence.low,
                 "uncertainty": f"{answer.uncertainty} {note}".strip(),
             }

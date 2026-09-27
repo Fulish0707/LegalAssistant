@@ -8,6 +8,10 @@ embedding:
   query_num_ctx: 1024
 llm:
   model: qwen3:4b
+  # Answer prompts with five evidence blocks measure 5,900-6,300 tokens (Qwen3 tokenizer,
+  # 2026-09-27); Ollama's default 4096 cut them silently. 8192 matches the chat app's
+  # OLLAMA_NUM_CTX, so Ollama does not reload qwen when the two alternate, and fits the GPU.
+  num_ctx: 8192
   
 qdrant:
   mode: server

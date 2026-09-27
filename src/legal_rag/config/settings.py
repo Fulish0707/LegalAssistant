@@ -95,11 +95,18 @@ class LLMSettings(_Section):
     max_tokens: int = 1024
     adapter: str | None = None
     timeout_seconds: float = 120.0
+    # Ollama context window; None keeps Ollama's default (4096 for qwen3:4b here), which
+    # silently cut the ~6,100-token answer prompts. Covers the generated tokens too.
+    num_ctx: int | None = Field(default=None, ge=1)
 
 
 class RagSettings(_Section):
     allow_clarification: bool = True
     llm_rewrite: bool = False
+    # Turn the analyzer's single needed document kind into a hard retrieval filter. Off: on
+    # 210 eval questions it asked for statutes 201 times, and filtering cut gold Success@10
+    # from 0.557 to 0.414 (95% CI of the change [-0.205, -0.086], 2026-09-27).
+    hard_filter: bool = False
     history_turns: int = 4
     max_regenerations: int = 1
     max_evidence_chars: int = 1500

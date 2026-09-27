@@ -55,6 +55,7 @@ llm:
 rag:
   allow_clarification: true
   llm_rewrite: false
+  hard_filter: false      # analyzer's document kind as a hard filter cut gold S@10 0.557 -> 0.414
   history_turns: 4
   max_regenerations: 1
   max_evidence_chars: 1500

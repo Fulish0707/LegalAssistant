@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from legal_rag.llm import ChatModel, Message
 from legal_rag.llm.prompts import load_prompt
-from legal_rag.schemas import QueryAnalysis, RetrievalFilters, RewrittenQueries
+from legal_rag.schemas import QueryAnalysis, RetrievalFilters, RewrittenQueries, citation_kind
 
 
 class QueryRewriter:
@@ -33,8 +33,12 @@ class QueryRewriter:
 
     @staticmethod
     def filters(analysis: QueryAnalysis) -> RetrievalFilters | None:
-        # Only a single, certain document type becomes a hard filter. Legal domain stays a
+        # Only a single, certain kind of authority becomes a hard filter. Legal domain stays a
         # soft signal: statutes rarely carry a domain label, so filtering on it would hide them.
-        if len(analysis.document_types_needed) != 1:
+        # Filter by citation kind, never by exact document_type: the analyzer names the native
+        # court_decision type, which no imported corpus uses (cases are judgment, decision, ...),
+        # so an exact filter matched nothing and the answer had no evidence (2026-09-27).
+        kinds = {citation_kind(document_type) for document_type in analysis.document_types_needed}
+        if len(kinds) != 1:
             return None
-        return RetrievalFilters(document_types=list(analysis.document_types_needed))
+        return RetrievalFilters(citation_kind=kinds.pop())
