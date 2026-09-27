@@ -58,7 +58,7 @@ class HealthReportingTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["llm_provider"], "ollama")
         self.assertEqual(response.json["embedding_provider"], "ollama")
-        self.assertEqual(response.json["collection"], "docs_ollama_nomic")
+        self.assertEqual(response.json["collection"], "docs_ollama_bge_m3")
         self.assertNotEqual(response.json["collection"], "langchain")
 
     def test_health_does_not_probe_the_llm_by_default(self):

@@ -114,6 +114,39 @@ class ExtractAgentSectionsTests(unittest.TestCase):
 
         self.assertIn("PS_Agent", sections["chat_response"])
 
+    # Trimmed from a live qwen3:4b turn that called a tool first (2026-09-27).
+    QWEN_LABELLED = (
+        'chat_response: "임차권등기명령을 완료하면 다음 효력이 발생합니다:  \n'
+        '1. **대항력**: 제3자에게 대항할 수 있습니다.  \n\n'
+        '**근거**:  \n- [주택임대차보호법] 제3조의3(5)항"\n\n'
+        'statement_suggestion: "임차권등기명령 신청서 초안  \n- [임차인 성명]: [성명]"\n\n'
+        'report_suggestion: "주의 사항  \n- \"증명 서류\"를 첨부하세요"\n\n'
+        'job_statement_suggestion: ""'
+    )
+
+    def test_reads_labelled_key_value_sections(self):
+        import langchain_config
+        from langchain_core.messages import AIMessage
+
+        sections = langchain_config.extract_agent_sections({
+            "messages": [AIMessage(content=self.QWEN_LABELLED)]
+        })
+
+        self.assertTrue(sections["chat_response"].startswith("임차권등기명령을 완료하면"))
+        self.assertTrue(sections["chat_response"].endswith("제3조의3(5)항"))
+        self.assertNotIn("statement_suggestion", sections["chat_response"])
+        self.assertEqual(sections["statement_suggestion"], "임차권등기명령 신청서 초안  \n- [임차인 성명]: [성명]")
+        self.assertEqual(sections["report_suggestion"], '주의 사항  \n- "증명 서류"를 첨부하세요')
+        self.assertEqual(sections["job_statement_suggestion"], "")
+
+    def test_prose_that_merely_mentions_a_key_is_not_labelled_output(self):
+        import langchain_config
+        from langchain_core.messages import AIMessage
+
+        self.assertIsNone(langchain_config.extract_agent_sections({
+            "messages": [AIMessage(content="답변입니다. chat_response: 라는 말은 무시하세요.")]
+        }))
+
     def test_returns_none_for_legacy_marker_prose_so_the_caller_can_fall_back(self):
         import langchain_config
         from langchain_core.messages import AIMessage
