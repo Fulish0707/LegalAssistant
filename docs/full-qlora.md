@@ -1,5 +1,11 @@
 # Prepare the full legal QA corpus
 
+For a complete, commented Qwen3-4B training workflow, open
+[`sft_qlora_full.ipynb`](../sft_qlora_full.ipynb). It loads the full preparation
+directly and keeps GPU training disabled until `RUN_TRAINING=True`. The older
+`sft_qlora.ipynb` is the manually edited pilot notebook; the replacement-cell
+instructions below are retained for anyone continuing in that file.
+
 The CPU command below processes all four `qa.jsonl` files. It removes the pilot caps and
 does not downsample domains. It does not train or load model weights. The existing local
 Qwen tokenizer is required. The user's handwritten notebook is left unchanged.
