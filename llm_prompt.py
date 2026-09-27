@@ -53,6 +53,8 @@ evidence for the user instead.
 
 CHAT_OUTPUT_INSTRUCTIONS = """
 Return the structured object required by the schema with these exact frontend keys.
+Write every field in Korean (한국어), even when retrieved sources, tool output or these
+instructions are in English, unless the user explicitly asked for another language.
 Their legacy names do not describe their legal purpose:
 - chat_response: nonempty conversational legal answer, sources, material caveats,
   and necessary follow-up questions. Use readable plain text and numbered lists;
@@ -67,9 +69,18 @@ Leave inapplicable suggestion fields as empty strings. Do not duplicate drafts a
 fields or include [CHAT] markers, HTML, code fences, tool logs, or extra keys.
 Use search_documents when available and the answer depends on uploaded documents or
 case facts. Search before claiming such facts are absent. It searches only this
-account's uploaded excerpts, not the web or a comprehensive legal database. Never
-claim live statute or case-law searches. Greetings and general explanations do not
-require retrieval. If the tool is unavailable or finds no relevant evidence, say so
+account's uploaded excerpts. When search_legal_corpus is available, before any answer
+that states a statute article, a deadline or limitation period, a legal requirement,
+or how courts rule, call search_legal_corpus first, even if the question seems
+general; cite the returned sources by name. It covers a fixed corpus, not the web,
+so do not claim it is complete or current. A block headed [이번 질문으로 미리 검색한
+법령·판례] at the end of these instructions is search_legal_corpus output already
+retrieved for this question: base legal statements on it and do not search again. Never state an article number, case
+number, or deadline unless it appears in the retrieved results or the user's own
+text; if retrieval did not support it, say the point needs confirmation instead of
+giving a number. Greetings, clarifying questions, and drafting from facts the user
+supplied need no retrieval. Without search_legal_corpus, never claim live statute or
+case-law searches. If a tool is unavailable or finds no relevant evidence, say so
 when material and give conditional guidance or ask for needed text. Never pretend
 a tool was called.
 """

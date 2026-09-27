@@ -17,7 +17,7 @@
     -   **대화 메모리:** LangGraph `SqliteSaver` 체크포인터가 브라우저 작업공간별 대화 스레드를 유지합니다 (`thread_id` = 세션 쿠키의 작업공간 ID). 로그인은 없습니다.
 -   **RAG 기반 문서 질의응답 및 콘텐츠 생성:**
     -   사용자가 제공하는 문서(`documents` 폴더 내 PDF, TXT 파일)를 ChromaDB 벡터 스토어에 저장 및 인덱싱.
-    -   임베딩은 Ollama `nomic-embed-text`를 사용합니다 (768차원).
+    -   임베딩은 Ollama `bge-m3`를 사용합니다 (1024차원). 법령·판례 코퍼스(`legal_rag`, Qdrant)와 같은 모델이라 Ollama에 임베딩 모델이 하나만 올라갑니다.
     -   `search_documents` 도구가 **한 번만 검색하고, 중복 청크를 제거한 뒤, 출처(`[source: ...]`)를 붙여** 원문 발췌를 그대로 반환합니다. 검색 결과는 항상 `filter={"user_id": ...}` 로 브라우저 작업공간 범위가 제한됩니다.
 -   **다중 입력 방식 지원:**
     -   **문서 업로드 및 분석 (OCR):**
@@ -37,7 +37,7 @@
 -   **LLM 프레임워크 (LLM Framework):** LangChain 1.x + **LangGraph** (`langchain.agents.create_agent`)
 -   **LLM 및 임베딩 (LLM & Embedding):** `llm_model.py`의 `get_chat_model()` / `get_embedding_model()` 커넥터가 담당하며, 공급자 이름은 이 모듈 밖에 등장하지 않습니다.
     -   채팅 (`LLM_PROVIDER`): `ollama` (기본값, `qwen3:4b`) 또는 `none` (비활성화)
-    -   임베딩 (`EMBEDDING_PROVIDER`): `ollama` (기본값, `nomic-embed-text`) 또는 `none` (비활성화)
+    -   임베딩 (`EMBEDDING_PROVIDER`): `ollama` (기본값, `bge-m3`) 또는 `none` (비활성화)
 -   **에이전트 메모리 (Memory):** `langgraph-checkpoint-sqlite`의 `SqliteSaver`
 -   **벡터 데이터베이스 (Vector Database):** ChromaDB (임베딩 공급자별 컬렉션 분리)
 -   **관측성 (Observability):** LangSmith (옵트인 추적) 및 `evals/` 평가 하네스
@@ -76,7 +76,7 @@ graph TD
     subgraph Models["모델 커넥터: llm_model.py"]
         M_Chat["get_chat_model(): LLM_PROVIDER = ollama 또는 none"]
         M_Embed["get_embedding_model(): EMBEDDING_PROVIDER = ollama 또는 none"]
-        M_Coll["get_collection_name(): docs_ollama_nomic"]
+        M_Coll["get_collection_name(): docs_ollama_bge_m3"]
     end
 
     subgraph DataStorage["데이터 저장소"]
@@ -121,7 +121,7 @@ graph TD
     -   **OCR:** 사용자가 업로드한 이미지/PDF/DOCX 파일에서 텍스트가 추출됩니다.
 2.  **임베딩 및 벡터 저장 (Embedding & Vector Storage - RAG Core):**
     -   분할된 청크들은 활성 임베딩 공급자의 모델로 임베딩되어 ChromaDB에 저장됩니다.
-    -   컬렉션 이름은 `get_collection_name()`이 임베딩 공급자와 모델로부터 생성합니다 (`docs_ollama_nomic`). 같은 모델의 다른 표기(`models/` 접두사, `:latest` 접미사)는 하나로 정규화되므로, 하나의 임베딩 공간이 두 컬렉션으로 쪼개지지 않습니다.
+    -   컬렉션 이름은 `get_collection_name()`이 임베딩 공급자와 모델로부터 생성합니다 (`docs_ollama_bge_m3`). 같은 모델의 다른 표기(`models/` 접두사, `:latest` 접미사)는 하나로 정규화되므로, 하나의 임베딩 공간이 두 컬렉션으로 쪼개지지 않습니다.
 3.  **사용자 질의 및 컨텍스트 검색 (User Query & Context Retrieval - RAG Core):**
     -   에이전트는 `search_documents` 도구를 호출하고, 이 도구는 **한 번만** 유사도 검색을 수행합니다 (`filter={"user_id": ...}`).
     -   중복 본문을 제거한 뒤 `[source: 파일명]` 머리말을 붙인 원문 발췌를 그대로 반환합니다. 이 경로에는 모델의 판단이 개입하지 않으므로, 4B 모델이 틀릴 여지 자체가 없습니다.
@@ -205,7 +205,7 @@ graph TD
 | `LLM_PROVIDER` | `ollama` | 채팅 모델 공급자. `ollama` 또는 `none`. |
 | `EMBEDDING_PROVIDER` | `ollama` | 임베딩 공급자. `ollama` 또는 `none`. **변경 시 재수집 필요** (4장 참고). |
 | `OLLAMA_MODEL` | `qwen3:4b` | Ollama 채팅 모델. |
-| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Ollama 임베딩 모델. |
+| `OLLAMA_EMBED_MODEL` | `bge-m3` | Ollama 임베딩 모델. `nomic-embed-text`에서 바꿨으므로 그 전에 올린 문서는 다시 업로드해야 합니다. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama 서버 주소. |
 | `OLLAMA_TEMPERATURE` | `0.7` | Qwen3는 greedy 디코딩(0)에서 품질이 떨어지고 같은 말을 반복합니다. 0으로 두지 마세요. |
 | `OLLAMA_REASONING` | (미설정) | 설정하지 않는 것이 기본입니다. `true`로 두면 추적 가시성을 얻는 대신 구조화 출력을 잃습니다. |
@@ -259,7 +259,7 @@ Tesseract OCR은 시스템 패키지로 별도 설치되어 있어야 합니다.
 ```bash
 # https://ollama.com 에서 설치한 뒤
 ollama pull qwen3:4b            # 채팅 모델
-ollama pull nomic-embed-text    # 로컬 임베딩 (EMBEDDING_PROVIDER=ollama 인 경우)
+ollama pull bge-m3              # 로컬 임베딩 (EMBEDDING_PROVIDER=ollama 인 경우)
 ollama serve                    # http://localhost:11434
 ```
 

@@ -10,7 +10,7 @@ import unittest
 import requests
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "bge-m3")
 PROBE_TIMEOUT_SECONDS = 1.0
 
 
@@ -57,7 +57,7 @@ class OllamaConnectorLiveTests(unittest.TestCase):
         self.assertEqual(len(vector), 768)
         # Matching dimensions do not imply matching embedding spaces.
         self.assertNotEqual(get_collection_name(), "langchain")
-        self.assertEqual(get_collection_name(), "docs_ollama_nomic")
+        self.assertEqual(get_collection_name(), "docs_ollama_bge_m3")
 
 
 if __name__ == "__main__":
