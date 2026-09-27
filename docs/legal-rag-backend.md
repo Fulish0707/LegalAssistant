@@ -120,6 +120,7 @@ Frequently changed keys:
 | `qdrant.mode` | `embedded` | `server` uses `qdrant.url` and `LEGAL_RAG__QDRANT__API_KEY` |
 | `retrieval.k_dense`, `k_sparse`, `k_fused`, `k_final` | 20, 20, 20, 5 | Depth per leg, after fusion, and into the answer |
 | `rerank.backend` | `noop` | `cross_encoder` needs the extra |
+| `rerank.device` / `rerank.dtype` | `cpu` / `float32` | `local.yaml` uses `cuda` / `float16`, see below |
 | `llm.backend` / `llm.model` | `ollama` / `qwen3:4b` | `transformers` arrives with V0.4 |
 | `rag.allow_clarification` | `true` | Ask for facts instead of answering when the analyzer flags them |
 | `rag.llm_rewrite` | `false` | Add LLM-generated search phrasings |
@@ -329,8 +330,7 @@ get wrong.
 **Weights exist because rank fusion has no notion of relevance.** Every list contributes
 `1/(k + rank)`, so each corpus's top hit outranks the relevant corpus's second hit no
 matter how poor it is. Fanning out therefore trades precision for recall. Weights mitigate
-it; a cross-encoder reranker is the real fix and is not built yet — `rerank.backend` is
-`noop`, and `legal_rag.reranking.cross_encoder` does not exist. Measure Recall@k with
+it; the cross-encoder reranker (`rerank.backend: cross_encoder`) is the real fix. Measure Recall@k with
 `corpora: []` and again with all four before concluding anything about fusion quality.
 
 `k_fused` defaults to 20, which is tight when eight lists feed the fuser rather than two.
@@ -339,3 +339,19 @@ Diagnostics: `eval_retrieval.py --leg sparse` now means every sparse leg across 
 corpus, fused, and the report header records which leg it measured. Use `close_legs(retriever)`
 to release stores — fan-out opens one per corpus, and in embedded mode each holds an
 exclusive lock on its index directory, which is why server mode is preferred for fan-out.
+
+## Reranker precision and device
+
+Measured 2026-09-27 on the RTX 4060 (8 GB): `BAAI/bge-reranker-v2-m3` scoring 50 civil
+judgment chunks (2,855 characters on average) at `max_length` 512 and batch 16.
+
+| Device / dtype | Seconds per query | Peak VRAM | Top 10 vs float32 |
+|---|---|---|---|
+| cuda / float32 | 2.9–3.1 | 2.5 GB | — |
+| cuda / float16 | 0.8 | 1.2 GB | identical |
+| cpu / float32 (16 cores) | 35–37 | 0 | identical |
+
+`local.yaml` runs float16 on cuda. The card also holds the chat model (qwen3:4b, ~3.4 GB)
+and bge-m3 (~1.9 GB), so float32 does not fit alongside them. CPU is too slow for chat,
+where the agent may search more than once per turn.
+

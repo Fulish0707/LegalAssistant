@@ -34,6 +34,7 @@ def build_embedder(settings: Settings) -> Embedder:
             base_url=settings.embedding.base_url,
             batch_size=settings.embedding.batch_size,
             timeout=settings.embedding.timeout_seconds,
+            query_num_ctx=settings.embedding.query_num_ctx,
         )
     raise ValueError(f"unknown embedding backend {settings.embedding.backend!r}")
 
@@ -61,7 +62,8 @@ def build_reranker(settings: Settings) -> Reranker:
     if settings.rerank.backend == "cross_encoder":
         from legal_rag.reranking.cross_encoder import CrossEncoderReranker  # heavy import, optional extra
 
-        return CrossEncoderReranker(model=settings.rerank.model, device=settings.rerank.device)
+        return CrossEncoderReranker(model=settings.rerank.model, device=settings.rerank.device,
+                                    dtype=settings.rerank.dtype)
     raise ValueError(f"unknown rerank backend {settings.rerank.backend!r}")
 
 
@@ -119,7 +121,8 @@ def build_hybrid_retriever(
     legs = build_corpus_legs(settings, embedder=embedder)
     return HybridRetriever(
         legs,
-        RRFFuser(rrf_k=settings.retrieval.rrf_k, weights=fusion_weights(settings)),
+        RRFFuser(rrf_k=settings.retrieval.rrf_k, weights=fusion_weights(settings),
+                 leg_floor=settings.retrieval.leg_floor),
         reranker or build_reranker(settings),
         k_leg=max(settings.retrieval.k_dense, settings.retrieval.k_sparse),
         k_fused=settings.retrieval.k_fused,
