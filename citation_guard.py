@@ -23,6 +23,18 @@ def _squash(text):
     return re.sub(r"\s+", "", text or "")
 
 
+# Korean statutes are cited both by full title and by the common short form:
+# 여성기업지원에 관한 법률 -> 여성기업지원법. Comparing both sides after this rewrite lets
+# either spelling match the other; the article number must still match separately.
+_TITLE_TAILS = ((r"등?에관한특별법", "특별법"), (r"등?에관한법률", "법"), (r"등?에관한법", "법"), (r"법률", "법"))
+
+
+def _short_title(squashed):
+    for pattern, replacement in _TITLE_TAILS:
+        squashed = re.sub(pattern, replacement, squashed)
+    return squashed
+
+
 # Words the law-name pattern matches that refer to a law without naming it.
 _GENERIC_LAW_WORDS = {"법", "법령", "법률", "동법", "본법", "이법", "같은법", "관련법", "관련법령", "시행령", "시행규칙", "규정", "규칙"}
 
@@ -30,13 +42,15 @@ _GENERIC_LAW_WORDS = {"법", "법령", "법률", "동법", "본법", "이법", "
 def unsupported_citations(answer, evidence_texts):
     """Citations in answer (in order, deduplicated) that no evidence text contains."""
     evidence = _squash(" ".join(t for t in evidence_texts if t))
+    evidence_short = _short_title(evidence)
     missing = []
     for match in STATUTE_RE.finditer(answer or ""):
         article, law = _squash(match.group("art")), match.group("law")
         if law and _squash(law) in _GENERIC_LAW_WORDS:
             law = None
         # 제3조 must not be satisfied by 제3조의3.
-        found = re.search(re.escape(article) + r"(?!의)", evidence) and (not law or _squash(law) in evidence)
+        law_found = not law or _squash(law) in evidence or _short_title(_squash(law)) in evidence_short
+        found = re.search(re.escape(article) + r"(?!의)", evidence) and law_found
         label = f"{law} {match.group('art')}" if law else match.group("art")
         if not found and label not in missing:
             missing.append(label)
