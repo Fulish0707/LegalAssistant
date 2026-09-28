@@ -464,3 +464,10 @@ within noise.
     so rankings are unchanged; only the evidence header and the verifier see it.
   - **Result:** the 지방자치법 question, run 3 times, was accepted on the first draft each
     time, with no guard flags.
+- **80-question rerun after the backfill.** Of 80 turns, 80 were answered, with no refusals
+  and no errors. The Verifier flagged 10 first drafts, but only one was a statute mismatch
+  (against 5 in the previous run). The other issues were references to non-statute
+  sources, such as a date or "국가인권위원회 결정", that no source text can match. The
+  guard flagged 0 first drafts and 0 final answers. Rerunning question-only retrieval on
+  the 210 questions from 2026-09-27 returned the same top 10 for all of them, and S@10 was
+  0.557 both times.
