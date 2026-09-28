@@ -35,6 +35,17 @@ class UnsupportedCitationTests(unittest.TestCase):
         self.assertEqual(unsupported_citations("장관의 권한 관련 법령 제48조에 따라", ["… 제48조(권한의 위임) …"]), [])
         self.assertEqual(unsupported_citations("같은 법률 제9조", ["없음"]), ["제9조"])
 
+    def test_short_and_full_law_names_match_each_other(self):
+        """"여성기업지원법 제2조" was flagged against "여성기업지원에 관한 법률 제2조" (2026-09-27)."""
+        full = ["여성기업지원에 관한 법률 제2조(정의) 이 법에서 사용하는 용어의 뜻은"]
+        self.assertEqual(unsupported_citations("여성기업지원법 제2조에 따르면", full), [])
+        self.assertEqual(unsupported_citations("여성기업지원에 관한 법률 제2조", ["여성기업지원법 제2조"]), [])
+
+    def test_short_name_still_needs_the_same_law_and_article(self):
+        full = ["여성기업지원에 관한 법률 제2조(정의)"]
+        self.assertEqual(unsupported_citations("근로기준법 제2조", full), ["근로기준법 제2조"])
+        self.assertEqual(unsupported_citations("여성기업지원법 제9조", full), ["여성기업지원법 제9조"])
+
     def test_the_users_own_text_counts_as_evidence(self):
         self.assertEqual(unsupported_citations("말씀하신 민법 제750조는", ["민법 제750조가 적용되나요?"]), [])
 
