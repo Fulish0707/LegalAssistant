@@ -60,11 +60,15 @@ def _docs(hits) -> list[str]:
     return out
 
 
-def _orchestrator():
+def _orchestrator(overrides: str | None = None):
+    """The local profile without clarification; `overrides` is JSON merged over it, e.g. an evidence arm."""
     from legal_rag.cli import settings_from_options
     from legal_rag.factory import build_orchestrator
 
-    return build_orchestrator(settings_from_options(profile="local", extra={"rag": {"allow_clarification": False}}))
+    extra: dict = {"rag": {"allow_clarification": False}}
+    for section, values in json.loads(overrides or "{}").items():
+        extra.setdefault(section, {}).update(values)
+    return build_orchestrator(settings_from_options(profile="local", extra=extra))
 
 
 @app.command()
@@ -109,6 +113,7 @@ def verify(
     out: Path = typer.Option(..., help="Directory for verify.jsonl."),
     questions: Path = typer.Option(None, exists=True, help="Custom question JSONL instead of the pilot sample."),
     per_domain: int = typer.Option(20), seed: int = typer.Option(11), cross: int = typer.Option(20),
+    overrides: str = typer.Option(None, help='Settings JSON, e.g. \'{"retrieval": {"k_final": 8}}\'.'),
 ) -> None:
     import legal_rag.rag.orchestrator as orchestrator_module
     from citation_guard import unsupported_citations
@@ -117,7 +122,7 @@ def verify(
 
     out.mkdir(parents=True, exist_ok=True)
     path = out / "verify.jsonl"
-    orch = _orchestrator()
+    orch = _orchestrator(overrides)
     log: dict = {}
 
     def evidence(bundle) -> list[str]:
@@ -183,6 +188,33 @@ def verify(
                 record["final_guard"] = unsupported_citations(text, evidence(response.evidence) + [ex["query"]])
                 record["final_text"] = text[:1500]
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+            fh.flush()
+
+
+@app.command()
+def coverage(
+    rewrite_run: Path = typer.Option(..., exists=True, dir_okay=False, help="A rewrite.jsonl whose rule_queries to reuse."),
+    out: Path = typer.Option(..., help="Directory for coverage.jsonl."),
+    depth: int = typer.Option(20),
+) -> None:
+    """Is the gold document among the evidence /v1/chat would build, at several evidence sizes?
+
+    Replays the stored rule-rewrite queries through retrieve_many, as handle() does, so no LLM
+    call is needed. One ranked list of `depth` chunks serves every size: the reranker only cuts."""
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "coverage.jsonl"
+    orch = _orchestrator()
+    queries = {f"{name}:{item['id']}": item["query"] for name, item in _sample(50, 7, None)}
+    done = _done(path)
+    with path.open("a") as fh:
+        for row in map(json.loads, open(rewrite_run)):
+            if row["key"] in done:
+                continue
+            query = row.get("query") or queries[row["key"]]
+            hits = orch.retriever.retrieve_many(row["rule_queries"], depth, None, rerank_query=query)
+            fh.write(json.dumps({"key": row["key"], "dataset": row["dataset"], "gold": row["gold"],
+                                 "chunk_documents": [hit.chunk.document_id for hit in hits],
+                                 "chunk_chars": [len(hit.chunk.text) for hit in hits]}, ensure_ascii=False) + "\n")
             fh.flush()
 
 
