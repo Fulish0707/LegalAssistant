@@ -449,5 +449,18 @@ within noise.
 - **Recheck:** the 4 affected questions were rerun live. All four answered, and the guard
   flagged none. The two that errored before did not truncate this time, so only the unit
   tests exercise the error path.
-- **Open, not fixed:** in that rerun the 지방자치법 chunk had no `Article` in its header,
-  so a correct `S1` citation was counted as `source_id_mismatch` and stripped.
+- **Statute windows now name their article.** The imported corpora cut each statute into
+  ~3,500-character windows with `metadata.article` empty. In that rerun, the chunk that
+  opens in the body of 지방자치법 제124조 carried no article, so a correct `S1` citation was
+  counted as `source_id_mismatch` and stripped. `Corpus.chunks()` now finds each window's
+  start in the document text and names the last article heading before it
+  (`legal_rag.ingestion.statute_articles`). This is not the ip-v2 structural rechunk; the
+  windows and embeddings are unchanged.
+  - **Coverage:** 21,229 of 21,234 statute windows across the four corpora. The other 5
+    are 1940s–60s decrees whose headings have no parenthesis.
+  - **Sanity check:** no window's article is numbered after the first heading inside it.
+  - **Live index:** `scripts/backfill_statute_articles.py --apply` wrote the values into
+    the live collections with `set_payload`, taking 53 s. Retrieval never reads the field,
+    so rankings are unchanged; only the evidence header and the verifier see it.
+  - **Result:** the 지방자치법 question, run 3 times, was accepted on the first draft each
+    time, with no guard flags.

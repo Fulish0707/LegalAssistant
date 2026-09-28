@@ -8,9 +8,10 @@ from typing import Iterator
 
 from pydantic import TypeAdapter
 
-from legal_rag.schemas import Chunk, LegalDocument
+from legal_rag.schemas import Chunk, DocumentType, LegalDocument
 
 from .manifest import Manifest
+from .statute_articles import StatuteArticleLocator
 from legal_rag.schemas.documents import ImportedDocument
 
 _DOCUMENT_ADAPTER: TypeAdapter = TypeAdapter(LegalDocument)
@@ -39,10 +40,32 @@ class Corpus:
                         yield _DOCUMENT_ADAPTER.validate_python(record)
 
     def chunks(self) -> Iterator[Chunk]:
+        """Every chunk; a statute window without an article gets the one it opens in."""
+        locators: dict[str, StatuteArticleLocator] = {}
+        texts: dict[str, str] | None = None
         with (self.directory / "chunks.jsonl").open(encoding="utf-8") as handle:
             for line in handle:
+                if not line.strip():
+                    continue
+                chunk = Chunk.model_validate_json(line)
+                if chunk.document_type is DocumentType.statute and chunk.metadata.article is None:
+                    if texts is None:
+                        texts = self._statute_texts()
+                    if chunk.document_id in texts:
+                        locator = locators.setdefault(chunk.document_id, StatuteArticleLocator(texts[chunk.document_id]))
+                        if article := locator.article(chunk.text):
+                            chunk = chunk.model_copy(update={"metadata": chunk.metadata.model_copy(update={"article": article})})
+                yield chunk
+
+    def _statute_texts(self) -> dict[str, str]:
+        texts = {}
+        with (self.directory / "documents.jsonl").open(encoding="utf-8") as handle:
+            for line in handle:
                 if line.strip():
-                    yield Chunk.model_validate_json(line)
+                    record = json.loads(line)
+                    if record.get("document_type") == DocumentType.statute.value and isinstance(record.get("text"), str):
+                        texts[record["id"]] = record["text"]
+        return texts
 
     def document(self, document_id: str) -> LegalDocument | ImportedDocument:
         if self._documents_by_id is None:
