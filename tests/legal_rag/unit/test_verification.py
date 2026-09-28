@@ -1,6 +1,7 @@
 from legal_rag.schemas import Citation, CitationKind, Confidence, DocumentType, Evidence, EvidenceBundle, LegalAnswer, VerificationAction
 from legal_rag.verification import VerificationPolicy, Verifier, backfill_citations
 from legal_rag.verification.backfill import _kind
+from legal_rag.verification.policy import STRIP_NOTE
 
 
 def _bundle():
@@ -133,3 +134,15 @@ def test_strip_cleans_issue_and_follow_up_lists():
     stripped = VerificationPolicy().strip(ans, report)
     assert stripped.legal_issues == ["보증금 반환"]
     assert stripped.additional_information_needed == ["계약 만료일"]
+
+
+def test_strip_cleans_the_model_written_uncertainty():
+    """strip left "석면피해구제법 제3조 제3항의 …" in the model's own uncertainty text, so the
+    removed citation still reached the user (2026-09-28, 80-question rerun)."""
+    ans = _answer(analysis="보증금은 반환되어야 합니다.",
+                  uncertainty="헌법 제11조의 적용 범위는 불확실합니다. 계약 만료일이 필요합니다.")
+    report = Verifier().verify(ans, _bundle())
+    stripped = VerificationPolicy().strip(ans, report)
+    model_text, note = stripped.uncertainty.split(STRIP_NOTE)
+    assert "제11조" not in model_text and "계약 만료일이 필요합니다." in model_text
+    assert "헌법 제11조" in note

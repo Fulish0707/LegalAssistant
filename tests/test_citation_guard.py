@@ -26,6 +26,16 @@ class UnsupportedCitationTests(unittest.TestCase):
     def test_bare_article_passes_when_the_number_is_in_evidence(self):
         self.assertEqual(unsupported_citations("제3조의3에 따라", ["주택임대차보호법 제3조의3(임차권등기명령)"]), [])
 
+    def test_branch_article_does_not_stand_in_for_the_main_article(self):
+        self.assertEqual(unsupported_citations("주택임대차보호법 제3조", ["주택임대차보호법 제3조의3(임차권등기명령)"]),
+                         ["주택임대차보호법 제3조"])
+
+    def test_possessive_after_the_article_is_not_a_branch_number(self):
+        """"「지방자치법」 제124조의 규정을 준용한다" in the evidence did not count as 제124조, so a
+        verified answer was flagged (2026-09-28, 80-question rerun)."""
+        evidence = ["교육감의 권한대행에 관하여는 「지방자치법」 제124조의 규정을 준용한다."]
+        self.assertEqual(unsupported_citations("지방자치법 제124조에 따라", evidence), [])
+
     def test_case_numbers_are_checked_too(self):
         answer = "대법원 2010다95062 판결과 2099다1 판결"
         self.assertEqual(unsupported_citations(answer, ["… 대법원 2010다95062 참조"]), ["2099다1"])

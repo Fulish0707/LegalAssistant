@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from .base import Message, ModelResponse
+from .base import Message, ModelResponse, StructuredOutputError
 
 
 @dataclass
@@ -33,6 +33,9 @@ class FakeChatModel:
         if isinstance(scripted, BaseModel):
             return ModelResponse(text=scripted.model_dump_json(), parsed=scripted)
         if response_schema is not None:
-            parsed = response_schema.model_validate_json(scripted)
+            try:
+                parsed = response_schema.model_validate_json(scripted)
+            except ValidationError as exc:  # as the real backends report a malformed answer
+                raise StructuredOutputError(f"{response_schema.__name__}: {exc}", scripted) from exc
             return ModelResponse(text=scripted, parsed=parsed)
         return ModelResponse(text=str(scripted))

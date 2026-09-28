@@ -21,6 +21,16 @@ _PLAIN_SYSTEM = (
 )
 
 
+def _repair_request(error: StructuredOutputError) -> str:
+    # qwen3:4b sometimes loops inside "analysis" until max_tokens cuts the JSON off
+    # (2 of 80 turns, 2026-09-28). Asking it to fix the schema just repeats the loop.
+    if "EOF while parsing" in str(error):
+        return ("출력이 너무 길어 JSON이 중간에 잘렸습니다. 같은 내용을 훨씬 짧게 쓰세요. "
+                "analysis는 다섯 문장 이내로, 각 목록은 세 항목 이내로 쓰고 같은 문장을 되풀이하지 마세요. "
+                "스키마에 맞는 JSON 객체만 출력하세요.")
+    return f"출력이 JSON 스키마에 맞지 않았습니다: {error}. 스키마에 맞는 JSON 객체만 출력하세요."
+
+
 class GenerationError(RuntimeError):
     """The model could not produce a schema-valid answer even after a repair attempt."""
 
@@ -86,7 +96,7 @@ class Generator:
                 response = self.model.generate(messages, response_schema=LegalAnswer, temperature=self.temperature, max_tokens=self.max_tokens)
             except StructuredOutputError as exc:
                 last_error = exc
-                messages = messages + [Message(role="user", content=f"출력이 JSON 스키마에 맞지 않았습니다: {exc}. 스키마에 맞는 JSON 객체만 출력하세요.")]
+                messages = messages + [Message(role="user", content=_repair_request(exc))]
                 continue
             if isinstance(response.parsed, LegalAnswer):
                 return response.parsed

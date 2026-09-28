@@ -434,3 +434,20 @@ within noise.
   - In the other, the verifier accepted "지방자치법 제124조" and the guard did not. The saved
     run keeps no evidence text, so it is unresolved which checker is right.
 
+
+**Fixes after the rerun**
+- **Truncated JSON:** when the answer JSON is cut off, the repair retry now asks for a
+  shorter answer instead of a schema fix. If generation still fails, `handle()` strips
+  the earlier draft when there is one and otherwise returns `kind="rejected"` with
+  `reason="answer generation failed"`. It no longer raises.
+- **Strip:** strip now also removes tainted sentences from the model-written `uncertainty`.
+  The strip note still names the removed citations, so the eval script leaves the note
+  out of the guard check.
+- **지방자치법 제124조:** the verifier was right. The evidence says "「지방자치법」 제124조의
+  규정을 준용한다", and the guard's `(?!의)` lookahead treated the particle 의 like the
+  branch number in 제3조의3. It is now `(?!의\d)`. Verify records now keep the evidence text.
+- **Recheck:** the 4 affected questions were rerun live. All four answered, and the guard
+  flagged none. The two that errored before did not truncate this time, so only the unit
+  tests exercise the error path.
+- **Open, not fixed:** in that rerun the 지방자치법 chunk had no `Article` in its header,
+  so a correct `S1` citation was counted as `source_id_mismatch` and stripped.

@@ -113,6 +113,7 @@ def verify(
     import legal_rag.rag.orchestrator as orchestrator_module
     from citation_guard import unsupported_citations
     from legal_rag.verification.citations import answer_text
+    from legal_rag.verification.policy import STRIP_NOTE
 
     out.mkdir(parents=True, exist_ok=True)
     path = out / "verify.jsonl"
@@ -174,8 +175,11 @@ def verify(
                       "final_ok": response.verification.ok if response.verification else None,
                       "final_issues": issues(response.verification) if response.verification else None,
                       "seconds": round(time.perf_counter() - started, 1)}
+            if response.evidence is not None:
+                record["evidence"] = evidence(response.evidence)
             if response.answer is not None:
-                text = answer_text(response.answer)
+                # The strip note names the citations it removed; the guard would count those as cited.
+                text = answer_text(response.answer).split(STRIP_NOTE)[0]
                 record["final_guard"] = unsupported_citations(text, evidence(response.evidence) + [ex["query"]])
                 record["final_text"] = text[:1500]
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")

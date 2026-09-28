@@ -14,7 +14,7 @@ from .analyzer import QueryAnalyzer
 from .clarify import ClarificationPolicy
 from .context import ContextBuilder
 from .conversation import ConversationStore
-from .generator import Generator
+from .generator import GenerationError, Generator
 from .rewriter import QueryRewriter
 from .trace import TraceRecorder
 
@@ -108,17 +108,27 @@ class Orchestrator:
         action = VerificationAction.accept
         feedback: str | None = None
         for attempt in range(self.settings.rag.max_regenerations + 1):
-            with recorder.stage(f"generate[{attempt}]"):
-                answer = self.generator.generate(message, bundle, feedback=feedback)
+            try:
+                with recorder.stage(f"generate[{attempt}]"):
+                    draft = self.generator.generate(message, bundle, feedback=feedback)
+            except GenerationError:
+                # The model broke the JSON twice, e.g. by looping past max_tokens. Strip the
+                # draft that asked for this regeneration, or refuse; either beats a 500.
+                action = VerificationAction.strip if answer is not None else VerificationAction.reject
+                break
             with recorder.stage(f"verify[{attempt}]"):
-                answer = backfill_citations(answer, bundle)
+                answer = backfill_citations(draft, bundle)
                 report = self.verifier.verify(answer, bundle, user_refs=[*analysis.statute_refs, *analysis.case_refs])
             action = self.policy.decide(report, attempt)
             if action != VerificationAction.regenerate:
                 break
             trace.regenerations += 1
             feedback = self.policy.feedback(report)
-        assert answer is not None and report is not None
+
+        if answer is None or report is None:
+            recorder.finish(policy_action=VerificationAction.reject.value)
+            self._remember(conversation_id, "답변을 생성하지 못했습니다.", trace.evidence_ids)
+            return ChatResponse(kind="rejected", conversation_id=conversation_id, reason="answer generation failed", evidence=bundle, trace=trace)
 
         if action == VerificationAction.strip:
             answer = self.policy.strip(answer, report)
