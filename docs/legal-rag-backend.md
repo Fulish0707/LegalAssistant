@@ -471,3 +471,41 @@ within noise.
   guard flagged 0 first drafts and 0 final answers. Rerunning question-only retrieval on
   the 210 questions from 2026-09-27 returned the same top 10 for all of them, and S@10 was
   0.557 both times.
+
+### Answer accuracy against the AIHub references, 2026-09-28
+
+`scripts/judge_answers.py` pairs the 80 saved answers from the article-backfill rerun with
+the reference answers in the upstream `qa.jsonl`. The eval sets leave those out, so this is
+the first check of answer content. The script also records whether the question's gold
+document was among the turn's evidence, since each reference is written from that one
+document. qwen3:8b (think on, `num_ctx` 12288) judged two things:
+- whether the answer states the reference's key conclusion (yes, partial or no);
+- whether anything in the answer contradicts the reference.
+
+An answer counts as correct when it covers the conclusion fully and contradicts nothing.
+This measures agreement with one reference answer, not legal correctness.
+
+| Group | Correct | Covers at least partly | Contradicts |
+|---|---|---|---|
+| All 80 | 0.62 [0.52, 0.72] | 0.71 | 0.15 [0.09, 0.24] |
+| Gold document in evidence (47) | 0.70 [0.56, 0.81] | 0.74 | 0.13 |
+| Gold document not in evidence (33) | 0.52 [0.35, 0.67] | 0.67 | 0.18 |
+| administrative / civil / criminal / crossdomain (20 each) | 0.60 / 0.45 / 0.80 / 0.65 | | 0.25 / 0.15 / 0.05 / 0.15 |
+
+Intervals are Wilson 95%.
+
+- **Calibration:** 31 answers, stratified by dataset and by gold-in-evidence, were graded
+  by hand before any judge output was read.
+  - Agreement: 26 of 31 on correct (Gwet AC1 0.698) and 28 of 31 on contradicts (AC1
+    0.879). Both pass the project's AC1 ≥ 0.6 bar.
+  - The judge is lenient on correct: it gave 21 of 31, against 18 by hand. Three of its
+    "yes" grades were partial answers, and one claimed the answer covered a point it did
+    not.
+  - It is strict on contradicts: it gave 5 of 31, against 2 by hand. It counts an answer
+    built on a different case as a contradiction.
+  - The hand-graded rates on the 31 were 0.58 correct and 0.06 contradicting.
+- **Main loss:** retrieval. With the gold document in evidence, 70% of answers match the
+  reference; without it, 52%.
+- **Civil:** civil is lowest at 0.45. Its questions are often generic ("손해액 산정에 있어
+  인정되는 기준은?") while the reference states what one court held.
+- **Truncated answers:** 2 of the 80 saved answers were cut at 1,500 characters.
