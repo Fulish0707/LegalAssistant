@@ -509,3 +509,39 @@ Intervals are Wilson 95%.
 - **Civil:** civil is lowest at 0.45. Its questions are often generic ("손해액 산정에 있어
   인정되는 기준은?") while the reference states what one court held.
 - **Truncated answers:** 2 of the 80 saved answers were cut at 1,500 characters.
+
+### More evidence per answer (k_final 5 → 8), 2026-09-28: not adopted
+
+**Gold coverage.** `eval_chat_pipeline.py coverage` replays the stored rule-rewrite queries
+through `retrieve_many`, as `/v1/chat` does, and checks whether the gold document lands in
+the evidence. No generation is involved.
+
+| Evidence | Formal, 210 questions | Everyday, 150 questions |
+|---|---|---|
+| 5 chunks (current) | 0.471 | 0.440 |
+| 5 distinct documents | 0.486 | 0.440 |
+| 8 chunks | 0.543 (+0.072, CI [+0.038, +0.110]) | 0.453 (CI [+0.000, +0.033]) |
+| 10 chunks | 0.567 | 0.473 |
+
+**Context budget.** The answer prompt was measured with Ollama's `prompt_eval_count` on 14
+questions.
+- **5 × 1,500 characters:** median 5.7k tokens, max 6.2k. With `max_tokens` 2048 that
+  already exceeds `num_ctx` 8192 at the tail.
+- **8 × 1,500 characters:** max 9.5k tokens, so it needs `num_ctx` 12288. That fits:
+  qwen3:4b loaded all 37 layers beside the reranker and bge-m3, at 7.0 GB.
+- **10 × 1,500 characters:** needs about 14k tokens. At `num_ctx` 20480 only 26 of 37
+  layers fit on the GPU.
+
+**Answers.** The same 80 questions were run with `k_final` 8 and `num_ctx` 12288, and
+qwen3:8b judged them as in the section above.
+- **Accuracy:** correct answers went from 49 to 46 of the 78 questions graded in both runs
+  (paired 95% CI [−0.141, +0.051]).
+- **Why no gain:** in this 80-question sample, the gold document entered the evidence for
+  48 questions against 47. The larger coverage gain on the 210-question set did not show
+  up here.
+- **Other effects:** regenerations fell from 10 to 4, turns took 37.4 s instead of 32.7 s,
+  and there were no errors or truncations.
+- **Judge failures:** the judge returned empty output for 2 answers, when its thinking
+  used up `max_tokens`.
+
+**Decision.** `k_final` stays at 5.
