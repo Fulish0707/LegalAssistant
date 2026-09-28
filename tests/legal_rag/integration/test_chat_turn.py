@@ -115,3 +115,25 @@ def test_hard_filter_can_be_enabled(retriever, monkeypatch):
     model = FakeChatModel({"QueryAnalysis": [analysis], "LegalAnswer": [_answer(), _answer()]})
     _orchestrator(settings, r, model).handle("보증금 반환 요건은?", conversation_id="f2")
     assert seen[0] is not None and seen[0].citation_kind == "statute"
+
+
+_TRUNCATED = '{"summary": "보증금 반환을 청구할 수 있습니다.", "analysis": "주택임대차보호법 제3조의3에 따라'
+
+
+def test_failed_generation_is_a_refusal_not_a_server_error(retriever):
+    """A GenerationError on JSON cut off at max_tokens escaped handle() and /v1/chat
+    answered 500 on 2 of 80 turns (2026-09-28)."""
+    settings, r = retriever
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis()], "LegalAnswer": [_TRUNCATED, _TRUNCATED]})
+    resp = _orchestrator(settings, r, model).handle("보증금을 못 받았어요", conversation_id="c6")
+    assert resp.kind == "rejected" and resp.reason == "answer generation failed" and resp.answer is None
+    assert resp.evidence.items and resp.trace.policy_action == "reject"
+
+
+def test_failed_regeneration_strips_the_previous_draft(retriever):
+    settings, r = retriever
+    bad = _answer(source_id="S9", reference="민법 제839조의2", analysis="민법 제839조의2에 따라 청구할 수 있습니다. 보증금은 반환되어야 합니다.")
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis()], "LegalAnswer": [bad, _TRUNCATED, _TRUNCATED]})
+    resp = _orchestrator(settings, r, model).handle("보증금을 못 받았어요", conversation_id="c7")
+    assert resp.kind == "answer" and resp.trace.policy_action == "strip" and resp.trace.regenerations == 1
+    assert "제839조의2" not in resp.answer.analysis and "보증금은 반환되어야 합니다." in resp.answer.analysis

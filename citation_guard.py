@@ -48,9 +48,9 @@ def unsupported_citations(answer, evidence_texts):
         article, law = _squash(match.group("art")), match.group("law")
         if law and _squash(law) in _GENERIC_LAW_WORDS:
             law = None
-        # 제3조 must not be satisfied by 제3조의3.
+        # 제3조 must not be satisfied by 제3조의3, but "제124조의 규정" is 제124조.
         law_found = not law or _squash(law) in evidence or _short_title(_squash(law)) in evidence_short
-        found = re.search(re.escape(article) + r"(?!의)", evidence) and law_found
+        found = re.search(re.escape(article) + r"(?!의\d)", evidence) and law_found
         label = f"{law} {match.group('art')}" if law else match.group("art")
         if not found and label not in missing:
             missing.append(label)
