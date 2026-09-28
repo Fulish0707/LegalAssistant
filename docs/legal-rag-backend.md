@@ -401,3 +401,36 @@ crossdomain.
   "법령" read as a law name (fixed since).
 - **Latency:** 24.8 s per turn on average.
 
+### Follow-up, 2026-09-28
+
+Both runs used `scripts/eval_chat_pipeline.py`. Raw results are under `data/eval/reports/chat_pipeline/`.
+
+**Everyday phrasing.** `data/eval/everyday-150.jsonl` rewrites the same 150 administrative,
+civil and criminal questions the way a person would ask them. Each keeps its gold document,
+and 30 were reviewed by hand.
+
+| Comparison | S@10 | 95% CI |
+|---|---|---|
+| Formal → everyday wording, question only | 0.553 → 0.480 | [−0.127, −0.020] |
+| Everyday: question only → rule rewrite | 0.480 → 0.473 | [−0.033, +0.013] |
+| Everyday: question only → LLM rewrite | 0.480 → 0.480 | [−0.027, +0.027] |
+| Everyday: question only → + analyzer hard filter | 0.480 → 0.393 | [−0.153, −0.020] |
+
+- **Rewriting:** everyday wording costs about 7 points, and LLM rewriting recovers none of it,
+  so `llm_rewrite` stays off.
+- **Clarification:** the analyzer asks for more facts on 24 of 150 everyday questions (16%),
+  against 1% for formal ones.
+
+**Verification rerun** on the same 80 questions, after the verifier and strip began covering
+every list field. Generation is sampled, so single-digit differences from the first run are
+within noise.
+- **Outcomes:** 78 answered, 0 rejected (3 in the first run), and 2 `GenerationError`. In the
+  errors, one field of the answer JSON ran past `max_tokens` 2048 and the JSON was cut, so the
+  exception left `handle()` and `/v1/chat` would return 500.
+- **Verifier:** it flagged 9 of 78 first drafts.
+- **citation_guard:** it flagged 3 of 78 first drafts and 2 of 78 final answers.
+  - In one, a stripped statute still appeared in the model-written `uncertainty`, which strip
+    does not clean.
+  - In the other, the verifier accepted "지방자치법 제124조" and the guard did not. The saved
+    run keeps no evidence text, so it is unresolved which checker is right.
+

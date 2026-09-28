@@ -161,7 +161,14 @@ def verify(
             log.clear()
             log.update({"attempts": [], "q": ex["query"], "user_refs": []})
             started = time.perf_counter()
-            response = orch.handle(ex["query"], conversation_id=uuid.uuid4().hex)
+            try:
+                response = orch.handle(ex["query"], conversation_id=uuid.uuid4().hex)
+            except Exception as error:  # e.g. GenerationError on truncated JSON: /v1/chat would 500
+                fh.write(json.dumps({"key": key, "dataset": dataset, "kind": "error", "attempts": log["attempts"],
+                                     "error": f"{type(error).__name__}: {str(error)[:300]}",
+                                     "seconds": round(time.perf_counter() - started, 1)}, ensure_ascii=False) + "\n")
+                fh.flush()
+                continue
             record = {"key": key, "dataset": dataset, "kind": response.kind, "attempts": log["attempts"],
                       "regenerations": response.trace.regenerations if response.trace else None,
                       "final_ok": response.verification.ok if response.verification else None,
@@ -218,7 +225,7 @@ def report(out: Path = typer.Option(..., exists=True, file_okay=False)) -> None:
         answered = [row for row in rows if "final_guard" in row]
         typer.echo("== verify")
         typer.echo(f"turns {len(rows)} | final kind {dict(collections.Counter(r['kind'] for r in rows))} | "
-                   f"regenerated {sum(1 for r in rows if (r['regenerations'] or 0) > 0)}")
+                   f"regenerated {sum(1 for r in rows if (r.get('regenerations') or 0) > 0)}")
         typer.echo(f"first draft flagged by verifier {sum(1 for a in first if not a['raw_ok'])}/{len(first)}; "
                    f"issue kinds {dict(collections.Counter(i.split(':')[0] for a in first for i in a['raw_issues']))}")
         typer.echo(f"citation_guard: first draft {sum(1 for a in first if a['raw_guard'])}/{len(first)}, "
