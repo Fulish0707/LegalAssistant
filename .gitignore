@@ -8,6 +8,7 @@ __pycache__/
 venv/
 env/
 venv-310/
+scripts/
 
 uploads/
 sqlite_db/*.db
