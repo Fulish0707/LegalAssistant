@@ -538,7 +538,7 @@ The imported corpora cut a statute into windows of about 3,500 characters that h
 context builder shows the first ``max_evidence_chars`` of each. The cross-encoder reads only the first ~900
 characters of a window, so a window whose answer sits further in scores low, and when it does reach the top five
 the answer can still lie past the cut. Splitting the windows at article headings and scoring every article
-against the question puts the cited article first (docs/legal-rag-backend.md, "Article-level evidence").
+against the question puts the cited article first (docs/superpowers/plans/2026-09-29-statute-article-evidence.md).
 """
 
 from __future__ import annotations
@@ -633,6 +633,8 @@ git commit -m "feat: ArticleEvidenceSelector scores statute articles instead of 
 In `tests/legal_rag/unit/test_article_evidence.py` add these imports at the top (below `from __future__ import annotations`), keeping the others:
 
 ```python
+import os
+
 import pytest
 
 from legal_rag.config import load_settings
@@ -643,6 +645,13 @@ from legal_rag.reranking import NoopReranker
 and append at the end:
 
 ```python
+@pytest.fixture(autouse=True)
+def _no_legal_rag_env(monkeypatch):
+    """Settings put the environment above overrides: a LEGAL_RAG__* variable exported in the caller's shell must not leak in."""
+    for name in [name for name in os.environ if name.startswith("LEGAL_RAG__")]:
+        monkeypatch.delenv(name)
+
+
 class _Retriever:
     """Only the reranker matters to the factory."""
 
