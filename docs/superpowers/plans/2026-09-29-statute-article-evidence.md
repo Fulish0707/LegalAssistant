@@ -55,11 +55,24 @@ Seven statute questions stay uncovered. For three the key chunk is in no leg's t
 
 **Behaviour change beyond showing the right article.** Evidence for a statute question shrinks from 7,342 to 3,537 characters, so prompts get shorter. If a longer context turns out to help, raising `retrieval.k_final` with the flag on is a separate experiment (`--overrides '{"rag": {"article_evidence": true}, "retrieval": {"k_final": 8}}'`); this plan does not include it.
 
+**Known limits of the splitter and the selector** (from the code reviews of Tasks 1 to 5; measured on all 21,234 statute windows of the four corpora unless noted).
+
+- The splitter loses no text (the segments of every window reproduce it) and never cuts a line-start cross-reference as a heading. Two first windows carry a wrongly labelled opening because the article locator falls back to the first article (`administrative::statute::011102` and `004631`), and a deleted article written as `제N조` with `삭제` on the next line (189 lines in 23 documents) stays attached to the article before it.
+- Adjacent windows overlap by about 400 characters, so an article on a window edge appears as two fragments and the step keeps the better-scoring one. For 34% of adjacent pairs neither fragment contains the other (median fragment 750 characters, merged article 1,254), so the kept unit can be half an article; a lexical simulation puts the loss at about 6.6% of answer lines on such pairs. The measured gains include this.
+- 2.0% of article segments exceed the 1,500-character display cut (0.85% exceed 2,000), and the cross-encoder reads only the first ~880 characters of any of them.
+- Units drop the neighbouring articles that the old 1,500-character window happened to show, so a draft that cites such a neighbour now fails verification (`statute_not_in_evidence`). This feeds the first-draft-flagged bar of criterion 4.
+- Chunks that carry different paragraphs of one article are kept apart (the four imported corpora have none). Keep `article_keep_top` at `k_final` or above: the reranker's own top hits outside the fused pool would otherwise be dropped.
+- The step adds a cross-encoder call of about 170 pairs on the request thread. `predict` is not serialised, so overlapping chat requests interleave GPU batches; peak VRAM and latency with two simultaneous chats are not measured. An exception in the step fails the request, as one in the reranker does.
+- With `rag.article_evidence: true` and `rerank.backend: noop` the server starts and `/health` says ok, and every `/v1/chat` returns a 500; the reason (`rag.article_evidence needs rerank.backend: cross_encoder`) is only in the server log.
+- Only `/v1/chat` and the CLI use the step. The Flask chat app reaches this backend through `/v1/search` only, so its users get no article evidence.
+- With the flag on, `trace.retrieved["reranked"]` lists all `k_fused` reranked candidates instead of `k_final`, and `evidence_ids` holds unit ids such as `w1@1`. `HybridRetriever.last_trace` is per thread, so a reader on another thread sees `{}`.
+- The three new settings change `Settings.hash()` of every profile, so `mode_comparison` refuses to compare a run recorded before this change with one recorded after. Nothing else keys on the hash.
+
 ## Acceptance criteria
 
 Criterion 2 was written after the in-sample harness numbers existed, on the same 80 questions the pool size was chosen on, so it is a regression guard and not evidence. Criterion 3 (bars written before the held-out runs, `data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/heldout-bars.txt`) and criterion 4 are the real tests.
 
-1. **Tests.** `538 passed, 3 skipped` before the change, `557 passed, 3 skipped` after (19 new tests).
+1. **Tests.** `538 passed, 3 skipped` before the change, `562 passed, 3 skipped` after (24 new tests).
 2. **Retrieval, in-sample (Task 6, 80 questions).** Statute questions covered with the step at least 26 of 35, none lost, at least 8 gained. Other questions covered at least 22 of 45 (23 today). Mean step time at most 2.0 s on statute questions and 0.5 s on the others. Mean extra pairs on statute questions at most 250.
 3. **Retrieval, held-out (Task 6b).** For each of the held-out formal set and the everyday-phrased set: statute questions gained minus lost at least 15% of the statute questions, with at most 2 lost; other questions at most 2 lost; statute step time p90 at most 2.5 s.
 4. **Answers (Task 7).** Compare arm means on the 35 statute questions: three flag-on runs against three flag-off samples (the 2026-09-28 run plus two reruns). Flag-on minus flag-off at least +3 correct; on the 23 questions the step does not change, the difference within plus or minus 2 (that group is the noise control); on the 45 other questions the first flag-on run within 3 of the baseline 28. `final_ok` at least 75 of 80 (baseline 76). First drafts flagged by the verifier at most 13 (baseline 10). Mean turn time not above the baseline 32.7 s.
@@ -67,9 +80,9 @@ Criterion 2 was written after the in-sample harness numbers existed, on the same
 
 ## Working rules
 
-- Work in the worktree created in Task 0, never in the main checkout: it has uncommitted changes of its own (`README.md`, `quota.py`, `sft_qlora_full.ipynb`).
+- Work in the worktree created in Task 0, never in the main checkout: it is the owner's working copy on another branch and may hold uncommitted changes of its own.
 - `PY=/home/layke/Documents/MyLLMAgent/.venv/bin/python`. Run every command from the worktree root with `PYTHONPATH=src`, otherwise the editable install imports the main checkout's code. The commands reuse the shell variables `PY` and `R` (`R=data/eval/reports/chat_pipeline`); set them again in a new shell.
-- Scripts that use the live index need `LEGAL_RAG__PATHS__ROOT=/home/layke/Documents/MyLLMAgent` (or `--root`); the worktree has no `data/indexes`.
+- Scripts that use the live index need `LEGAL_RAG__PATHS__ROOT=/home/layke/Documents/MyLLMAgent` (or `--root`); the worktree has no `data/indexes`. Give the variable inline on the one command (`LEGAL_RAG__PATHS__ROOT=... $PY ...`) and never `export` it in a shell that also runs pytest: the environment overrides the tests' temporary paths, and `test_build_orchestrator_gives_the_step_the_retrievers_own_reranker` would write `conversations.db` into that root.
 - One heavy GPU process at a time. Before Task 6 and Task 7, unload Ollama models (`curl -s localhost:11434/api/generate -d '{"model":"qwen3:4b","keep_alive":0}'`, same for `qwen3:8b`) and check `nvidia-smi` shows under 1 GB used.
 - Commit after each task. End every commit message with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
 
@@ -82,7 +95,7 @@ Criterion 2 was written after the in-sample harness numbers existed, on the same
 
 **Step 1: Create the worktree from the current head**
 
-The head is `claude/sft-adapter-eval` at `160b94f`. That branch is 23 commits ahead of `main` and holds the `/v1/chat` chain and its evaluation scripts, so open any pull request against `claude/sft-adapter-eval`, not `main`; otherwise it carries those 23 commits too.
+The head was `claude/sft-adapter-eval` at `160b94f` when this plan was written (a later commit, `5239664`, added only docs). That branch is 23 commits ahead of `main` and holds the `/v1/chat` chain and its evaluation scripts, so open any pull request against `claude/sft-adapter-eval`, not `main`; otherwise it carries those 23 commits too.
 
 ```bash
 cd /home/layke/Documents/MyLLMAgent
@@ -408,11 +421,11 @@ WINDOW = (
 QUERY = "휴업 또는 폐업하려는 경우 어떻게 공지해야 하나요?"
 
 
-def _chunk(chunk_id, text, document_id="law", document_type=DocumentType.statute, article=None):
+def _chunk(chunk_id, text, document_id="law", document_type=DocumentType.statute, article=None, paragraph=None):
     statute = document_type == DocumentType.statute
     return Chunk(id=chunk_id, document_id=document_id, document_type=document_type, path="chunk:0000", order=0, text=text,
                  title="도시철도법", metadata=ChunkMetadata(dataset="d", corpus_version="v", law_name="도시철도법" if statute else None,
-                                                        article=article))
+                                                        article=article, paragraph=paragraph))
 
 
 def _hit(chunk, score):
@@ -440,6 +453,7 @@ def test_a_statute_window_becomes_one_unit_per_article_best_first():
     assert best.chunk.id == "w1@1" and best.score == 0.9 and best.retriever == "article"
     assert best.chunk.document_id == "law" and best.chunk.metadata.law_name == "도시철도법"
     assert window.text == WINDOW  # the retrieved chunk is untouched
+    assert selector.select(QUERY, [_hit(window, 0.05)], ["w1"], k=0) == []  # like the reranker, k <= 0 selects nothing
 
 
 def test_other_chunks_stay_whole_and_compete_on_their_reranker_score():
@@ -462,9 +476,11 @@ def test_candidates_are_the_fused_top_plus_the_rerankers_top():
     windows = [_chunk(f"w{i}", f"제{i}조(가) 본문 {i}", document_id=f"d{i}") for i in range(4)]
     hits = [_hit(w, 1 - i / 10) for i, w in enumerate(windows)]  # reranker order w0 w1 w2 w3
     selector, loader = _selector({}, pool=1, keep_top=1)
-    selector.select(QUERY, hits, ["w3", "w2", "w1", "w0"], k=2)  # fused order reversed
-    scored = [text for _, text in loader.encoder.calls[0]["pairs"]]
-    assert sorted(scored) == sorted([windows[0].text, windows[3].text])
+    units = selector.select(QUERY, hits, ["w3", "w2", "w1", "w0"], k=4)  # fused order reversed
+    pairs = loader.encoder.calls[0]["pairs"]
+    assert {query for query, _ in pairs} == {QUERY}  # articles are scored against the question
+    assert sorted(text for _, text in pairs) == sorted([windows[0].text, windows[3].text])
+    assert {u.chunk.id.split("@")[0] for u in units} == {"w0", "w3"}  # nothing outside the pool comes back
 
 
 def test_an_article_held_by_two_overlapping_windows_is_kept_once_at_its_best_score():
@@ -473,9 +489,10 @@ def test_an_article_held_by_two_overlapping_windows_is_kept_once_at_its_best_sco
     second = _chunk("w2", second_text)
     scores = {**_scores(WINDOW, **{"36": 0.7}), **_scores(second_text, **{"36": 0.9})}
     selector, _ = _selector(scores)
-    units = selector.select(QUERY, [_hit(first, 0.5), _hit(second, 0.4)], ["w1", "w2"], k=10)
-    labelled = [(u.chunk.metadata.article, u.score) for u in units if u.chunk.metadata.article == "제36조"]
-    assert labelled == [("제36조", 0.9)]
+    other_law = _chunk("w3", WINDOW, document_id="other")  # its 제36조 is another article
+    units = selector.select(QUERY, [_hit(first, 0.5), _hit(second, 0.4), _hit(other_law, 0.3)], ["w1", "w2", "w3"], k=10)
+    labelled = [(u.chunk.document_id, u.score) for u in units if u.chunk.metadata.article == "제36조"]
+    assert labelled == [("law", 0.9), ("other", 0.7)]
 
 
 def test_the_opening_of_a_window_is_named_after_the_article_it_continues():
@@ -491,8 +508,15 @@ def test_ties_keep_the_rerankers_order():
     window = _chunk("w1", "제1조(가) 본문")
     selector, _ = _selector({"제1조(가) 본문": 0.5})
     hits = [_hit(cases[0], 0.5), _hit(cases[1], 0.5), _hit(window, 0.1), _hit(cases[2], 0.5)]
-    units = selector.select(QUERY, hits, [h.chunk.id for h in hits], k=4)
+    units = selector.select(QUERY, hits, [h.chunk.id for h in reversed(hits)], k=4)  # fused order is the reverse
     assert [u.chunk.id for u in units] == ["c0", "c1", "w1@0", "c2"]
+
+
+def test_paragraph_chunks_of_one_article_are_kept_apart():
+    first, second = (_chunk(f"p{n}", f"{n}항 본문", article="제36조", paragraph=f"제{n}항") for n in (1, 2))
+    selector, _ = _selector({})
+    units = selector.select(QUERY, [_hit(first, 0.5), _hit(second, 0.4)], ["p1", "p2"], k=5)
+    assert [u.chunk.id for u in units] == ["p1@0", "p2@0"]
 ```
 
 **Step 2: Run the tests to verify they fail**
@@ -514,7 +538,7 @@ The imported corpora cut a statute into windows of about 3,500 characters that h
 context builder shows the first ``max_evidence_chars`` of each. The cross-encoder reads only the first ~900
 characters of a window, so a window whose answer sits further in scores low, and when it does reach the top five
 the answer can still lie past the cut. Splitting the windows at article headings and scoring every article
-against the question puts the cited article first (docs/legal-rag-backend.md, "Article-level evidence").
+against the question puts the cited article first (docs/superpowers/plans/2026-09-29-statute-article-evidence.md).
 """
 
 from __future__ import annotations
@@ -537,9 +561,13 @@ class ArticleEvidenceSelector:
 
         Candidates are the first ``pool`` chunks by fused rank plus the reranker's own top ``keep_top``. A statute
         window becomes one unit per article, scored by the cross-encoder against ``query``; every other chunk stays
-        whole with its reranker score. An article that two overlapping windows both contain is kept once, at its
-        best score. With no statute window among the candidates the result is ``hits[:k]``.
+        whole with its reranker score, so ``query`` must be the text the reranker scored ``hits`` against. An
+        article that two overlapping windows both contain is kept once, at its best score; chunks that carry
+        different paragraphs of one article are kept apart. With no statute window among the candidates the
+        result is ``hits[:k]``, and with ``k <= 0`` it is empty.
         """
+        if k <= 0:
+            return []
         in_pool = set(fused_ids[: self.pool])
         candidates = [hit for rank, hit in enumerate(hits) if rank < self.keep_top or hit.chunk.id in in_pool]
         statute = [hit for hit in candidates if citation_kind(hit.chunk.document_type) is CitationKind.statute]
@@ -553,10 +581,10 @@ class ArticleEvidenceSelector:
             articles[hit.chunk.id].append(_unit(hit, n, segment, score))
         units = [unit for hit in candidates for unit in (articles.get(hit.chunk.id) or [hit])]  # reranker order kept
         chosen: list[ScoredChunk] = []
-        seen: set[tuple[str, str]] = set()
+        seen: set[tuple[str, str, str | None]] = set()
         for unit in sorted(units, key=lambda unit: -unit.score):  # stable: ties keep the reranker's order
             if unit.retriever == "article" and unit.chunk.metadata.article:
-                article = (unit.chunk.document_id, unit.chunk.metadata.article)
+                article = (unit.chunk.document_id, unit.chunk.metadata.article, unit.chunk.metadata.paragraph)
                 if article in seen:
                     continue
                 seen.add(article)
@@ -581,7 +609,7 @@ def _unit(hit: ScoredChunk, n: int, segment: ArticleSegment, score: float) -> Sc
 PYTHONPATH=src $PY -m pytest tests/legal_rag/unit/test_article_evidence.py -q -p no:cacheprovider
 ```
 
-Expected: `7 passed`.
+Expected: `8 passed`.
 
 **Step 5: Commit**
 
@@ -597,13 +625,16 @@ git commit -m "feat: ArticleEvidenceSelector scores statute articles instead of 
 **Files:**
 - Modify: `src/legal_rag/rag/orchestrator.py`
 - Modify: `src/legal_rag/factory.py`
-- Test: `tests/legal_rag/unit/test_article_evidence.py`, `tests/legal_rag/integration/test_chat_turn.py`
+- Modify: `src/legal_rag/retrieval/hybrid.py` (the retriever's trace becomes per thread; see Step 3)
+- Test: `tests/legal_rag/unit/test_article_evidence.py`, `tests/legal_rag/integration/test_chat_turn.py`, `tests/legal_rag/unit/test_fusion.py`
 
 **Step 1: Write the failing tests**
 
 In `tests/legal_rag/unit/test_article_evidence.py` add these imports at the top (below `from __future__ import annotations`), keeping the others:
 
 ```python
+import os
+
 import pytest
 
 from legal_rag.config import load_settings
@@ -614,6 +645,13 @@ from legal_rag.reranking import NoopReranker
 and append at the end:
 
 ```python
+@pytest.fixture(autouse=True)
+def _no_legal_rag_env(monkeypatch):
+    """Settings put the environment above overrides: a LEGAL_RAG__* variable exported in the caller's shell must not leak in."""
+    for name in [name for name in os.environ if name.startswith("LEGAL_RAG__")]:
+        monkeypatch.delenv(name)
+
+
 class _Retriever:
     """Only the reranker matters to the factory."""
 
@@ -629,9 +667,23 @@ def test_factory_builds_the_step_only_when_enabled_and_only_over_a_cross_encoder
     reranker = CrossEncoderReranker(model="fake", device="cpu", loader=_FakeLoader(_FakeEncoder({})))
     selector = build_evidence_selector(enabled, _Retriever(reranker))
     assert selector.reranker is reranker and (selector.pool, selector.keep_top) == (7, 4)
+
+
+def test_build_orchestrator_gives_the_step_the_retrievers_own_reranker(tmp_path):
+    from legal_rag.factory import build_orchestrator
+    from legal_rag.retrieval.fusion import RRFFuser
+    from legal_rag.retrieval.hybrid import HybridRetriever
+
+    overrides = {"paths": {"root": str(tmp_path)}, "llm": {"backend": "fake"}, "rag": {"article_evidence": True}}
+    reranker = CrossEncoderReranker(model="fake", device="cpu", loader=_FakeLoader(_FakeEncoder({})))
+    retriever = HybridRetriever([], RRFFuser(60), reranker, k_leg=1, k_fused=1)
+    orchestrator = build_orchestrator(load_settings(profile="default", overrides=overrides), retriever=retriever)
+    assert orchestrator.retriever is retriever and orchestrator.evidence_selector.reranker is reranker
+    off = build_orchestrator(load_settings(profile="default", overrides={**overrides, "rag": {"article_evidence": False}}), retriever=retriever)
+    assert off.retriever is retriever and off.evidence_selector is None
 ```
 
-Append to `tests/legal_rag/integration/test_chat_turn.py` (it reuses the file's `retriever` fixture, `_answer` and `_orchestrator`):
+In `tests/legal_rag/integration/test_chat_turn.py` add `from legal_rag.retrieval.hybrid import HybridRetriever` under the `Orchestrator` import and append (it reuses the file's `retriever` fixture, `_answer` and `_orchestrator`):
 
 ```python
 class _ArticleStep:
@@ -665,15 +717,100 @@ def test_without_the_article_step_retrieval_stops_at_k_final(retriever):
     resp = _orchestrator(settings, r, model).handle("임차권등기명령 신청서에 적어야 하는 사항은?", conversation_id="c-noart")
     assert len(resp.evidence.items) == settings.retrieval.k_final
     assert not any(timing.stage == "select_articles" for timing in resp.trace.timings)
+
+
+class _ReverseReranker:
+    """Reorders the fused candidates, so that the reranked order differs from the fused order."""
+
+    name = "reverse"
+
+    def rerank(self, query, candidates, k):
+        return [candidate.model_copy(update={"retriever": "reranked"}) for candidate in reversed(candidates)][:k]
+
+
+def test_article_step_pool_follows_the_fused_ranking_not_the_rerankers(retriever):
+    settings, r = retriever
+    reordering = HybridRetriever(r.legs, r.fuser, _ReverseReranker(), k_leg=r.k_leg, k_fused=r.k_fused)
+    step = _ArticleStep()
+    # The reversed ranking may put an unrelated unit first, so the draft can fail verification and be regenerated.
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(domain="민사", issues=["보증금 반환"], keywords=["임차권등기명령"])], "LegalAnswer": [_answer(), _answer()]})
+    orch = Orchestrator.from_components(settings=settings, retriever=reordering, model=model, store=InMemoryConversationStore(), verifier=Verifier(),
+                                        policy=VerificationPolicy(max_regenerations=settings.rag.max_regenerations), evidence_selector=step)
+    resp = orch.handle("임차권등기명령 신청서에 적어야 하는 사항은?", conversation_id="c-fused")
+    [(_, hit_ids, fused_ids, _)] = step.calls
+    assert fused_ids == [chunk_id for chunk_id, _ in resp.trace.retrieved["fused"]]
+    assert hit_ids == list(reversed(fused_ids))  # the reranker's order is not the fused order
+
+
+def test_article_step_is_skipped_for_a_retriever_that_is_not_hybrid(retriever):
+    settings, r = retriever
+
+    class _Flat:
+        name = "flat"
+
+        def retrieve(self, query, k, filters=None):
+            return r.retrieve(query, k, filters)
+
+    step = _ArticleStep()
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(domain="민사", issues=["보증금 반환"], keywords=["임차권등기명령"])], "LegalAnswer": [_answer()]})
+    orch = Orchestrator.from_components(settings=settings, retriever=_Flat(), model=model, store=InMemoryConversationStore(), verifier=Verifier(),
+                                        policy=VerificationPolicy(max_regenerations=settings.rag.max_regenerations), evidence_selector=step)
+    resp = orch.handle("임차권등기명령 신청서에 적어야 하는 사항은?", conversation_id="c-flat")
+    assert step.calls == [] and len(resp.evidence.items) == settings.retrieval.k_final
+```
+
+The orchestrator reads the fused ranking from `HybridRetriever.last_trace` right after retrieval. `/v1/chat` runs `handle` on a thread pool over one shared retriever, and `retrieve_many` resets that attribute at the start of every call, so an overlapping request would replace the dict while this request's reranker is still running. Today that only garbles the audit trace; with the article step it would silently shrink the pool to the reranker's top 10 for the affected request. The trace therefore has to belong to the calling thread. In `tests/legal_rag/unit/test_fusion.py` add `import threading` above the first import and append at the end:
+
+```python
+class _ByQuery:
+    name = "dense"
+
+    def __init__(self, hits_by_query):
+        self.hits_by_query = hits_by_query
+
+    def retrieve(self, query, k, filters=None):
+        return self.hits_by_query[query][:k]
+
+
+def test_last_trace_belongs_to_the_thread_that_ran_the_retrieval():
+    """/v1/chat runs handle() on a thread pool over one shared retriever: a request must read its own fused list."""
+    c1, c2, _ = _chunks()
+    leg = _ByQuery({"first": [_sc(c1, 0.9, "dense")], "second": [_sc(c2, 0.9, "dense")]})
+    inside, resume = threading.Event(), threading.Event()
+
+    class _Pausing:
+        def rerank(self, query, candidates, k):
+            if query == "first":
+                inside.set()  # the first request is between fusing and reranking
+                assert resume.wait(5)
+            return list(candidates)[:k]
+
+    hybrid = HybridRetriever([leg], RRFFuser(60), _Pausing(), k_leg=5, k_fused=5)
+    seen = {}
+
+    def first_request():
+        hybrid.retrieve_many(["first"], k=1)
+        seen["fused"] = [chunk_id for chunk_id, _ in hybrid.last_trace["fused"]]
+
+    worker = threading.Thread(target=first_request)
+    worker.start()
+    assert inside.wait(5)
+    hybrid.retrieve_many(["second"], k=1)  # a second request runs to the end in the meantime
+    resume.set()
+    worker.join(5)
+    assert seen["fused"] == [c1.id]
+    assert [chunk_id for chunk_id, _ in hybrid.last_trace["fused"]] == [c2.id]
 ```
 
 **Step 2: Run the tests to verify they fail**
 
 ```bash
-PYTHONPATH=src $PY -m pytest tests/legal_rag/unit/test_article_evidence.py tests/legal_rag/integration/test_chat_turn.py -q -p no:cacheprovider
+for f in unit/test_article_evidence.py integration/test_chat_turn.py unit/test_fusion.py; do
+  PYTHONPATH=src $PY -m pytest tests/legal_rag/$f -q -p no:cacheprovider 2>&1 | tail -4
+done
 ```
 
-Expected: the unit file fails to import `build_evidence_selector`; the chat-turn file has 1 failed, `TypeError: from_components() got an unexpected keyword argument 'evidence_selector'` (the second new test passes already).
+One run per file, because a collection error in one file stops pytest before it runs the others. Expected: the unit file fails to import `build_evidence_selector` (`ImportError`, 1 error); the chat-turn file has 3 failed, each `TypeError: from_components() got an unexpected keyword argument 'evidence_selector'` (`test_without_the_article_step_retrieval_stops_at_k_final` passes already); the fusion file has 1 failed, `AssertionError: assert ['d2#p'] == ['d1#p']` (the first request read the second request's fused list).
 
 **Step 3: Implement**
 
@@ -778,19 +915,59 @@ index 246409e..b0c14b6 100644
          store=SQLiteConversationStore(settings.index_corpus_dir() / "conversations.db"),
 ```
 
+Apply to `src/legal_rag/retrieval/hybrid.py` (the trace of `retrieve_many` is kept per thread; a caller that reads `last_trace` in the thread that ran the retrieval sees the same dict as before):
+
+```diff
+diff --git a/src/legal_rag/retrieval/hybrid.py b/src/legal_rag/retrieval/hybrid.py
+index 59b35aa..d6ead14 100644
+--- a/src/legal_rag/retrieval/hybrid.py
++++ b/src/legal_rag/retrieval/hybrid.py
+@@ -2,6 +2,7 @@
+ 
+ from __future__ import annotations
+ 
++import threading
+ from typing import Protocol
+ 
+ from legal_rag.reranking import Reranker
+@@ -25,7 +26,21 @@ class HybridRetriever:
+         self.reranker = reranker
+         self.k_leg = k_leg
+         self.k_fused = k_fused
+-        self.last_trace: dict[str, list[tuple[str, float]]] = {}
++        self._trace = threading.local()
++        self.last_trace = {}
++
++    @property
++    def last_trace(self) -> dict[str, list[tuple[str, float]]]:
++        """The lists of this thread's latest retrieve_many: one per leg and query, plus "fused" and "reranked".
++
++        Per thread because /v1/chat runs the orchestrator on a thread pool over one shared retriever, and a
++        single shared dict would hand a request the fused list of another request's query.
++        """
++        return getattr(self._trace, "lists", {})
++
++    @last_trace.setter
++    def last_trace(self, lists: dict[str, list[tuple[str, float]]]) -> None:
++        self._trace.lists = lists
+ 
+     def retrieve(self, query: str, k: int, filters: RetrievalFilters | None = None) -> list[ScoredChunk]:
+         return self.retrieve_many([query], k, filters)
+```
+
 **Step 4: Run the tests, then the whole backend suite**
 
 ```bash
-PYTHONPATH=src $PY -m pytest tests/legal_rag/unit/test_article_evidence.py tests/legal_rag/integration/test_chat_turn.py -q -p no:cacheprovider
+PYTHONPATH=src $PY -m pytest tests/legal_rag/unit/test_article_evidence.py tests/legal_rag/integration/test_chat_turn.py tests/legal_rag/unit/test_fusion.py -q -p no:cacheprovider
 PYTHONPATH=src $PY -m pytest tests/legal_rag -q -p no:cacheprovider
 ```
 
-Expected: `19 passed` for the first command; `557 passed, 3 skipped` for the second.
+Expected: `36 passed` for the first command; `562 passed, 3 skipped` for the second.
 
 **Step 5: Commit**
 
 ```bash
-git add src/legal_rag/rag/orchestrator.py src/legal_rag/factory.py tests/legal_rag/unit/test_article_evidence.py tests/legal_rag/integration/test_chat_turn.py
+git add src/legal_rag/rag/orchestrator.py src/legal_rag/factory.py src/legal_rag/retrieval/hybrid.py tests/legal_rag/unit/test_article_evidence.py tests/legal_rag/integration/test_chat_turn.py tests/legal_rag/unit/test_fusion.py
 git commit -m "feat: run the article evidence step between retrieval and the context builder" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 ```
 
@@ -939,6 +1116,8 @@ Expected, verified on 2026-09-29 (the analyzer may differ by a token between run
 statute questions: n=35  covered today 16  with article step 28  (+12 / -0)  extra cross-encoder pairs 169  step time 1.27s  evidence chars 7342 -> 3537
 other questions: n=45  covered today 23  with article step 23  (+0 / -0)  extra cross-encoder pairs 20  step time 0.21s  evidence chars 6545 -> 6479
 ```
+
+The branch's own run on 2026-09-30 (code of Tasks 1 to 5 as committed, after the review fixes) gave the same coverage numbers (statute 16 to 28, +12 / -0; other 23 to 23), 169 and 20 extra pairs, evidence characters 7342 to 3537 and 6545 to 6479, and step times of 1.44 s (p90 2.26 s) for statute questions and 0.24 s for the others. Step times move with the state of the GPU; criterion 2 bounds the mean.
 
 Check the output against acceptance criterion 2. If it fails, stop and report; do not go on to Task 6b or Task 7.
 
@@ -1175,9 +1354,9 @@ git commit -m "eval: record the documents of the shown evidence" -m "Co-Authored
 **Step 3: Run 1, all 80 questions with the step on (about 55 minutes), then judge (about 30 minutes)**
 
 ```bash
-export LEGAL_RAG__PATHS__ROOT=/home/layke/Documents/MyLLMAgent
+LIVE=/home/layke/Documents/MyLLMAgent
 R=data/eval/reports/chat_pipeline
-PYTHONPATH=src $PY scripts/eval_chat_pipeline.py verify --out $R/articles-on-1 --overrides '{"rag": {"article_evidence": true}}'
+LEGAL_RAG__PATHS__ROOT=$LIVE PYTHONPATH=src $PY scripts/eval_chat_pipeline.py verify --out $R/articles-on-1 --overrides '{"rag": {"article_evidence": true}}'
 curl -s localhost:11434/api/generate -d '{"model":"qwen3:4b","keep_alive":0}' >/dev/null
 PYTHONPATH=src $PY scripts/judge_answers.py pairs --run $R/articles-on-1
 PYTHONPATH=src $PY scripts/judge_answers.py judge --run $R/articles-on-1
@@ -1198,7 +1377,7 @@ with open("data/eval/reports/chat_pipeline/statute-35.jsonl", "w", encoding="utf
             out.write(json.dumps({"id": question_id, "query": pair["question"], "relevant_document_ids": pair["gold"], "dataset": dataset}, ensure_ascii=False) + "\n")
 EOF
 for n in 2 3; do
-  PYTHONPATH=src $PY scripts/eval_chat_pipeline.py verify --out $R/articles-on-$n --questions $R/statute-35.jsonl --overrides '{"rag": {"article_evidence": true}}'
+  LEGAL_RAG__PATHS__ROOT=$LIVE PYTHONPATH=src $PY scripts/eval_chat_pipeline.py verify --out $R/articles-on-$n --questions $R/statute-35.jsonl --overrides '{"rag": {"article_evidence": true}}'
   curl -s localhost:11434/api/generate -d '{"model":"qwen3:4b","keep_alive":0}' >/dev/null
   PYTHONPATH=src $PY scripts/judge_answers.py pairs --run $R/articles-on-$n
   PYTHONPATH=src $PY scripts/judge_answers.py judge --run $R/articles-on-$n
@@ -1214,7 +1393,7 @@ Without them the flag-on runs would be compared with a single baseline run, and 
 
 ```bash
 for n in 2 3; do
-  PYTHONPATH=src $PY scripts/eval_chat_pipeline.py verify --out $R/articles-off-$n --questions $R/statute-35.jsonl
+  LEGAL_RAG__PATHS__ROOT=$LIVE PYTHONPATH=src $PY scripts/eval_chat_pipeline.py verify --out $R/articles-off-$n --questions $R/statute-35.jsonl
   curl -s localhost:11434/api/generate -d '{"model":"qwen3:4b","keep_alive":0}' >/dev/null
   PYTHONPATH=src $PY scripts/judge_answers.py pairs --run $R/articles-off-$n
   PYTHONPATH=src $PY scripts/judge_answers.py judge --run $R/articles-off-$n
@@ -1352,7 +1531,7 @@ git add docs/legal-rag-backend.md configs/local.yaml
 git commit -m "docs: article-level statute evidence, result and setting" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 ```
 
-Expected: `557 passed, 3 skipped`.
+Expected: `562 passed, 3 skipped`.
 
 ---
 
