@@ -192,6 +192,15 @@ def fusion_weights(settings: Settings) -> dict[str, float]:
 def build_chat_model(settings: Settings):
     from legal_rag.llm import FakeChatModel, OllamaChatModel
 
+    if settings.llm.backend == "gemini":
+        import os
+        from legal_rag.llm.gemini import GeminiChatModel
+
+        key = settings.llm.api_key
+        return GeminiChatModel(model=settings.llm.model,
+                               api_key=key.get_secret_value() if key else os.getenv("GEMINI_API_KEY", ""),
+                               timeout=settings.llm.timeout_seconds,
+                               thinking_level=settings.llm.gemini_thinking_level)
     if settings.llm.backend == "fake":
         return FakeChatModel({})
     if settings.llm.backend == "ollama":
