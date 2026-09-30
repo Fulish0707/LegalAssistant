@@ -34,19 +34,25 @@ local 프로필의 재정렬 설정은 CUDA와 float16을 사용하며, 모델�
 ## 4. 시스템 아키텍처 및 작동 방식 (System Architecture & How it Works)
 
 ~~~mermaid
-flowchart LR
-    User["사용자"] --> Flask["Flask 채팅 화면"]
-    Flask --> Agent["LangGraph 에이전트"]
-    Flask -- "법률 근거 사전 검색" --> Search["FastAPI /v1/search"]
-    Search --> Retrieval["dense + BM25 → RRF → 재정렬"]
-    Retrieval --> Qdrant["Qdrant: 법률 코퍼스"]
-    Search -- "검색 근거" --> Agent
-    Agent --> Ollama["Ollama qwen3:4b"]
-    Agent -- "SSE 응답" --> Flask
-    Agent --> SQLite["SQLite 대화 기록·체크포인트"]
-    Direct["API/CLI 사용자"] --> Chat["FastAPI /v1/chat 또는 scripts/chat.py"]
-    Chat --> Retrieval
-    Chat --> Ollama
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "diagramPadding": 6}}}%%
+flowchart TB
+    User["사용자"] --> Web["Flask 웹 채팅<br/>LangGraph 에이전트"]
+    Caller["API · CLI"] --> ChatAPI["FastAPI<br/>/v1/chat"]
+
+    Web -->|필요 시 근거 검색| SearchAPI["FastAPI<br/>/v1/search"]
+    ChatAPI --> Orchestrator["RAG 오케스트레이터<br/>분석 · 생성 · 인용 검증"]
+
+    SearchAPI --> Retrieval["하이브리드 검색<br/>Dense: bge-m3 · Qdrant<br/>Sparse: BM25"]
+    Orchestrator --> Retrieval
+    Retrieval --> Ranking["RRF 결합<br/>Cross-encoder 재정렬"]
+    Ranking --> Evidence["검색 근거"]
+
+    Evidence --> Web
+    Evidence --> Orchestrator
+    Web --> LLM["Ollama<br/>qwen3:4b"]
+    Orchestrator --> LLM
+    Web --> SQLite["SQLite<br/>대화 기록 · 체크포인트"]
+    Web -->|SSE 응답| User
 ~~~
 
 1.  Flask 앱은 법률 검색이 필요한 입력을 받으면 법률 RAG 서비스에서 근거를 먼저 가져옵니다.
