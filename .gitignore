@@ -19,6 +19,9 @@ chroma_db/
 .vscode/
 .worktrees/
 .claude/worktrees/
+docs/
+evals/
+
 
 # Tool caches (they also write their own .gitignore, but do not rely on that)
 .pytest_cache/
