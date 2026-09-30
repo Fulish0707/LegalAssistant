@@ -16,12 +16,11 @@ from unittest import mock
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 
 
-# Exactly the set static/lc-chat.js branches on (sse.onmessage, lines 266-282).
+# Exactly the set static/lc-chat.js branches on (sendMessage, sse.onmessage).
 FRONTEND_EVENT_TYPES = {
     "token_chunk",
     "thought",
     "final_response",
-    "update_draft",
     "error",
     "stream_end",
 }
@@ -190,6 +189,48 @@ class ChatStreamingTests(ChatStreamBase):
         self.assertIn("최종 답변입니다.", streamed)
         self.assertTrue([e for e in events if e["type"] == "thought"])
 
+    def test_final_response_carries_the_evidence_the_tools_returned(self):
+        """The evidence rail renders only what retrieval actually handed the model."""
+        hit = {"source": "계약서.pdf", "quote": "만료일로부터 14일 내 반환"}
+        agent = StubAgent(
+            [("updates", {"tools": {"messages": [
+                ToolMessage(content="[source: 계약서.pdf]\n만료일로부터 14일 내 반환",
+                            tool_call_id="t1", artifact=[hit])
+            ]}})]
+            + [("values", {"messages": [AIMessage(content=SCHEMA_JSON)]})]
+        )
+        final = [e for e in self.collect(agent) if e["type"] == "final_response"][0]
+
+        self.assertEqual(final["sources"], [hit])
+
+    def test_answer_without_retrieval_has_no_evidence(self):
+        agent = StubAgent(
+            [("updates", {"tools": {"messages": [ToolMessage(content="근거", tool_call_id="t1")]}})]
+            + [("values", {"messages": [AIMessage(content=SCHEMA_JSON)]})]
+        )
+        final = [e for e in self.collect(agent) if e["type"] == "final_response"][0]
+
+        self.assertEqual(final["sources"], [])
+
+    def test_labelled_output_is_split_into_sections_not_leaked(self):
+        labelled = (
+            'chat_response: "임차권등기명령을 신청하세요."\n\n'
+            'statement_suggestion: "신청서 초안\n- [성명]"\n\n'
+            'job_statement_suggestion: ""'
+        )
+        agent = StubAgent(
+            ai_chunks(labelled)
+            + [("values", {"messages": [AIMessage(content=labelled)]})]
+        )
+        events = self.collect(agent)
+        streamed = "".join(e["content"] for e in events if e["type"] == "token_chunk")
+        final = [e for e in events if e["type"] == "final_response"][0]
+
+        self.assertNotIn("chat_response", streamed)
+        self.assertEqual(final["chat_response"], "임차권등기명령을 신청하세요.")
+        self.assertEqual(final["statement_suggestion"], "신청서 초안\n- [성명]")
+        self.assertEqual(final["job_statement_suggestion"], "")
+
     def test_stream_is_threaded_on_the_browsers_workspace_and_terminates(self):
         agent = StubAgent(
             ai_chunks("안녕하세요.")
@@ -287,6 +328,17 @@ class AnswerTokenFilterTests(ChatStreamBase):
 
     def test_fenced_json_is_suppressed(self):
         self.assertEqual(self.feed_all(["```json\n", '{"a": 1}\n```']), "")
+
+    def test_labelled_sections_are_suppressed(self):
+        """qwen3:4b sometimes writes the schema as `key: "value"` lines, not JSON."""
+        self.assertEqual(self.feed_all(["chat_", 'response: "보증금은', ' 돌려받습니다"']), "")
+
+    def test_labelled_sections_after_whitespace_and_bold_are_suppressed(self):
+        self.assertEqual(self.feed_all(["\n**chat_response**", ': "x"']), "")
+
+    def test_prose_sharing_a_prefix_with_a_key_passes_through(self):
+        self.assertEqual(self.feed_all(["chat", " with me"]), "chat with me")
+        self.assertEqual(self.feed_all(["report_suggestion은 비어 있습니다"]), "report_suggestion은 비어 있습니다")
 
     def test_think_block_split_across_chunks_is_stripped(self):
         self.assertEqual(self.feed_all(["<thi", "nk>secret</th", "ink>answer"]), "answer")

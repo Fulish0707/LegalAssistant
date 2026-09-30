@@ -34,6 +34,7 @@ def build_embedder(settings: Settings) -> Embedder:
             base_url=settings.embedding.base_url,
             batch_size=settings.embedding.batch_size,
             timeout=settings.embedding.timeout_seconds,
+            query_num_ctx=settings.embedding.query_num_ctx,
         )
     raise ValueError(f"unknown embedding backend {settings.embedding.backend!r}")
 
@@ -61,7 +62,9 @@ def build_reranker(settings: Settings) -> Reranker:
     if settings.rerank.backend == "cross_encoder":
         from legal_rag.reranking.cross_encoder import CrossEncoderReranker  # heavy import, optional extra
 
-        return CrossEncoderReranker(model=settings.rerank.model, device=settings.rerank.device)
+        return CrossEncoderReranker(model=settings.rerank.model, device=settings.rerank.device,
+                                    dtype=settings.rerank.dtype,
+                                    local_files_only=settings.rerank.local_files_only)
     raise ValueError(f"unknown rerank backend {settings.rerank.backend!r}")
 
 
@@ -119,7 +122,8 @@ def build_hybrid_retriever(
     legs = build_corpus_legs(settings, embedder=embedder)
     return HybridRetriever(
         legs,
-        RRFFuser(rrf_k=settings.retrieval.rrf_k, weights=fusion_weights(settings)),
+        RRFFuser(rrf_k=settings.retrieval.rrf_k, weights=fusion_weights(settings),
+                 leg_floor=settings.retrieval.leg_floor),
         reranker or build_reranker(settings),
         k_leg=max(settings.retrieval.k_dense, settings.retrieval.k_sparse),
         k_fused=settings.retrieval.k_fused,
@@ -191,9 +195,15 @@ def build_chat_model(settings: Settings):
     if settings.llm.backend == "fake":
         return FakeChatModel({})
     if settings.llm.backend == "ollama":
-        return OllamaChatModel(model=settings.llm.model, base_url=settings.llm.base_url, timeout=settings.llm.timeout_seconds)
+        return OllamaChatModel(model=settings.llm.model, base_url=settings.llm.base_url,
+                               timeout=settings.llm.timeout_seconds, num_ctx=settings.llm.num_ctx)
     if settings.llm.backend == "transformers":
-        raise RuntimeError("the transformers backend arrives with V0.4 (QLoRA adapters)")
+        from legal_rag.llm.transformers import TransformersChatModel
+
+        return TransformersChatModel(
+            model_id=settings.llm.model,
+            adapter=settings.llm.adapter,
+        )
     raise ValueError(f"unknown llm backend {settings.llm.backend!r}")
 
 

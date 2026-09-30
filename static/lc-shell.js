@@ -139,41 +139,41 @@ window.LC = window.LC || {};
 
   LC.evidenceRail = (opts) => {
     const o = opts || {};
-    const list = LC.SOURCES.filter(x => !o.tab || o.tab === '전체' || x.kind === o.tab);
+    const kinds = ['전체'].concat([...new Set(LC.SOURCES.map(x => x.kind))]);
+    const tab = kinds.includes(o.tab) ? o.tab : '전체';
+    const list = LC.SOURCES.filter(x => tab === '전체' || x.kind === tab);
     return `
 <aside style="min-height:0;width:356px;flex:none;overflow:hidden;background:#fff;border-left:1px solid #e6e3dd;display:flex;flex-direction:column">
   <div style="display:flex;flex-direction:column;height:100%;min-height:0">
+    ${list.length ? `
     <div style="flex:none;padding:16px 20px 0;display:flex;flex-direction:column;gap:12px">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
         <span style="font-size:13px;font-weight:600">왜 이렇게 답했나요</span>
-        <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#9aa0a5">
-          <span style="width:6px;height:6px;border-radius:50%;background:#3f9142;display:inline-block"></span>
-          <span id="knowledgeSummary">${LC.esc(LC.S.chunkLabel)}</span>
-        </span>
+        <span style="font-size:11px;color:#9aa0a5">근거 ${LC.SOURCES.length}건</span>
       </div>
+      ${kinds.length > 2 ? `
       <div style="display:flex;gap:4px;border-bottom:1px solid #f0ede7">
-        ${['전체','법령','판례','내 문서'].map(k => `<button class="lc-tab" data-act="railTab" data-key="${LC.esc(k)}" style="padding:8px 10px;border:0;border-bottom:2px solid ${o.tab === k ? a : 'transparent'};background:transparent;font-size:12px;font-weight:500;color:${o.tab === k ? '#14171a' : '#9aa0a5'};cursor:pointer">${LC.esc(k)}</button>`).join('')}
-      </div>
+        ${kinds.map(k => `<button class="lc-tab" data-act="railTab" data-key="${LC.esc(k)}" style="padding:8px 10px;border:0;border-bottom:2px solid ${tab === k ? a : 'transparent'};background:transparent;font-size:12px;font-weight:500;color:${tab === k ? '#14171a' : '#9aa0a5'};cursor:pointer">${LC.esc(k)}</button>`).join('')}
+      </div>` : ''}
     </div>
 
     <div id="knowledgeSources" style="flex:1;min-height:0;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:9px">
       ${list.map(s => `
-      <div style="display:flex;flex-direction:column;gap:7px;padding:14px 16px;border-radius:12px;border:1px solid ${o.activeCite === s.id ? a : '#e6e3dd'};background:${o.activeCite === s.id ? '#f4faf9' : '#fff'}">
+      <div style="display:flex;flex-direction:column;gap:7px;padding:14px 16px;border-radius:12px;border:1px solid #e6e3dd;background:#fff">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
           <span style="font-size:10px;letter-spacing:.14em;color:#9aa0a5">${LC.esc(s.kind)}</span>
-          <span style="display:flex;align-items:center;gap:7px">
+          ${s.score == null ? '' : `<span style="display:flex;align-items:center;gap:7px">
             ${LC.bar(s.score, 40, 4)}
             <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;color:${a}">${LC.pct(s.score)}</span>
-          </span>
+          </span>`}
         </div>
         <div style="font-size:13px;font-weight:500;line-height:1.55">${LC.esc(s.title)}</div>
-        <div style="font-size:12px;line-height:1.7;color:#767d83;text-wrap:pretty">${LC.esc(s.quote)}</div>
+        <div style="font-size:12px;line-height:1.7;color:#767d83;text-wrap:pretty;white-space:pre-wrap;${LC.S.openSource === s.id ? '' : 'display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden'}">${LC.esc(s.quote)}</div>
         <div style="display:flex;gap:10px;padding-top:2px">
-          <button class="lc-link" data-act="viewSource" data-key="${s.id}" style="background:transparent;border:0;padding:0;font-size:11px;color:${a};cursor:pointer">원문 보기</button>
-          <button class="lc-link" data-act="cite" data-key="${s.id}" style="background:transparent;border:0;padding:0;font-size:11px;color:#9aa0a5;cursor:pointer">답변에서 위치 찾기</button>
+          <button class="lc-link" data-act="viewSource" data-key="${LC.esc(s.id)}" style="background:transparent;border:0;padding:0;font-size:11px;color:${a};cursor:pointer">${s.kind === '내 문서' ? '원문 보기' : LC.S.openSource === s.id ? '접기' : '전문 보기'}</button>
         </div>
       </div>`).join('')}
-    </div>
+    </div>` : '<div style="flex:1"></div>'}
 
     ${o.footer || ''}
   </div>
@@ -255,9 +255,8 @@ ${LC.S.traceOpen ? `
     lawyer: () => { alert('변호사 연결은 준비 중입니다. 상담 기록을 바탕으로 적합한 변호사를 안내할 예정입니다.'); return false; },
     viewSource: k => {
       const s = LC.SOURCES.find(x => x.id === k);
-      if (s && s.kind === '내 문서') location.href = 'documents.html';
-      else location.href = 'cases.html';
-      return false;
+      if (s && s.kind === '내 문서') { location.href = 'documents.html'; return false; }
+      LC.S.openSource = LC.S.openSource === k ? null : k;   // 법령·판례는 제자리에서 전문 펼치기
     }
   };
   document.addEventListener('keydown', e => {

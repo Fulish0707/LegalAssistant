@@ -9,6 +9,8 @@ from langchain_config import (
     AgentContext,
     build_agent,
     extract_agent_sections,
+    SECTION_FIELDS,
+    search_legal_evidence,
     ingest_text_to_vector_store,
     get_knowledge_base_status,
     clear_knowledge_base,
@@ -18,6 +20,8 @@ from langchain_config import (
     tracing_status,
 )
 import logging
+
+from citation_guard import annotate_unsupported, unsupported_citations
 import sqlite3
 import json
 import re
@@ -376,6 +380,20 @@ def _tail_prefix_length(text, tag):
     return 0
 
 
+_SECTION_LABEL = re.compile(r'\**"?(' + "|".join(SECTION_FIELDS) + r')"?\**\s*:')
+
+
+def _could_become_section_label(text):
+    """True while text is still a prefix of a `key:` label, so the gate must wait."""
+    core = text.lstrip('*"')
+    for key in SECTION_FIELDS:
+        if key.startswith(core):
+            return True
+        if core.startswith(key) and re.fullmatch(r'"?\**\s*', core[len(key):]):
+            return True
+    return False
+
+
 class _AnswerTokenFilter:
     """Decide once, per model call, whether a message stream is visible answer.
 
@@ -429,12 +447,16 @@ class _AnswerTokenFilter:
         return self._gate("".join(visible))
 
     def flush(self):
-        """Emit whatever was held back waiting on a possible tag boundary."""
+        """Emit whatever was held back waiting on a possible tag or label boundary."""
         if self._in_think:
             self._pending = ""
             return ""
         remainder, self._pending = self._pending, ""
-        return self._gate(remainder)
+        emitted = self._gate(remainder)
+        if not self._decided and not self._suppressed and self._head:
+            # The message ended while still looking like the start of a label.
+            emitted, self._head = emitted + self._head, ""
+        return emitted
 
     def _gate(self, text):
         if self._suppressed or not text:
@@ -445,9 +467,11 @@ class _AnswerTokenFilter:
         stripped = self._head.lstrip()
         if not stripped:
             return ""
-        if stripped[0] in "{`":
+        if stripped[0] in "{`" or _SECTION_LABEL.match(stripped):
             self._suppressed = True
             self._head = ""
+            return ""
+        if _could_become_section_label(stripped):
             return ""
         self._decided = True
         emitted, self._head = self._head, ""
@@ -474,6 +498,27 @@ def _tool_activity(node, update):
     if lines:
         return lines
     return ["답변 생성 중" if node == "model" else f"단계: {node}"]
+
+
+def _tool_sources(update):
+    """Structured retrieval hits a tool attached to its ToolMessage.artifact."""
+    sources = []
+    messages = (update or {}).get("messages") if isinstance(update, dict) else None
+    for message in messages or []:
+        if isinstance(message, ToolMessage) and isinstance(message.artifact, list):
+            sources.extend(hit for hit in message.artifact if isinstance(hit, dict))
+    return sources
+
+
+_SMALL_TALK = re.compile(r"^(?:안녕|반가|고마|감사|수고|ㅎㅇ|hi|hello|thanks?|thank you|bye)", re.IGNORECASE)
+
+
+def _needs_legal_search(text):
+    """Everything but greetings and thanks gets the statute/case-law pre-search."""
+    stripped = (text or "").strip()
+    if len(stripped) < 4:
+        return False
+    return not (_SMALL_TALK.match(stripped) and len(stripped) <= 20)
 
 
 def _draft_is_already_in_thread(agent, run_config, draft):
@@ -557,12 +602,22 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
             agent_prompt += f"\n\n{DRAFT_CONTEXT_HEADER}\n{current_personal_statement_draft}"
 
         final_state = None
+        sources = []
+        # Search statutes and case law before the model runs. Left to the model,
+        # qwen3:4b skipped the search and invented a deadline (2026-09-27).
+        legal_evidence = ""
+        legal_rag_url = os.getenv("LEGAL_RAG_URL", "").strip()
+        if legal_rag_url and _needs_legal_search(user_input):
+            yield _sse({'type': 'thought', 'content': '법령·판례 검색 중'})
+            legal_evidence, hits = search_legal_evidence(legal_rag_url, user_input)
+            sources.extend(hits)
+            yield _sse({'type': 'thought', 'content': f'법령·판례 {len(hits)}건 확인'})
         filters = {}
         buffer = ""
         for mode, chunk in agent.stream(
             {"messages": [("user", agent_prompt)]},
             run_config,
-            context=AgentContext(user_id=thread_user_id),
+            context=AgentContext(user_id=thread_user_id, legal_evidence=legal_evidence),
             stream_mode=["messages", "updates", "values"],
         ):
             if mode == "messages":
@@ -592,6 +647,7 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
                         buffer = ""
             elif mode == "updates":
                 for node, update in (chunk or {}).items():
+                    sources.extend(_tool_sources(update))
                     for line in _tool_activity(node, update):
                         yield _sse({'type': 'thought', 'content': line})
             elif mode == "values":
@@ -616,6 +672,12 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
             elif not cleaned_agent_output_string:
                 print(f"Warning: Agent output became empty after cleaning. Original: '{agent_output_string}'")
         parsed_chat_response = parsed_sections["chat_response"] if parsed_sections["chat_response"] else "Sorry, I couldn't generate a response."
+        # Citations the evidence does not back get a visible notice, whatever the model did.
+        evidence_texts = [legal_evidence, user_input, current_personal_statement_draft]
+        evidence_texts += [f"{hit.get('source', '')} {hit.get('quote', '')}" for hit in sources]
+        parsed_chat_response = annotate_unsupported(
+            parsed_chat_response, unsupported_citations(parsed_chat_response, evidence_texts)
+        )
 
         add_chat_message_to_db(thread_user_id, "assistant", parsed_chat_response)
 
@@ -625,6 +687,7 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
             "statement_suggestion": parsed_sections["statement_suggestion"],
             "job_statement_suggestion": parsed_sections["job_statement_suggestion"],
             "report_suggestion": parsed_sections["report_suggestion"],
+            "sources": sources,
             "current_draft_processed": current_personal_statement_draft
         }
         yield _sse(final_data)

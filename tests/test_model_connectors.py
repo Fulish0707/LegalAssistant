@@ -74,6 +74,39 @@ class ModelConnectorTests(unittest.TestCase):
             module.get_embedding_descriptor(), ("ollama", "nomic-embed-text:latest")
         )
 
+    def test_default_embedder_is_bge_m3(self):
+        """One embedder for the whole app: legal_rag's Qdrant corpora are bge-m3, so
+        uploads use it too and Ollama keeps a single embedding model resident."""
+        module = importlib.import_module("llm_model")
+
+        os.environ["EMBEDDING_PROVIDER"] = "ollama"
+        os.environ.pop("OLLAMA_EMBED_MODEL", None)
+
+        self.assertEqual(module.get_embedding_descriptor(), ("ollama", "bge-m3"))
+        self.assertEqual(module.get_collection_name(), "docs_ollama_bge_m3")
+
+    def test_ollama_context_window_defaults_to_8192(self):
+        """Ollama's own default is 4096 tokens; system prompt plus legal evidence ran
+        to about 6,100 and Ollama cut the system prompt off (2026-09-27)."""
+        module = importlib.import_module("llm_model")
+        os.environ["LLM_PROVIDER"] = "ollama"
+        os.environ.pop("OLLAMA_NUM_CTX", None)
+        self.assertEqual(module.get_chat_model().num_ctx, 8192)
+
+        os.environ["OLLAMA_NUM_CTX"] = "12288"
+        self.assertEqual(module.get_chat_model().num_ctx, 12288)
+
+    def test_embedding_context_window_defaults_to_1024(self):
+        """Must equal legal_rag's embedding.query_num_ctx: Ollama reloads a model whenever
+        two clients ask for different windows. Upload chunks are 1,000 characters."""
+        module = importlib.import_module("llm_model")
+        os.environ["EMBEDDING_PROVIDER"] = "ollama"
+        os.environ.pop("OLLAMA_EMBED_NUM_CTX", None)
+        self.assertEqual(module.get_embedding_model().num_ctx, 1024)
+
+        os.environ["OLLAMA_EMBED_NUM_CTX"] = "2048"
+        self.assertEqual(module.get_embedding_model().num_ctx, 2048)
+
     def test_unknown_provider_raises(self):
         os.environ["LLM_PROVIDER"] = "not-a-provider"
         module = importlib.import_module("llm_model")

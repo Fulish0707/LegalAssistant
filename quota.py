@@ -6,7 +6,7 @@ import hashlib
 import ipaddress
 
 
-DAILY_AI_REQUEST_LIMIT = 20
+DAILY_AI_REQUEST_LIMIT = 100
 
 
 @dataclass(frozen=True)

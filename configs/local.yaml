@@ -1,8 +1,17 @@
 # Ubuntu host with an RTX 4060. Ollama serves both the LLM and the embedder.
 embedding:
   model: bge-m3
+  # 8 GB card: qwen3:4b at 8192 context (4.5 GB) + fp16 reranker (1.5 GB) left 1.8 GB, and
+  # bge-m3 at Ollama's default 4096 window needs 1.1 GB weights + 1.17 GB compute buffer, so
+  # it failed to load (2026-09-27). Queries fit in 1024. Same value as the chat app's
+  # OLLAMA_EMBED_NUM_CTX, or Ollama reloads bge-m3 whenever the other client calls.
+  query_num_ctx: 1024
 llm:
   model: qwen3:4b
+  # Answer prompts with five evidence blocks measure 5,900-6,300 tokens (Qwen3 tokenizer,
+  # 2026-09-27); Ollama's default 4096 cut them silently. 8192 matches the chat app's
+  # OLLAMA_NUM_CTX, so Ollama does not reload qwen when the two alternate, and fits the GPU.
+  num_ctx: 8192
   
 qdrant:
   mode: server
@@ -12,17 +21,26 @@ retrieval:
   corpora: [criminal-v1, civil-v1, administrative-v1, ip-v1]
   # All three depths must match: the reranker sees the fused top-k_fused, built from legs of
   # the same depth. Raising k_fused alone leaves the legs at their default 20.
-  # 50 vs 100 candidates was indistinguishable on the 200-case graded pool (Precision@10
-  # -0.006, 95% CI [-0.019, +0.008]) at half the reranking cost (3.06 s vs 6.04 s per query).
-  # Legs stay 100 deep: the measured ranking reranked the top 50 of a fusion built from
-  # 100-deep legs. Fusing 50-deep legs instead changes the candidate set (overlap 9.55/10).
+  # 50 vs 100 candidates was indistinguishable on the ip-v1 200-case graded pool (Precision@10
+  # -0.006, 95% CI [-0.019, +0.008]), but that fused 2 lists from one corpus. Across four
+  # corpora (8 lists) 100 improved the top 5 on 5 of 10 everyday questions (unjudged) and was
+  # flat on crossdomain-60 (Success@10 0.567 either way) for ~0.7 s more per query with the
+  # fp16 reranker (2026-09-27). Chat answers everyday questions, so 100.
   k_dense: 100
   k_sparse: 100
-  k_fused: 50            # what the reranker scores, and what sets its cost
+  k_fused: 100           # what the reranker scores, and what sets its cost
   # Measured on the ip-v1 200-case graded pool (docs/retrieval-diagnostics.md): equal weights cost
   # 0.096 Precision@10 against dense alone (95% CI [0.069, 0.122]); at 0.75 the hybrid matches dense
   # (+0.011, CI [-0.000, 0.022]), so sparse is kept as insurance for lexical queries, not for gain.
   sparse_weight: 0.75
+  # Every leg's top 3 always reach the reranker. Across four corpora RRF mostly rewards a chunk
+  # that both of its corpus's legs return, so a corpus whose legs disagree was shut out: for
+  # "전세 ... 보증금을 안 돌려줘요" civil got 2 of 50 slots and its best chunk (civil sparse rank 1,
+  # cross-encoder 0.82, above everything served) sat at fused rank 129. On crossdomain-60 the
+  # floor moved gold Success@10 0.533 -> 0.567 (criminal +1 case, civil +1; administrative
+  # Success@10 unchanged, MRR@10 -0.025), within noise at n=60, at no extra cost. The floor fills
+  # at most half of k_fused; multi-query /v1/chat is unmeasured (docs/retrieval-diagnostics.md).
+  leg_floor: 3
 
 rerank:
   # Cross-encoder reranking of the fused top-100 gained 0.076 Precision@10 over the fused
@@ -31,3 +49,12 @@ rerank:
   # the cost. Needs the `rerank` extra: uv sync --extra rerank
   backend: cross_encoder
   device: cuda
+  # Cached locally; skipping the Hub checks loads it in 1.9 s instead of 5.6 s (2026-09-27).
+  local_files_only: true
+  # Half precision: 0.8 s vs 3.0 s per query and 1.2 GB vs 2.5 GB of VRAM, identical top 10
+  # on 50 civil judgments (2026-09-27). The 8 GB card also holds qwen3:4b and bge-m3.
+  dtype: float16
+
+api:
+  # Load BM25, bge-m3 and the reranker at startup instead of on the first request.
+  warmup: true

@@ -50,3 +50,21 @@ def test_feedback_is_appended_and_empty_bundle_is_stated():
     Generator(model).generate("q", EvidenceBundle(items=[]), feedback="근거 없는 인용")
     msgs = model.calls[0].messages
     assert msgs[-1].content == "근거 없는 인용" and "검색된 법률 근거가 없습니다" in msgs[1].content
+
+
+def test_truncated_json_is_retried_with_a_request_for_a_shorter_answer():
+    """A schema-repair prompt did not stop qwen3:4b from looping past max_tokens again (2026-09-28)."""
+    class Truncated:
+        name = "truncated"
+
+        def __init__(self):
+            self.n = 0
+
+        def generate(self, messages, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                raise StructuredOutputError("LegalAnswer: Invalid JSON: EOF while parsing a string at line 5", '{"summary": "…')
+            assert "잘렸습니다" in messages[-1].content and "짧게" in messages[-1].content
+            return ModelResponse(text="{}", parsed=_answer())
+
+    assert Generator(Truncated()).generate("q", _bundle()).confidence

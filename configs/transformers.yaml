@@ -1,0 +1,25 @@
+# Test profile: TransformersChatModel with QLoRA adapter.
+# Reranker on CPU to leave GPU room for the 4-bit model (~3.2 GB).
+# Embedder stays on Ollama (separate process).
+
+llm:
+  backend: transformers
+  model: Qwen/Qwen3-4B
+  adapter: models/adapters/qwen3-4b-legal-full/20260924T105613457564Z/adapter
+  temperature: 0.2
+  max_tokens: 1024
+
+qdrant:
+  mode: server
+  url: http://localhost:6333
+
+retrieval:
+  corpora: [criminal-v1, civil-v1, administrative-v1, ip-v1]
+  k_dense: 100
+  k_sparse: 100
+  k_fused: 50
+  sparse_weight: 0.75
+
+rerank:
+  backend: cross_encoder
+  device: cpu  # CPU to save GPU for the LLM
