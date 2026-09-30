@@ -46,7 +46,7 @@ rerank:
   device: cpu
 
 llm:
-  backend: ollama          # ollama | fake | transformers (V0.4)
+  backend: ollama          # ollama | gemini | fake | transformers (V0.4)
   model: qwen3:4b
   base_url: http://localhost:11434
   temperature: 0.2

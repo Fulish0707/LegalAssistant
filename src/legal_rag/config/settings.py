@@ -88,12 +88,14 @@ class RerankSettings(_Section):
 
 
 class LLMSettings(_Section):
-    backend: Literal["ollama", "fake", "transformers"] = "ollama"
+    backend: Literal["ollama", "fake", "transformers", "gemini"] = "ollama"
     model: str = "qwen3:4b"
     base_url: str = "http://localhost:11434"
     temperature: float = 0.2
     max_tokens: int = 1024
     adapter: str | None = None
+    api_key: SecretStr | None = None  # Gemini key; environment/.env only
+    gemini_thinking_level: Literal["low", "medium", "high"] | None = None
     timeout_seconds: float = 120.0
     # Ollama context window; None keeps Ollama's default (4096 for qwen3:4b here), which
     # silently cut the ~6,100-token answer prompts. Covers the generated tokens too.
@@ -170,6 +172,6 @@ class Settings(BaseSettings):
 
     def hash(self) -> str:
         """Stable digest of the non-secret configuration, recorded in corpus manifests."""
-        payload = self.model_dump(mode="json", exclude={"qdrant": {"api_key"}})
+        payload = self.model_dump(mode="json", exclude={"qdrant": {"api_key"}, "llm": {"api_key"}})
         encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()[:16]
