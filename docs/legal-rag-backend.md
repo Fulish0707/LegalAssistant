@@ -222,6 +222,36 @@ then embed and upsert batches. It does not retain every chunk or token list in R
 Embedded Qdrant still uses memory for its stored vectors and payloads; streaming
 preparation does not make total database memory constant.
 
+## Gemini chat backend
+
+The API (`scripts/serve.py`), interactive chat (`scripts/chat.py`), and evaluation
+commands using `settings_from_options` read these chat settings from the project
+`.env` (or the `--root` directory):
+
+```dotenv
+LEGAL_RAG__LLM__BACKEND=gemini
+LEGAL_RAG__LLM__MODEL=gemini-3.7-flash
+GEMINI_API_KEY=
+LEGAL_RAG__LLM__GEMINI_THINKING_LEVEL=low
+LEGAL_RAG__LLM__MAX_TOKENS=8192
+```
+
+Fill in the API key from Google AI Studio, then start the API with
+`uv run python scripts/serve.py --profile local`. Gemini uses the existing
+structured answer contract, citation verification, and local retrieval pipeline.
+Questions and retrieved passages are sent to Google's GenerateContent API.
+The Flask chat model still uses its separate `LLM_PROVIDER` setting.
+
+Gemini's token cap covers reasoning and answer output together. The 2026-09-30
+smoke run cut a JSON answer at 2,048 tokens, so the Gemini trial uses low reasoning
+and an 8,192-token total cap. The model ID remains editable; 3.8 Flash returned
+repeated HTTP 503 responses during that trial, while 3.7 Flash answered successfully.
+
+To select the local generator, set the backend to `ollama`, model to
+`qwen3:4b`, and max tokens to `2048`. Explicit CLI chat settings override the `.env` entries; exported
+`LEGAL_RAG__LLM__...` environment variables have highest priority. API keys are
+excluded from configuration hashes and are rejected in YAML profiles.
+
 ## Document type and citation kind
 
 `document_type` is the fine-grained retrieval facet. Six values appear across the four
