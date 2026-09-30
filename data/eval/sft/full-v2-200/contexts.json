@@ -1,0 +1,52 @@
+{
+  "data_dir": "/home/layke/Documents/MyLLMAgent/data/training/legal-qa-full-v2",
+  "manifest_sha256": "d5ced4c548311ee549e795c52e63fdea746c477a01606a0c59216fcde5877eba",
+  "test_sha256": "906b8826e17d3edd1dbf5c753275a1f0bea158a1619ff6fdf962fd635664dac4",
+  "tokenizer_dir": "/home/layke/Documents/MyLLMAgent/data/training/qwen3-4b-tokenizer",
+  "tokenizer_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+  "max_length": 1024,
+  "per_domain": 50,
+  "seed": 42,
+  "budget": 768,
+  "window_chars": 480,
+  "retrieval": {
+    "corpora": [
+      "criminal-v1",
+      "civil-v1",
+      "administrative-v1",
+      "ip-v1"
+    ],
+    "k_final": 5,
+    "k_dense": 100,
+    "k_sparse": 100,
+    "k_fused": 50,
+    "sparse_weight": 0.75,
+    "rrf_k": 60,
+    "rerank": "cross_encoder",
+    "filter": "legal_domain per case",
+    "query": "raw question"
+  },
+  "settings_hash": "fb4ad2d1ee1f3db2",
+  "seconds": 723.3,
+  "stats": {
+    "cases": 200,
+    "gold_retrieved": 95,
+    "retrieved_without_passages": 0,
+    "retrieved_passages_mean": 1.975,
+    "prompt_tokens": {
+      "none": {
+        "mean": 152.33,
+        "max": 199
+      },
+      "retrieved": {
+        "mean": 713.83,
+        "max": 768
+      },
+      "oracle": {
+        "mean": 792.805,
+        "max": 949
+      }
+    }
+  },
+  "contexts_sha256": "5e7378bef7ff782563230eeabf60acbb129888ae3d1af2b9ada622aba1d84a24"
+}

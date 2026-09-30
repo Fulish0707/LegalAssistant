@@ -50,3 +50,43 @@ def test_ollama_refuses_silent_truncation():
 
     embedder = OllamaEmbedder(model='bge-m3', base_url='http://test', transport=httpx.MockTransport(handler))
     assert embedder.embed_query('원문 전체') == [0.1, 0.2]
+
+
+def _recording_embedder(**kwargs):
+    bodies = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        return httpx.Response(200, json={"embeddings": [[0.1, 0.2] for _ in body["input"]]})
+
+    embedder = OllamaEmbedder(model="bge-m3", base_url="http://test", transport=httpx.MockTransport(handler), **kwargs)
+    return embedder, bodies
+
+
+def test_query_context_window_is_sent_only_with_queries():
+    """bge-m3 at Ollama's default 4096 context reserves a 1.17 GB compute buffer, which
+    did not fit beside qwen3:4b at 8192 and the reranker (2026-09-27). Queries are short;
+    index builds keep the full window, and truncate=False still refuses silent cuts."""
+    embedder, bodies = _recording_embedder(query_num_ctx=1024)
+    embedder.embed_query("보증금 반환")
+    embedder.embed_documents(["긴 판결문"])
+
+    assert bodies[0]["options"] == {"num_ctx": 1024}
+    assert "options" not in bodies[1]
+    assert bodies[0]["truncate"] is False
+
+
+def test_no_query_context_window_by_default():
+    embedder, bodies = _recording_embedder()
+    embedder.embed_query("q")
+    assert "options" not in bodies[0]
+
+
+def test_factory_passes_the_query_context_window():
+    from legal_rag.config import Settings
+    from legal_rag.factory import build_embedder
+
+    embedder = build_embedder(Settings(embedding={"query_num_ctx": 1024}))
+    assert embedder.query_num_ctx == 1024
+    assert Settings().embedding.query_num_ctx is None

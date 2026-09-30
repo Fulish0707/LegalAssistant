@@ -100,6 +100,13 @@ class VectorStore:
         return payload
 
     # Reads ----------------------------------------------------------------------
+    def texts_by_chunk_id(self, chunk_ids: list[str]) -> dict[str, str]:
+        """Point lookup by id: document_id and order carry no payload index."""
+        if not chunk_ids:
+            return {}
+        points = self.client.retrieve(self.collection, ids=[point_id(i) for i in chunk_ids], with_payload=["id", "text"])
+        return {point.payload["id"]: point.payload["text"] for point in points}
+
     def search_dense(self, vector: list[float], k: int, filters: RetrievalFilters | None = None) -> list[tuple[Chunk, float]]:
         return self._query(vector, self.DENSE, k, filters)
 

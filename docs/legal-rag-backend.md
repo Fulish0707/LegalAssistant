@@ -120,9 +120,14 @@ Frequently changed keys:
 | `qdrant.mode` | `embedded` | `server` uses `qdrant.url` and `LEGAL_RAG__QDRANT__API_KEY` |
 | `retrieval.k_dense`, `k_sparse`, `k_fused`, `k_final` | 20, 20, 20, 5 | Depth per leg, after fusion, and into the answer |
 | `rerank.backend` | `noop` | `cross_encoder` needs the extra |
+| `rerank.device` / `rerank.dtype` | `cpu` / `float32` | `local.yaml` uses `cuda` / `float16`, see below |
+| `rerank.local_files_only` | `false` | Load the cached model without Hub checks (1.9 s instead of 5.6 s); `local.yaml` sets it |
+| `api.warmup` | `false` | Run one search in the background at startup; `/health` reports `warm`. `local.yaml` sets it: first search after warm-up 2.3 s instead of ~18 s cold |
 | `llm.backend` / `llm.model` | `ollama` / `qwen3:4b` | `transformers` arrives with V0.4 |
+| `llm.num_ctx` | unset (Ollama's 4096) | `local.yaml` sets 8192: answer prompts measure 5,900–6,300 tokens |
 | `rag.allow_clarification` | `true` | Ask for facts instead of answering when the analyzer flags them |
-| `rag.llm_rewrite` | `false` | Add LLM-generated search phrasings |
+| `rag.llm_rewrite` | `false` | Add LLM-generated search phrasings; no measurable retrieval gain (below) |
+| `rag.hard_filter` | `false` | Use the analyzer's single needed document kind as a hard filter; harmful (below) |
 | `rag.max_regenerations` | `1` | Regeneration attempts after a failed verification |
 | `trace.path` / `trace.include_text` | unset / `false` | JSONL audit log; user text is excluded unless enabled |
 
@@ -329,8 +334,7 @@ get wrong.
 **Weights exist because rank fusion has no notion of relevance.** Every list contributes
 `1/(k + rank)`, so each corpus's top hit outranks the relevant corpus's second hit no
 matter how poor it is. Fanning out therefore trades precision for recall. Weights mitigate
-it; a cross-encoder reranker is the real fix and is not built yet — `rerank.backend` is
-`noop`, and `legal_rag.reranking.cross_encoder` does not exist. Measure Recall@k with
+it; the cross-encoder reranker (`rerank.backend: cross_encoder`) is the real fix. Measure Recall@k with
 `corpora: []` and again with all four before concluding anything about fusion quality.
 
 `k_fused` defaults to 20, which is tight when eight lists feed the fuser rather than two.
@@ -339,3 +343,205 @@ Diagnostics: `eval_retrieval.py --leg sparse` now means every sparse leg across 
 corpus, fused, and the report header records which leg it measured. Use `close_legs(retriever)`
 to release stores — fan-out opens one per corpus, and in embedded mode each holds an
 exclusive lock on its index directory, which is why server mode is preferred for fan-out.
+
+## Reranker precision and device
+
+Measured 2026-09-27 on the RTX 4060 (8 GB): `BAAI/bge-reranker-v2-m3` scoring 50 civil
+judgment chunks (2,855 characters on average) at `max_length` 512 and batch 16.
+
+| Device / dtype | Seconds per query | Peak VRAM | Top 10 vs float32 |
+|---|---|---|---|
+| cuda / float32 | 2.9–3.1 | 2.5 GB | — |
+| cuda / float16 | 0.8 | 1.2 GB | identical |
+| cpu / float32 (16 cores) | 35–37 | 0 | identical |
+
+`local.yaml` runs float16 on cuda. The card also holds the chat model (qwen3:4b, ~3.4 GB)
+and bge-m3 (~1.9 GB), so float32 does not fit alongside them. CPU is too slow for chat,
+where the agent may search more than once per turn.
+
+## Chat pipeline evaluation, 2026-09-27
+
+Components of `/v1/chat`, run under the local profile with qwen3:4b at `num_ctx` 8192.
+
+**Two bugs were fixed before measuring.**
+- The analyzer names the native `court_decision` type. As an exact `document_type` filter that
+  matched no imported corpus, so every such turn answered with zero evidence. The filter now
+  uses the citation kind.
+- `build_chat_model` passed no `num_ctx`, so answer prompts (5,900–6,300 tokens) were cut at
+  Ollama's default 4096 without a warning.
+
+**Analysis and rewriting against retrieval.** 210 questions: 50 each from the administrative,
+civil and criminal pilot-200 sets, plus crossdomain-60. ip is left out because it sits at the
+exact-gold floor. Scoring is gold document in the top 10; intervals are paired bootstraps.
+
+| Condition | S@10 | MRR@10 | ΔS@10 95% CI vs question only |
+|---|---|---|---|
+| Question only (`/v1/search`) | 0.557 | 0.399 | — |
+| + rule rewrite | 0.567 | 0.397 | [−0.010, +0.029] |
+| + LLM rewrite | 0.571 | 0.396 | [−0.005, +0.038] |
+| + rule rewrite + analyzer hard filter | 0.414 | 0.309 | [−0.205, −0.086] |
+
+- **The hard filter:** it fired on 207 of 210 questions, and 201 of those were statute-only.
+  That is why `rag.hard_filter` is now off.
+- **Clarification:** the analyzer asked for more facts on 2 of 210 questions.
+- **Scope:** these are formal, document-derived questions. Conversational phrasing, which the
+  rewriter targets, is untested.
+
+**Verification policy.** 80 questions: 20 each from administrative, civil, criminal and
+crossdomain.
+- **First drafts:** the verifier flagged 10 (12.5%). There were 10 `source_id_mismatch` issues
+  (the right authority under the wrong source id) and 6 `statute_not_in_evidence`.
+- **Policy outcome:** all 10 were regenerated. 4 then passed, 3 were stripped and answered, and
+  3 were rejected, a 3.75% refusal rate.
+- **Independent check:** `citation_guard` on the answer text flagged 7 of 80 first drafts and
+  4 of 77 final answers.
+- **Hand check of the 5 remaining flags:** 2 were genuinely unsupported. Both were in
+  `legal_issues` or `additional_information_needed`, which the verifier and strip then skipped
+  (fixed since). The other 3 were checker artefacts: a shortened law name, and the generic word
+  "법령" read as a law name (fixed since).
+- **Latency:** 24.8 s per turn on average.
+
+### Follow-up, 2026-09-28
+
+Both runs used `scripts/eval_chat_pipeline.py`. Raw results are under `data/eval/reports/chat_pipeline/`.
+
+**Everyday phrasing.** `data/eval/everyday-150.jsonl` rewrites the same 150 administrative,
+civil and criminal questions the way a person would ask them. Each keeps its gold document,
+and 30 were reviewed by hand.
+
+| Comparison | S@10 | 95% CI |
+|---|---|---|
+| Formal → everyday wording, question only | 0.553 → 0.480 | [−0.127, −0.020] |
+| Everyday: question only → rule rewrite | 0.480 → 0.473 | [−0.033, +0.013] |
+| Everyday: question only → LLM rewrite | 0.480 → 0.480 | [−0.027, +0.027] |
+| Everyday: question only → + analyzer hard filter | 0.480 → 0.393 | [−0.153, −0.020] |
+
+- **Rewriting:** everyday wording costs about 7 points, and LLM rewriting recovers none of it,
+  so `llm_rewrite` stays off.
+- **Clarification:** the analyzer asks for more facts on 24 of 150 everyday questions (16%),
+  against 1% for formal ones.
+
+**Verification rerun** on the same 80 questions, after the verifier and strip began covering
+every list field. Generation is sampled, so single-digit differences from the first run are
+within noise.
+- **Outcomes:** 78 answered, 0 rejected (3 in the first run), and 2 `GenerationError`. In the
+  errors, one field of the answer JSON ran past `max_tokens` 2048 and the JSON was cut, so the
+  exception left `handle()` and `/v1/chat` would return 500.
+- **Verifier:** it flagged 9 of 78 first drafts.
+- **citation_guard:** it flagged 3 of 78 first drafts and 2 of 78 final answers.
+  - In one, a stripped statute still appeared in the model-written `uncertainty`, which strip
+    does not clean.
+  - In the other, the verifier accepted "지방자치법 제124조" and the guard did not. The saved
+    run keeps no evidence text, so it is unresolved which checker is right.
+
+
+**Fixes after the rerun**
+- **Truncated JSON:** when the answer JSON is cut off, the repair retry now asks for a
+  shorter answer instead of a schema fix. If generation still fails, `handle()` strips
+  the earlier draft when there is one and otherwise returns `kind="rejected"` with
+  `reason="answer generation failed"`. It no longer raises.
+- **Strip:** strip now also removes tainted sentences from the model-written `uncertainty`.
+  The strip note still names the removed citations, so the eval script leaves the note
+  out of the guard check.
+- **지방자치법 제124조:** the verifier was right. The evidence says "「지방자치법」 제124조의
+  규정을 준용한다", and the guard's `(?!의)` lookahead treated the particle 의 like the
+  branch number in 제3조의3. It is now `(?!의\d)`. Verify records now keep the evidence text.
+- **Recheck:** the 4 affected questions were rerun live. All four answered, and the guard
+  flagged none. The two that errored before did not truncate this time, so only the unit
+  tests exercise the error path.
+- **Statute windows now name their article.** The imported corpora cut each statute into
+  ~3,500-character windows with `metadata.article` empty. In that rerun, the chunk that
+  opens in the body of 지방자치법 제124조 carried no article, so a correct `S1` citation was
+  counted as `source_id_mismatch` and stripped. `Corpus.chunks()` now finds each window's
+  start in the document text and names the last article heading before it
+  (`legal_rag.ingestion.statute_articles`). This is not the ip-v2 structural rechunk; the
+  windows and embeddings are unchanged.
+  - **Coverage:** 21,229 of 21,234 statute windows across the four corpora. The other 5
+    are 1940s–60s decrees whose headings have no parenthesis.
+  - **Sanity check:** no window's article is numbered after the first heading inside it.
+  - **Live index:** `scripts/backfill_statute_articles.py --apply` wrote the values into
+    the live collections with `set_payload`, taking 53 s. Retrieval never reads the field,
+    so rankings are unchanged; only the evidence header and the verifier see it.
+  - **Result:** the 지방자치법 question, run 3 times, was accepted on the first draft each
+    time, with no guard flags.
+- **80-question rerun after the backfill.** Of 80 turns, 80 were answered, with no refusals
+  and no errors. The Verifier flagged 10 first drafts, but only one was a statute mismatch
+  (against 5 in the previous run). The other issues were references to non-statute
+  sources, such as a date or "국가인권위원회 결정", that no source text can match. The
+  guard flagged 0 first drafts and 0 final answers. Rerunning question-only retrieval on
+  the 210 questions from 2026-09-27 returned the same top 10 for all of them, and S@10 was
+  0.557 both times.
+
+### Answer accuracy against the AIHub references, 2026-09-28
+
+`scripts/judge_answers.py` pairs the 80 saved answers from the article-backfill rerun with
+the reference answers in the upstream `qa.jsonl`. The eval sets leave those out, so this is
+the first check of answer content. The script also records whether the question's gold
+document was among the turn's evidence, since each reference is written from that one
+document. qwen3:8b (think on, `num_ctx` 12288) judged two things:
+- whether the answer states the reference's key conclusion (yes, partial or no);
+- whether anything in the answer contradicts the reference.
+
+An answer counts as correct when it covers the conclusion fully and contradicts nothing.
+This measures agreement with one reference answer, not legal correctness.
+
+| Group | Correct | Covers at least partly | Contradicts |
+|---|---|---|---|
+| All 80 | 0.62 [0.52, 0.72] | 0.71 | 0.15 [0.09, 0.24] |
+| Gold document in evidence (47) | 0.70 [0.56, 0.81] | 0.74 | 0.13 |
+| Gold document not in evidence (33) | 0.52 [0.35, 0.67] | 0.67 | 0.18 |
+| administrative / civil / criminal / crossdomain (20 each) | 0.60 / 0.45 / 0.80 / 0.65 | | 0.25 / 0.15 / 0.05 / 0.15 |
+
+Intervals are Wilson 95%.
+
+- **Calibration:** 31 answers, stratified by dataset and by gold-in-evidence, were graded
+  by hand before any judge output was read.
+  - Agreement: 26 of 31 on correct (Gwet AC1 0.698) and 28 of 31 on contradicts (AC1
+    0.879). Both pass the project's AC1 ≥ 0.6 bar.
+  - The judge is lenient on correct: it gave 21 of 31, against 18 by hand. Three of its
+    "yes" grades were partial answers, and one claimed the answer covered a point it did
+    not.
+  - It is strict on contradicts: it gave 5 of 31, against 2 by hand. It counts an answer
+    built on a different case as a contradiction.
+  - The hand-graded rates on the 31 were 0.58 correct and 0.06 contradicting.
+- **Main loss:** retrieval. With the gold document in evidence, 70% of answers match the
+  reference; without it, 52%.
+- **Civil:** civil is lowest at 0.45. Its questions are often generic ("손해액 산정에 있어
+  인정되는 기준은?") while the reference states what one court held.
+- **Truncated answers:** 2 of the 80 saved answers were cut at 1,500 characters.
+
+### More evidence per answer (k_final 5 → 8), 2026-09-28: not adopted
+
+**Gold coverage.** `eval_chat_pipeline.py coverage` replays the stored rule-rewrite queries
+through `retrieve_many`, as `/v1/chat` does, and checks whether the gold document lands in
+the evidence. No generation is involved.
+
+| Evidence | Formal, 210 questions | Everyday, 150 questions |
+|---|---|---|
+| 5 chunks (current) | 0.471 | 0.440 |
+| 5 distinct documents | 0.486 | 0.440 |
+| 8 chunks | 0.543 (+0.072, CI [+0.038, +0.110]) | 0.453 (CI [+0.000, +0.033]) |
+| 10 chunks | 0.567 | 0.473 |
+
+**Context budget.** The answer prompt was measured with Ollama's `prompt_eval_count` on 14
+questions.
+- **5 × 1,500 characters:** median 5.7k tokens, max 6.2k. With `max_tokens` 2048 that
+  already exceeds `num_ctx` 8192 at the tail.
+- **8 × 1,500 characters:** max 9.5k tokens, so it needs `num_ctx` 12288. That fits:
+  qwen3:4b loaded all 37 layers beside the reranker and bge-m3, at 7.0 GB.
+- **10 × 1,500 characters:** needs about 14k tokens. At `num_ctx` 20480 only 26 of 37
+  layers fit on the GPU.
+
+**Answers.** The same 80 questions were run with `k_final` 8 and `num_ctx` 12288, and
+qwen3:8b judged them as in the section above.
+- **Accuracy:** correct answers went from 49 to 46 of the 78 questions graded in both runs
+  (paired 95% CI [−0.141, +0.051]).
+- **Why no gain:** in this 80-question sample, the gold document entered the evidence for
+  48 questions against 47. The larger coverage gain on the 210-question set did not show
+  up here.
+- **Other effects:** regenerations fell from 10 to 4, turns took 37.4 s instead of 32.7 s,
+  and there were no errors or truncations.
+- **Judge failures:** the judge returned empty output for 2 answers, when its thinking
+  used up `max_tokens`.
+
+**Decision.** `k_final` stays at 5.

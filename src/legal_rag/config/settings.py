@@ -39,6 +39,9 @@ class EmbeddingSettings(_Section):
     batch_size: int = 16
     fake_dimension: int = 64
     timeout_seconds: float = 120.0
+    # Ollama context window for query embeddings; None keeps Ollama's default. Must match
+    # the chat app's OLLAMA_EMBED_NUM_CTX or Ollama reloads bge-m3 between the two clients.
+    query_num_ctx: int | None = Field(default=None, ge=1)
 
 
 class SparseSettings(_Section):
@@ -67,12 +70,21 @@ class RetrievalSettings(_Section):
     corpus_weights: dict[str, float] = Field(default_factory=dict)  # absent corpora weigh 1.0
     dense_weight: float = 1.0
     sparse_weight: float = 1.0
+    # Top hits of every leg that always reach the reranker, whatever their fused score. 0 is plain
+    # RRF; see RRFFuser and docs/retrieval-diagnostics.md for why fan-out needs it.
+    leg_floor: int = Field(default=0, ge=0)
 
 
 class RerankSettings(_Section):
     backend: Literal["noop", "cross_encoder"] = "noop"
     model: str = "BAAI/bge-reranker-v2-m3"
     device: str = "cpu"
+    # float16 needs a GPU. On the 4060 it reranks 50 candidates in 0.8 s instead of 3.0 s
+    # with 1.2 GB instead of 2.5 GB, and the same top 10 (docs/legal-rag-backend.md).
+    dtype: Literal["float32", "float16"] = "float32"
+    # Load from the local Hugging Face cache without Hub checks: 1.9 s instead of 5.6 s.
+    # Needs the model downloaded once; a fresh machine keeps the default.
+    local_files_only: bool = False
 
 
 class LLMSettings(_Section):
@@ -83,11 +95,18 @@ class LLMSettings(_Section):
     max_tokens: int = 1024
     adapter: str | None = None
     timeout_seconds: float = 120.0
+    # Ollama context window; None keeps Ollama's default (4096 for qwen3:4b here), which
+    # silently cut the ~6,100-token answer prompts. Covers the generated tokens too.
+    num_ctx: int | None = Field(default=None, ge=1)
 
 
 class RagSettings(_Section):
     allow_clarification: bool = True
     llm_rewrite: bool = False
+    # Turn the analyzer's single needed document kind into a hard retrieval filter. Off: on
+    # 210 eval questions it asked for statutes 201 times, and filtering cut gold Success@10
+    # from 0.557 to 0.414 (95% CI of the change [-0.205, -0.086], 2026-09-27).
+    hard_filter: bool = False
     history_turns: int = 4
     max_regenerations: int = 1
     max_evidence_chars: int = 1500
@@ -96,6 +115,9 @@ class RagSettings(_Section):
 class ApiSettings(_Section):
     host: str = "127.0.0.1"
     port: int = 8000
+    # Run one search in the background at startup so BM25, the embedder and the
+    # reranker load before the first user request (~18 s cold, 2.2 s warm).
+    warmup: bool = False
 
 
 class TraceSettings(_Section):

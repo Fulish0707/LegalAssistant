@@ -4,6 +4,8 @@ import os
 
 DEFAULT_LLM_PROVIDER = "ollama"
 DEFAULT_EMBEDDING_PROVIDER = "ollama"
+# Same embedder as legal_rag's Qdrant corpora, so Ollama keeps one embedding model resident.
+DEFAULT_OLLAMA_EMBED_MODEL = "bge-m3"
 
 # Keep embedding spaces in separate collections, even when dimensions match.
 COLLECTION_NAMES = {
@@ -43,6 +45,9 @@ def get_chat_model():
             "temperature": float(os.getenv("OLLAMA_TEMPERATURE", "0.7")),
             "top_p": 0.8,
             "top_k": 20,
+            # Ollama's own default is 4096 tokens. System prompt plus legal evidence ran
+            # to ~6,100 and Ollama silently dropped the system prompt (2026-09-27).
+            "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "8192")),
         }
         reasoning = os.getenv("OLLAMA_REASONING")
         if reasoning is not None:
@@ -73,8 +78,11 @@ def get_embedding_model():
         from langchain_ollama import OllamaEmbeddings
 
         return OllamaEmbeddings(
-            model=os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
+            model=os.getenv("OLLAMA_EMBED_MODEL", DEFAULT_OLLAMA_EMBED_MODEL),
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+            # Same window as legal_rag's embedding.query_num_ctx: Ollama reloads bge-m3
+            # when clients disagree. Upload chunks are 1,000 characters, well under it.
+            num_ctx=int(os.getenv("OLLAMA_EMBED_NUM_CTX", "1024")),
         )
 
     raise ValueError(f"Unknown EMBEDDING_PROVIDER: {provider!r}")
@@ -83,7 +91,7 @@ def get_embedding_model():
 def get_embedding_descriptor():
     provider = _embedding_provider()
     if provider == "ollama":
-        return provider, os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+        return provider, os.getenv("OLLAMA_EMBED_MODEL", DEFAULT_OLLAMA_EMBED_MODEL)
     if provider == DISABLED:
         return provider, ""
     raise ValueError(f"Unknown EMBEDDING_PROVIDER: {provider!r}")

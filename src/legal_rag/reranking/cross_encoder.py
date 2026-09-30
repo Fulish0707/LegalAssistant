@@ -1,6 +1,7 @@
 """Rerank fused candidates with a cross-encoder; needs the optional ``rerank`` extra."""
 from __future__ import annotations
 
+import threading
 from typing import Any, Callable, Protocol
 
 from legal_rag.schemas import ScoredChunk
@@ -13,10 +14,13 @@ class _Encoder(Protocol):
 Loader = Callable[..., _Encoder]
 
 
-def _load_cross_encoder(model: str, *, device: str, max_length: int) -> _Encoder:
+def _load_cross_encoder(model: str, *, device: str, max_length: int, dtype: str,
+                        local_files_only: bool = False) -> _Encoder:
+    import torch
     from sentence_transformers import CrossEncoder  # heavy import, optional extra
 
-    return CrossEncoder(model, device=device, max_length=max_length)
+    return CrossEncoder(model, device=device, max_length=max_length, local_files_only=local_files_only,
+                        model_kwargs={'torch_dtype': getattr(torch, dtype)})
 
 
 class CrossEncoderReranker:
@@ -32,21 +36,28 @@ class CrossEncoderReranker:
     name = 'cross_encoder'
 
     def __init__(self, model: str, device: str = 'cpu', *, batch_size: int = 16, max_length: int = 512,
-                 loader: Loader | None = None) -> None:
+                 dtype: str = 'float32', local_files_only: bool = False, loader: Loader | None = None) -> None:
         self.model = model
         self.device = device
+        self.dtype = dtype
+        self.local_files_only = local_files_only
         self.batch_size = batch_size
         self.max_length = max_length
         self._loader = loader or _load_cross_encoder
         self._encoder: _Encoder | None = None
+        # The API's startup warm-up and a first user request can both reach encoder();
+        # loading twice would put two copies of the model on the GPU.
+        self._load_lock = threading.Lock()
 
     @property
     def is_loaded(self) -> bool:
         return self._encoder is not None
 
     def encoder(self) -> _Encoder:
-        if self._encoder is None:
-            self._encoder = self._loader(self.model, device=self.device, max_length=self.max_length)
+        with self._load_lock:
+            if self._encoder is None:
+                self._encoder = self._loader(self.model, device=self.device, max_length=self.max_length,
+                                             dtype=self.dtype, local_files_only=self.local_files_only)
         return self._encoder
 
     def rerank(self, query: str, candidates: list[ScoredChunk], k: int) -> list[ScoredChunk]:

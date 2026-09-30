@@ -16,6 +16,8 @@ from typing import Iterable
 from legal_rag.schemas import Evidence, EvidenceBundle
 
 CSV_FIELDS = ['case_id', 'question', 'answer_a', 'answer_b', 'winner', 'reason']
+# The judge reads the reference before the two answers it is asked to compare.
+CSV_FIELDS_WITH_REFERENCE = ['case_id', 'question', 'reference_answer', 'answer_a', 'answer_b', 'winner', 'reason']
 WINNERS = ('A', 'B', 'tie')
 
 
@@ -37,12 +39,13 @@ def evidence_bundle(pool: dict[tuple[str, str], dict], case_id: str, ranked: lis
 def pairwise_rows(answers: list[dict], *, seed: int) -> tuple[list[dict], dict[str, str]]:
     """CSV rows with the two answers randomly assigned to A and B, plus the hidden mapping.
 
-    ``answers`` rows carry ``case_id``, ``question``, and one answer per side name. The mapping is
-    written separately so the judge never sees which corpus wrote which answer.
+    ``answers`` rows carry ``case_id``, ``question``, and one answer per side name, and optionally
+    a ``reference_answer`` that is copied into the row for the judge. The mapping is written
+    separately so the judge never sees which side wrote which answer.
     """
     rows, key = [], {}
     for answer in sorted(answers, key=lambda row: row['case_id']):
-        sides = sorted(name for name in answer if name not in ('case_id', 'question'))
+        sides = sorted(name for name in answer if name not in ('case_id', 'question', 'reference_answer'))
         if len(sides) != 2:
             raise ValueError(f"{answer['case_id']}: expected two answers, got {sides}")
         # Seeded per case, not per sequence: a case keeps its sides when the sample around it
@@ -50,8 +53,11 @@ def pairwise_rows(answers: list[dict], *, seed: int) -> tuple[list[dict], dict[s
         rng = random.Random(f"{seed}:{answer['case_id']}")
         first, second = (sides if rng.random() < 0.5 else sides[::-1])
         key[answer['case_id']] = f'A={first},B={second}'
-        rows.append({'case_id': answer['case_id'], 'question': answer['question'],
-                     'answer_a': answer[first], 'answer_b': answer[second], 'winner': '', 'reason': ''})
+        row = {'case_id': answer['case_id'], 'question': answer['question'],
+               'answer_a': answer[first], 'answer_b': answer[second], 'winner': '', 'reason': ''}
+        if 'reference_answer' in answer:
+            row['reference_answer'] = answer['reference_answer']
+        rows.append(row)
     return rows, key
 
 

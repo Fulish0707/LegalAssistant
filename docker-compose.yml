@@ -2,12 +2,25 @@
 # exclusively, so one process serving four corpora blocks indexing and search on all
 # four. Server mode also creates the payload indexes that VectorStore.recreate skips
 # when embedded.
+#
+# Run it on the native Docker Engine (`docker --context default compose up -d`), not
+# Docker Desktop. Desktop runs containers in a qemu VM: for this 8.2 GB store the VM
+# plus virtiofsd held ~18 GB of host RAM, even after the container stopped, and the
+# kernel OOM-killed it twice on 2026-09-27. Natively its page cache is reclaimable.
+# The unprivileged image runs as uid 1000, so files written under data/qdrant stay
+# owned by the host user instead of root.
 services:
   qdrant:
-    image: qdrant/qdrant:v1.12.1
+    image: qdrant/qdrant:v1.12.1-unprivileged
     ports:
       - "6333:6333"   # REST
       - "6334:6334"   # gRPC
     volumes:
       - ./data/qdrant:/qdrant/storage
     restart: unless-stopped
+    # Four collections of RocksDB segments exceed the engine's default open-file limit
+    # ("Too many open files" at startup); Docker Desktop's VM happened to allow more.
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535

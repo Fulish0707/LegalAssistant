@@ -17,6 +17,8 @@ STATUTE_WITH_LAW = re.compile(rf"{_LAW_NAME}\s*{_ARTICLE}{_PARAGRAPH}")
 STATUTE_BARE = re.compile(rf"{_ARTICLE}{_PARAGRAPH}")
 
 CASE_TYPES = (
+    # 헌법재판소 types first: alternation takes the first match, and bare 헌 would stop at 헌마.
+    "헌가|헌나|헌다|헌라|헌마|헌바|헌사|헌아|"
     "가합|가단|가소|고합|고단|고정|다카|"
     "다|도|두|누|나|라|마|노|오|모|르|므|드|느|브|스|수|무|어|우|주|구|카|타|허|후|헌|초|즈|재|하|바"
 )

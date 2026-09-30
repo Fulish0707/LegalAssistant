@@ -25,6 +25,8 @@ class SearchRequest(BaseModel):
 
 class SearchResponse(BaseModel):
     hits: list[ScoredChunk]
+    # document_id -> display label, for hits whose chunk names no court, case, law or title.
+    labels: dict[str, str] = Field(default_factory=dict)
 
 
 class HealthResponse(BaseModel):
@@ -35,3 +37,4 @@ class HealthResponse(BaseModel):
     embedder: str | None = None
     llm: str
     tokenizer: str | None = None
+    warm: bool = False  # the startup warm-up search has completed

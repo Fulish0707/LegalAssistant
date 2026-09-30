@@ -181,3 +181,10 @@ def test_a_supplied_reranker_and_embedder_are_shared_rather_than_rebuilt(tmp_pat
     unshared = build_hybrid_retriever(cfg)
     assert unshared.reranker is not shared
     close_legs(unshared)
+
+
+def test_leg_floor_setting_reaches_the_fuser(tmp_path):
+    from legal_rag.factory import build_hybrid_retriever
+    make_corpus(tmp_path, "alpha", ["특허"])
+    assert build_hybrid_retriever(settings(tmp_path, "alpha")).fuser.leg_floor == 0
+    assert build_hybrid_retriever(settings(tmp_path, "alpha", leg_floor=3)).fuser.leg_floor == 3

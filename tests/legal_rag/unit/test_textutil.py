@@ -42,3 +42,9 @@ def test_split_sentences_korean():
         "다만 등기명령을 먼저 신청해야 한다!",
         "정말인가?",
     ]
+
+
+def test_case_refs_cover_constitutional_court_numbers():
+    """헌법재판소 numbers use two-character types (헌마, 헌바, ...)."""
+    assert extract_case_refs("사  건○  2020헌마843 가석방") == ["2020헌마843"]
+    assert extract_case_refs("2018헌바434 위헌소원, 2023헌가12") == ["2018헌바434", "2023헌가12"]

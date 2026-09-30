@@ -48,6 +48,25 @@ class SearchDocumentsToolTests(unittest.TestCase):
 
         self.assertIn("a.pdf", result)
 
+    def test_tool_call_attaches_structured_sources(self):
+        """The browser's evidence rail reads ToolMessage.artifact, not the prose."""
+        import langchain_config
+
+        docs = [
+            Document(page_content="same text", metadata={"source": "a.pdf"}),
+            Document(page_content="same text", metadata={"source": "a.pdf"}),
+            Document(page_content="other text", metadata={}),
+        ]
+        with patch.object(langchain_config, "retrieve_for_user", return_value=docs):
+            message = langchain_config.build_rag_tool("user-1").invoke(
+                {"type": "tool_call", "id": "t1", "name": "search_documents", "args": {"query": "q"}}
+            )
+
+        self.assertEqual(message.artifact, [
+            {"source": "a.pdf", "quote": "same text"},
+            {"source": "Unknown source", "quote": "other text"},
+        ])
+
     def test_empty_retrieval_is_explicit(self):
         """The model must be told retrieval found nothing, so it does not invent."""
         import langchain_config
