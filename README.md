@@ -1,306 +1,127 @@
-# PS_Agent: AI 기반 보고서 작성 보조 에이전트
+# 법률 RAG 에이전트
 
-**RAG (Retrieval Augmented Generation) 및 LLM (Large Language Model) 기반 포트폴리오 프로젝트**
+**Flask 채팅 화면과 별도 FastAPI 법률 검색 서비스로 구성된 프로젝트**
 
 ## 1. 프로젝트 개요 (Project Overview)
 
--   본 프로젝트는 사용자의 자기소개서(대학 입학용, 직장 지원용) 작성 및 전문적인 보고서 생성을 돕는 AI 에이전트입니다.
--   엔진은 **Ollama로 서빙하는 로컬 모델 `qwen3:4b`** 이며, 외부 AI API에 의존하지 않습니다. 공급자는 `LLM_PROVIDER` / `EMBEDDING_PROVIDER` 환경 변수로 전환하며, `none`을 지정하면 AI 기능을 명시적으로 끌 수 있습니다.
--   에이전트는 **LangGraph 기반 `langchain.agents.create_agent`** 로 구성되며, RAG (Retrieval Augmented Generation) 파이프라인을 통해 문서 기반 질의응답 및 콘텐츠 생성을 지원합니다. 폐기 예정(deprecated)인 `langchain_classic.initialize_agent`는 더 이상 사용하지 않습니다.
--   다양한 입력 방식(텍스트, 문서 파일)을 지원하여 사용자 편의성을 높였습니다.
+-   Flask 앱은 채팅 화면과 대화 기록을 제공하고, 법률 질의가 들어오면 별도 법률 RAG 서비스에서 근거를 검색합니다.
+-   법률 RAG 서비스는 법령, 판례, 행정 해석 등 색인된 자료를 검색합니다. 검색 API와 자체 채팅 API, CLI를 제공합니다.
+-   현재 local 프로필은 Ollama의 qwen3:4b와 bge-m3, Qdrant 서버, 네 개 코퍼스(criminal-v1, civil-v1, administrative-v1, ip-v1)를 사용합니다.
+-   Flask 앱과 법률 RAG 서비스는 별도 Python 환경에서 실행합니다. 법률 RAG 서비스의 Python 요구 버전은 3.11입니다.
 
 ## 2. 주요 기능 (Main Features)
 
--   **AI 기반 채팅 상담:**
-    -   자기소개서 및 보고서 작성 관련 일반적인 질문에 대한 답변 및 가이드 제공.
-    -   LangGraph 에이전트를 통한 대화형 상호작용.
-    -   **대화 메모리:** LangGraph `SqliteSaver` 체크포인터가 브라우저 작업공간별 대화 스레드를 유지합니다 (`thread_id` = 세션 쿠키의 작업공간 ID). 로그인은 없습니다.
--   **RAG 기반 문서 질의응답 및 콘텐츠 생성:**
-    -   사용자가 제공하는 문서(`documents` 폴더 내 PDF, TXT 파일)를 ChromaDB 벡터 스토어에 저장 및 인덱싱.
-    -   임베딩은 Ollama `bge-m3`를 사용합니다 (1024차원). 법령·판례 코퍼스(`legal_rag`, Qdrant)와 같은 모델이라 Ollama에 임베딩 모델이 하나만 올라갑니다.
-    -   `search_documents` 도구가 **한 번만 검색하고, 중복 청크를 제거한 뒤, 출처(`[source: ...]`)를 붙여** 원문 발췌를 그대로 반환합니다. 검색 결과는 항상 `filter={"user_id": ...}` 로 브라우저 작업공간 범위가 제한됩니다.
--   **다중 입력 방식 지원:**
-    -   **문서 업로드 및 분석 (OCR):**
-        -   PDF, TXT, DOCX, 이미지(PNG, JPG) 파일 업로드 지원.
-        -   Tesseract OCR (이미지) 및 pypdf/python-docx (문서)를 통한 텍스트 추출.
-        -   추출된 텍스트를 기반으로 LLM을 활용하여 HTML 형식의 보고서 자동 생성 (한국어).
--   **관측 및 평가:**
-    -   LangSmith 추적을 옵트인으로 지원하며, 실행마다 공급자·모델·컬렉션 메타데이터를 남깁니다.
-    -   `evals/` 아래에 16개 골든 케이스로 구성된 재현 가능한 평가 하네스를 제공합니다.
--   **데이터 관리:**
-    -   SQLite DB를 사용하여 채팅 내역 및 자기소개서 초안 저장.
+-   **웹 채팅:** Flask 앱이 사용자 입력을 받아 LangGraph 에이전트의 응답을 SSE로 전달합니다. 대화 기록과 에이전트 체크포인트는 SQLite에 저장합니다.
+-   **법률 근거 검색:** Flask 앱은 일반적인 채팅 입력에 대해 답변 생성 전에 법률 RAG 서비스의 POST /v1/search를 호출합니다. 짧은 인사나 감사 표현은 검색 대상에서 제외합니다.
+-   **하이브리드 검색:** 법률 RAG 서비스는 Qdrant의 dense 검색과 BM25 검색 결과를 RRF로 합치고, 현재 local 프로필에서는 cross-encoder로 후보를 재정렬합니다.
+-   **법률 답변 API와 CLI:** POST /v1/chat과 scripts/chat.py는 검색 근거를 바탕으로 답변을 만들고 인용을 검증합니다. 근거에서 확인되지 않는 조문이나 사건번호가 있으면 답변을 한 번 다시 생성하고, 그래도 남으면 해당 문장을 지웁니다. 지우고 남는 내용이 없거나 답변 생성이 실패하면 오류 대신 거절 응답을 돌려줍니다. Flask 채팅은 이 채팅 API 대신 검색 API를 사용합니다.
+-   **인용 확인 표시:** Flask 채팅 답변에 검색 근거에서 찾을 수 없는 조문이나 사건번호가 있으면, 답변 끝에 직접 확인하라는 안내를 붙입니다.
+-   **코퍼스별 검색:** 현재 local 프로필은 형사, 민사, 행정, 지식재산권 코퍼스를 함께 조회합니다.
 
 ## 3. 기술 스택 (Tech Stack)
 
--   **언어 (Language):** Python 3.13
--   **웹 프레임워크 (Web Framework):** Flask
--   **LLM 프레임워크 (LLM Framework):** LangChain 1.x + **LangGraph** (`langchain.agents.create_agent`)
--   **LLM 및 임베딩 (LLM & Embedding):** `llm_model.py`의 `get_chat_model()` / `get_embedding_model()` 커넥터가 담당하며, 공급자 이름은 이 모듈 밖에 등장하지 않습니다.
-    -   채팅 (`LLM_PROVIDER`): `ollama` (기본값, `qwen3:4b`) 또는 `none` (비활성화)
-    -   임베딩 (`EMBEDDING_PROVIDER`): `ollama` (기본값, `bge-m3`) 또는 `none` (비활성화)
--   **에이전트 메모리 (Memory):** `langgraph-checkpoint-sqlite`의 `SqliteSaver`
--   **벡터 데이터베이스 (Vector Database):** ChromaDB (임베딩 공급자별 컬렉션 분리)
--   **관측성 (Observability):** LangSmith (옵트인 추적) 및 `evals/` 평가 하네스
--   **문서 처리 (Document Processing):**
-    -   OCR: Tesseract OCR, Pillow
-    -   PDF: pypdf
-    -   DOCX: python-docx
--   **데이터베이스 (Database):** SQLite
--   **기타 (Others):** `dotenv` (환경변수 관리)
+| 구분 | 현재 사용 구성 |
+| --- | --- |
+| 웹 채팅 | Flask, LangChain/LangGraph, SSE |
+| 법률 RAG API | FastAPI, Uvicorn |
+| 채팅·임베딩 모델 | Ollama qwen3:4b, bge-m3 |
+| 검색·재정렬 | Qdrant 서버, BM25, RRF, BAAI/bge-reranker-v2-m3 |
+| 대화 상태 | SQLite, LangGraph SQLite 체크포인터 |
+| 설정 | Flask의 .env, 법률 RAG의 configs/default.yaml 및 configs/local.yaml |
+
+local 프로필의 재정렬 설정은 CUDA와 float16을 사용하며, 모델을 로컬 캐시에서 읽습니다.
 
 ## 4. 시스템 아키텍처 및 작동 방식 (System Architecture & How it Works)
 
-```mermaid
-graph TD
-    subgraph UserInput["사용자 입력"]
-        UI_Text["텍스트 입력 / SSE 채팅"]
-        UI_DocUpload["문서 업로드 .pdf, .docx, .png"]
-    end
+~~~mermaid
+flowchart LR
+    User["사용자"] --> Flask["Flask 채팅 화면"]
+    Flask --> Agent["LangGraph 에이전트"]
+    Flask -- "법률 근거 사전 검색" --> Search["FastAPI /v1/search"]
+    Search --> Retrieval["dense + BM25 → RRF → 재정렬"]
+    Retrieval --> Qdrant["Qdrant: 법률 코퍼스"]
+    Search -- "검색 근거" --> Agent
+    Agent --> Ollama["Ollama qwen3:4b"]
+    Agent -- "SSE 응답" --> Flask
+    Agent --> SQLite["SQLite 대화 기록·체크포인트"]
+    Direct["API/CLI 사용자"] --> Chat["FastAPI /v1/chat 또는 scripts/chat.py"]
+    Chat --> Retrieval
+    Chat --> Ollama
+~~~
 
-    subgraph Web["웹 계층"]
-        W_Flask["Flask App: app.py"]
-        W_Session["브라우저 작업공간 세션: 서명된 쿠키의 user_id"]
-        W_OCR["OCR + 보고서 생성: llm_ocr.py"]
-        W_JS["브라우저 SSE 클라이언트: static/lc-chat.js"]
-    end
+1.  Flask 앱은 법률 검색이 필요한 입력을 받으면 법률 RAG 서비스에서 근거를 먼저 가져옵니다.
+2.  법률 RAG 서비스는 설정된 코퍼스에서 dense와 BM25 검색을 수행하고 결과를 결합·재정렬합니다.
+3.  Flask 앱은 검색 근거를 에이전트에 전달하고, 생성된 답변과 출처를 채팅 화면으로 보냅니다.
+4.  법률 RAG 서비스의 자체 채팅 API와 CLI는 검색, 답변 생성, 인용 검증을 한 서비스 안에서 처리합니다.
 
-    subgraph Agent["에이전트 계층: langchain_config.py"]
-        A_Build["build_agent user_id, checkpointer"]
-        A_Create["create_agent: LangGraph 런타임"]
-        A_Prefix["AGENT_PREFIX 시스템 프롬프트: 항상 먼저 검색"]
-        A_Schema["response_format=AgentSections + extract_agent_sections"]
-        A_RAG["도구: search_documents — 작업공간 user_id 로 필터"]
-        A_Stream["agent.stream: stream_mode = messages, updates, values"]
-    end
+## 5. 검색 평가 (Evaluation)
 
-    subgraph Models["모델 커넥터: llm_model.py"]
-        M_Chat["get_chat_model(): LLM_PROVIDER = ollama 또는 none"]
-        M_Embed["get_embedding_model(): EMBEDDING_PROVIDER = ollama 또는 none"]
-        M_Coll["get_collection_name(): docs_ollama_bge_m3"]
-    end
+법률 RAG의 검색 품질은 scripts/eval_retrieval.py와 data/eval의 평가 자료로 확인할 수 있습니다. 현재 검색 깊이, 결합 가중치, 재정렬 설정을 선택한 근거와 측정 범위는 [검색 진단 문서](docs/retrieval-diagnostics.md)에 기록되어 있습니다. 평가 수치는 해당 자료와 설정에서의 결과이며 실제 모든 질의의 정확도를 뜻하지 않습니다.
 
-    subgraph DataStorage["데이터 저장소"]
-        DS_Chroma["ChromaDB: 공급자별 컬렉션, user_id 메타데이터"]
-        DS_Ckpt["SqliteSaver: AGENT_CHECKPOINT_DB, thread_id=작업공간 ID"]
-        DS_SQLite["SQLite: 채팅 내역, 초안 (APP_STATE_DB)"]
-        DS_Docs["./documents: RAG 원본 문서"]
-    end
-
-    subgraph Obs["관측성"]
-        O_Trace["LangSmith: 옵트인, thread_id/provider/model/collection 태그"]
-        O_Eval["evals/run_eval.py --provider ollama"]
-    end
-
-    UI_Text --> W_Flask
-    UI_DocUpload --> W_OCR --> W_Flask
-    W_Session -- "user_id" --> W_Flask
-
-    W_Flask --> A_Build
-    A_Build --> A_Create
-    A_Prefix --> A_Create
-    A_Schema --> A_Create
-    A_RAG --> A_Create
-
-    A_Create -- "thread_id = 작업공간 ID" --> DS_Ckpt
-    A_Create --> A_Stream
-    A_Stream -- "thought / token_chunk SSE" --> W_JS
-
-    A_Create -- "추론" --> M_Chat
-    A_RAG -- "유사도 검색 filter user_id" --> DS_Chroma
-    M_Embed --> DS_Chroma
-    M_Coll -- "컬렉션 선택" --> DS_Chroma
-    DS_Docs -- "수집(ingest)" --> DS_Chroma
-
-    W_Flask -- "저장/조회" --> DS_SQLite
-    A_Create -.-> O_Trace
-    O_Eval -.-> A_Create
-```
-
-1.  **데이터 수집 및 전처리 (Data Ingestion & Preprocessing):**
-    -   **문서:** `./documents` (또는 `RAG_DOCUMENTS_DIR`) 폴더의 PDF, TXT 파일들이 로드되어 텍스트로 변환되고 청크(chunk) 단위로 분할됩니다. 각 청크에는 소유 작업공간을 나타내는 `user_id` 메타데이터가 기록됩니다.
-    -   **OCR:** 사용자가 업로드한 이미지/PDF/DOCX 파일에서 텍스트가 추출됩니다.
-2.  **임베딩 및 벡터 저장 (Embedding & Vector Storage - RAG Core):**
-    -   분할된 청크들은 활성 임베딩 공급자의 모델로 임베딩되어 ChromaDB에 저장됩니다.
-    -   컬렉션 이름은 `get_collection_name()`이 임베딩 공급자와 모델로부터 생성합니다 (`docs_ollama_bge_m3`). 같은 모델의 다른 표기(`models/` 접두사, `:latest` 접미사)는 하나로 정규화되므로, 하나의 임베딩 공간이 두 컬렉션으로 쪼개지지 않습니다.
-3.  **사용자 질의 및 컨텍스트 검색 (User Query & Context Retrieval - RAG Core):**
-    -   에이전트는 `search_documents` 도구를 호출하고, 이 도구는 **한 번만** 유사도 검색을 수행합니다 (`filter={"user_id": ...}`).
-    -   중복 본문을 제거한 뒤 `[source: 파일명]` 머리말을 붙인 원문 발췌를 그대로 반환합니다. 이 경로에는 모델의 판단이 개입하지 않으므로, 4B 모델이 틀릴 여지 자체가 없습니다.
-4.  **LLM을 통한 답변/콘텐츠 생성 (Response/Content Generation via LLM):**
-    -   LangGraph 런타임이 도구 호출 루프를 돌리고, `AGENT_PREFIX` 시스템 프롬프트에 따라 **답변 전에 항상 먼저 검색**합니다.
-    -   최종 답변의 네 개 섹션은 `extract_agent_sections()`가 추출합니다: `structured_response` → 메시지 본문의 JSON → 레거시 `[CHAT]` 마커 순서입니다.
-5.  **결과 제공 (Output):**
-    -   `agent.stream(..., stream_mode=["messages", "updates", "values"])`가 생성한 이벤트를 `thought` / `token_chunk` SSE 이벤트로 변환해 전달합니다. 전송 규약(wire contract)은 변경되지 않았으므로 `static/lc-chat.js`는 수정되지 않았습니다.
-    -   생성된 텍스트 답변, HTML 보고서 등이 Flask 웹 인터페이스를 통해 사용자에게 제공됩니다.
-
-### 임베딩 공급자를 바꾸면 반드시 재수집(re-ingestion)해야 합니다
-
--   임베딩 모델을 바꾸면 차원이 같더라도 임베딩 공간이 달라집니다. Chroma는 차원만 검사하므로 서로 무관한 벡터를 하나의 컬렉션에 **오류 없이 조용히** 받아들인 뒤 비교합니다. 결과는 예외가 아니라 **엉뚱한 이웃 문서**입니다. 과거 `text-embedding-004`(768차원)와 `nomic-embed-text`(768차원)가 정확히 이 충돌을 일으켰습니다.
--   이 조용한 충돌을 막기 위해 컬렉션 이름에 공급자와 모델을 인코딩했습니다. 따라서 `EMBEDDING_PROVIDER`를 바꾸면 **새 컬렉션**이 만들어집니다.
--   그 결과 **기존 지식 베이스는 재수집 전까지 비어 있는 것처럼 보입니다.** 실패도 경고도 없이 검색 결과가 0건일 뿐입니다.
--   마이그레이션 이전의 레거시 `langchain` 컬렉션은 디스크에 그대로 남아 있으며, 옮겨지지 않은 채 어디에서도 참조되지 않습니다. 필요한 문서는 다시 수집해야 합니다.
-
-## 5. 평가 결과와 배운 점 (Evaluation Results & Findings)
-
-`evals/`는 3개의 합성 픽스처 문서 위에 16개의 골든 케이스(답변 가능 14 + 답변 불가 2)를 정의한 평가 하네스입니다. 채점 항목 대부분은 모델이 아니라 코드가 판정합니다 (정답 포함 여부, `search_documents` 호출 여부, 거절 문구 여부). 근거성(groundedness)만 모델이 판정하며, 답변 가능한 14개 케이스에만 적용됩니다.
-
-### 핵심 발견: 조건부 도구 지시는 작은 모델에게 통하지 않는다
-
-첫 측정에서 `qwen3:4b`는 16개 중 **4개**에서만 `search_documents`를 호출했습니다. 그런데 실패한 12개는 **전부 환각이 아니라 거절**이었고, 정답을 맞힌 4개는 정확히 **검색을 수행한 그 4개**였습니다. 즉 **검색 자체는 한 번도 문제가 아니었습니다.**
-
-원인은 시스템 프롬프트였습니다. 기존 문구는
-
-> `"Use search_documents when the user asks about the local document database"`
-
-라는 **조건문**이었습니다. 그런데 "최소 GPA가 얼마인가요?" 같은 질문은 '문서'를 언급하지 않습니다. 4B 모델은 지시를 문자 그대로 받아들여 조건이 충족되지 않았다고 판단하고, 자기 지식으로 답하거나 아예 거절했습니다. 더 큰 모델은 의도를 추론해서 넘어가지만, 4B는 넘어가지 않습니다.
-
-프롬프트를 **"항상 먼저 검색하고, 검색 결과가 없을 때에만 모른다고 답하라"** 는 무조건 지시로 바꾸자, **같은 16개 케이스**가 다음과 같이 움직였습니다.
-
-| 지표 (metric) | 변경 전 (before) | 변경 후 (after) |
-| --- | --- | --- |
-| 정확도 (correctness, 코드 판정) | 4/16 | **15/16** |
-| `search_documents` 호출 | 4/16 | **16/16** |
-| 근거성 (groundedness, 모델 판정) | 4/14 | **14/14** |
-| 총 실행 시간 (wall clock) | 765초 | 249초 (판정 생략) / 488초 (판정 포함) |
-
-독립적인 두 번의 실행에서 모두 15/16으로 재현되었고, 실패한 한 케이스도 동일했습니다 (`unanswerable-legal-head` — 모델이 단호하게 거절하는 대신 픽스처 내용을 근거로 추론을 시도합니다).
-
-> **일반화 가능한 교훈:** 작은 모델은 조건부 도구 사용 지시를 문자 그대로 해석한다. **검색을 조건이 아니라 무조건으로 만들어라.**
-
-### 그 외 측정된 사실 (Other measured findings)
-
--   **4B에서 `structured_response`는 신뢰할 수 없습니다.** 실제 4필드 스키마(`AgentSections`)와 전체 시스템 프롬프트를 함께 사용했을 때 3회 실행 중 **0회** 채워졌습니다. 모델은 스키마에 맞는 유효한 JSON을 구조화 출력 도구 호출 대신 **메시지 본문으로** 내보냅니다. 따라서 `extract_agent_sections()`의 폴백은 안전장치가 아니라 **Qwen 요청을 실제로 지탱하는 주 경로**입니다.
-    -   `ProviderStrategy`도 시도했으나 폐기했습니다. `structured_response`는 안정적으로 채워지지만, Ollama의 `format=json_schema`가 모든 생성을 스키마로 강제하는 탓에 **모델이 도구 호출을 낼 수 없게 되어 RAG 도구 자체가 도달 불가능**해집니다.
--   **`ChatOllama`의 `reasoning`은 설정하지 않은 채로 두어야 합니다.** `reasoning=True`는 구조화 출력 도구 호출을 3/3 억제했고, `reasoning=False`는 사고 과정 산문이 `content`로 새어 나옵니다. 추적에서 사고 과정을 보고 싶다면 `OLLAMA_REASONING=true`로 구조화 출력과 맞바꿀 수 있습니다.
--   **`qwen3`에서는 `token_chunk` SSE 이벤트가 한 번도 발생하지 않았습니다.** 원시 스트림이 항상 스키마 JSON이기 때문입니다. `token_chunk` 분기는 `app.py`에 그대로 존재하지만 qwen3 경로에서는 조건이 성립하지 않습니다. 진행 중 UI는 `thought` 이벤트가 담당합니다.
--   평가 하네스는 **실패한 케이스가 있으면 0이 아닌 종료 코드**를 반환하고(CI에 그대로 붙일 수 있습니다), 픽스처는 임시 `RAG_PERSIST_DIR`에 전용 `user_id`로 수집되고 종료 시 삭제되므로, 실제 지식 베이스는 건드리지 않습니다.
+/v1/chat의 질의 재작성과 인용 검증은 scripts/eval_chat_pipeline.py로 측정합니다. 2026-09-28 측정에서 규칙·LLM 질의 재작성은 검색 정확도를 유의하게 바꾸지 못했고, 분석기의 문서 유형 필터는 정확도를 떨어뜨려 기본으로 꺼 두었습니다. 인용 검증을 고친 뒤 같은 80문항을 다시 실행했을 때 80문항 모두 답변했고, 최종 답변에 근거 없는 인용 표시는 없었습니다. 측정 방법과 결과는 [법률 RAG 개발 안내](docs/legal-rag-backend.md)의 Chat pipeline evaluation 절에 있습니다.
 
 ## 6. 주요 코드 파일 설명 (Key Code Files)
 
--   `app.py`: Flask 애플리케이션 실행, 라우팅, SSE 스트리밍, 체크포인터 수명 관리.
--   `langchain_config.py`: `create_agent` 기반 에이전트 구성(`build_agent`), `search_documents` RAG 도구, `AGENT_PREFIX` 시스템 프롬프트, `AgentSections` 스키마와 `extract_agent_sections()`, ChromaDB 초기화 및 문서 수집/인덱싱, LangSmith 추적 메타데이터.
--   `llm_model.py`: 공급자 기반 모델 커넥터(`get_chat_model`, `get_embedding_model`)와 임베딩 공급자별 컬렉션 이름(`get_collection_name`). 공급자 이름이 등장하는 유일한 모듈입니다.
--   `llm_prompt.py`: **레거시 프롬프트.** 채팅 에이전트의 시스템 프롬프트는 `langchain_config.py`의 `AGENT_PREFIX`로 대체되었으며, 이 파일은 현재 `llm_ocr.analyze_document()`의 문서 분석 경로에서만 사용됩니다.
--   `llm_ocr.py`: 이미지, PDF, DOCX 파일에서 텍스트를 추출하고, LLM을 이용해 HTML 보고서 생성.
--   `quota.py`: 솔트된 IP 해시 기준 일일 AI 요청 할당량 (원자적 예약, UTC 일자 롤오버).
--   `html_sanitizer.py`: 생성된 보고서 HTML의 Bleach 허용 목록 기반 정제.
--   `evals/dataset.py`: 16개 골든 케이스(순수 데이터, import 없음).
--   `evals/run_eval.py`: 공급자별 평가 실행기.
--   `evals/fixtures/`: 평가용 합성 문서 3종.
--   `chroma_db/`: ChromaDB 벡터 데이터 저장소.
--   `documents/`: RAG 시스템에 사용될 원본 문서 저장 폴더.
--   `sqlite_db/`: 애플리케이션 상태 DB(`app_state.db`)와 에이전트 체크포인트 DB(`checkpoints.db`).
--   `templates/`: Flask HTML 템플릿 (chatbot.html, document.html, statistics.html).
--   `static/lc-chat.js`: SSE 채팅 클라이언트. 전송 규약이 유지되었으므로 이번 마이그레이션에서 수정되지 않았습니다.
+-   app.py: Flask 라우팅, 채팅 SSE, 법률 근거 사전 검색, 대화 상태 관리.
+-   langchain_config.py: LangGraph 에이전트 구성과 법률 검색 서비스 호출.
+-   citation_guard.py: Flask 답변에서 검색 근거에 없는 조문·사건번호를 찾아 확인 안내 표시.
+-   static/lc-chat.js: 웹 채팅의 SSE 응답 처리.
+-   src/legal_rag/: 법률 자료 검색, 답변 생성, 인용 검증, API 구현.
+-   scripts/serve.py, scripts/chat.py: 법률 RAG API 서버와 대화형 CLI 실행.
+-   scripts/eval_chat_pipeline.py: /v1/chat의 질의 재작성·인용 검증 측정.
+-   configs/local.yaml: 현재 로컬 검색 코퍼스, Qdrant, 모델, 재정렬 설정.
+-   docker-compose.yml: Qdrant 서버 설정.
 
 ## 7. 실행 방법 (How to Run)
 
-### 7.1 환경 변수 설정
+### 7.1 법률 RAG 서비스 준비
 
-프로젝트 루트에 `.env` 파일을 만들고 필요한 값을 넣습니다. 비밀 값은 저장소에 커밋하지 않습니다.
+법률 RAG 서비스는 Python 3.11 환경에서 실행합니다. 프로젝트 루트에서 Qdrant와 Ollama를 준비한 뒤 local 프로필로 API를 시작합니다.
 
-**모델 공급자 (Model providers)**
+~~~bash
+docker compose up -d
+uv python install 3.11
+uv sync --extra rerank
+ollama pull qwen3:4b
+ollama pull bge-m3
+uv run python scripts/serve.py --profile local --port 8000
+~~~
 
-| 변수 | 기본값 | 설명 |
-| --- | --- | --- |
-| `LLM_PROVIDER` | `ollama` | 채팅 모델 공급자. `ollama` 또는 `none`. |
-| `EMBEDDING_PROVIDER` | `ollama` | 임베딩 공급자. `ollama` 또는 `none`. **변경 시 재수집 필요** (4장 참고). |
-| `OLLAMA_MODEL` | `qwen3:4b` | Ollama 채팅 모델. |
-| `OLLAMA_EMBED_MODEL` | `bge-m3` | Ollama 임베딩 모델. `nomic-embed-text`에서 바꿨으므로 그 전에 올린 문서는 다시 업로드해야 합니다. |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama 서버 주소. |
-| `OLLAMA_TEMPERATURE` | `0.7` | Qwen3는 greedy 디코딩(0)에서 품질이 떨어지고 같은 말을 반복합니다. 0으로 두지 마세요. |
-| `OLLAMA_REASONING` | (미설정) | 설정하지 않는 것이 기본입니다. `true`로 두면 추적 가시성을 얻는 대신 구조화 출력을 잃습니다. |
+Ollama 서버가 실행 중이어야 합니다. local 프로필의 재정렬에는 CUDA와 로컬에 캐시된 BAAI/bge-reranker-v2-m3 모델이 필요합니다. 이 프로필은 data/processed와 data/indexes의 네 코퍼스 및 Qdrant 색인을 사용합니다. 새 법률 자료의 수집·색인 절차는 [법률 RAG 개발 안내](docs/legal-rag-backend.md)를 참고하십시오.
 
-**저장소 및 애플리케이션 (Storage & app)**
+2026-09-28 이전에 만든 색인은 법령 조각의 조 번호가 비어 있습니다. 다시 색인하지 않고 조 번호만 채우려면 다음을 실행합니다.
 
-| 변수 | 기본값 | 설명 |
-| --- | --- | --- |
-| `APP_STATE_DB` | `sqlite_db/app_state.db` | 채팅 내역·초안 SQLite DB. |
-| `AGENT_CHECKPOINT_DB` | `sqlite_db/checkpoints.db` | LangGraph 체크포인터 DB. 애플리케이션 상태 DB와 스키마가 다르므로 분리되어 있습니다. |
-| `RAG_PERSIST_DIR` | `./chroma_db` | ChromaDB 영속 디렉터리. |
-| `RAG_DOCUMENTS_DIR` | `./documents` | RAG 원본 문서 폴더. |
-| `SECRET_KEY` | — | Flask 세션 키. **운영 환경에서는 필수**이며, 세션 쿠키가 곧 작업공간 접근 권한이므로 장기 보관되는 긴 난수를 사용합니다. 키가 바뀌면 모든 브라우저가 새 작업공간을 받습니다. |
-| `QUOTA_IP_SALT` | — | 할당량 계산용 IP 해시 솔트. 원본 IP는 저장되지 않습니다. |
-| `DAILY_AI_REQUEST_LIMIT` | `20` | 일일 AI 요청 한도. |
+~~~bash
+uv run python scripts/backfill_statute_articles.py --profile local --apply
+~~~
 
-**LangSmith 추적 (기본 비활성)**
+서비스 상태는 http://127.0.0.1:8000/health에서 확인할 수 있습니다. 주요 경로는 다음과 같습니다.
 
-| 변수 | 설명 |
+| 경로 | 용도 |
 | --- | --- |
-| `LANGSMITH_TRACING` | `1/true/yes/on` 중 하나일 때만 활성화됩니다. 빈 값이면 꺼진 상태입니다. |
-| `LANGSMITH_API_KEY` | LangSmith API 키. |
-| `LANGSMITH_PROJECT` | 프로젝트 이름 (미지정 시 `default`). |
+| GET /health | 코퍼스와 모델, 준비 상태 확인 |
+| POST /v1/search | 법률 근거 검색 |
+| POST /v1/chat | 법률 근거를 사용한 답변 생성 |
 
-추적이 켜지면 실행마다 `thread_id`, `llm_provider`, `llm_model`, `embedding_provider`, `collection` 메타데이터와 `provider:` / `model:` 태그가 기록됩니다.
+### 7.2 Flask 채팅 실행
 
-> **개인정보 주의:** 추적을 켜면 전체 프롬프트, 검색된 문서 원문, 모델 답변이 LangSmith로 업로드됩니다. 이 애플리케이션은 사용자의 자기소개서와 업로드 파일을 다루므로, 제3자에게 개인정보를 전송해도 되는 환경에서만 활성화하십시오.
+Flask 앱은 루트 requirements.txt를 사용하는 별도 Python 환경에서 실행합니다. 프로젝트 루트의 .env에 법률 RAG 서비스 주소를 설정합니다.
 
-**브라우저 작업공간 (로그인 없음)**
+~~~dotenv
+APP_ENV=local
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=qwen3:4b
+LEGAL_RAG_URL=http://127.0.0.1:8000
+~~~
 
-이 Flask 앱에는 로그인이 없습니다. 브라우저가 처음 접속하면 서명된 세션 쿠키에 무작위 작업공간 ID(`user_id`)가 발급되고, 초안·채팅 기록(SQLite), 업로드 문서(Chroma), 에이전트 대화 메모리(체크포인터 `thread_id`)가 모두 그 ID로만 저장·조회됩니다. 다른 브라우저의 초안이나 문서는 검색·삭제·조회할 수 없습니다.
-
--   **쿠키가 곧 연속성입니다.** 같은 브라우저에서 쿠키가 유지되는 동안 같은 작업공간으로 돌아옵니다. 계정 복구나 기기 간 동기화는 없습니다.
--   **쿠키를 지우면 새 작업공간이 시작됩니다.** 서버의 기존 데이터는 삭제되지 않고 남아 있지만, 새 브라우저 세션에서는 접근할 수 없습니다. 자동 정리 작업은 없습니다.
--   **이전 Google 계정 데이터는 보존되지만 접근되지 않습니다.** 과거 계정 ID로 저장된 행·벡터·체크포인트는 그대로 두며, 익명 작업공간으로 이관하거나 노출하지 않습니다. 이전 로그인 쿠키 키는 무시되고 제거됩니다.
--   **일일 AI 요청 한도는 IP 기준입니다.** 직접 연결된 피어 IP를 솔트 해시하여 하루 `DAILY_AI_REQUEST_LIMIT`(기본 20회)을 적용합니다. 같은 IP를 공유하는 사용자는 한도를 함께 씁니다. 리버스 프록시 뒤에서는 프록시 IP가 집계되므로 별도 구성이 필요합니다. `X-Forwarded-For`는 신뢰하지 않습니다.
--   **`SECRET_KEY`는 운영 환경에서 여전히 필수입니다.** 세션 쿠키 서명이 작업공간 접근 통제의 전부이므로 HTTPS와 함께 안전한 키를 사용하십시오.
-
-`src/legal_rag`의 FastAPI 법률 RAG 백엔드는 이 Flask 앱과 독립된 서비스이며, 위 세션·할당량 정책은 그 백엔드에 적용되지 않습니다.
-
-### 7.2 필수 라이브러리 설치
-
-```bash
+~~~bash
 pip install -r requirements.txt
-```
-
-Tesseract OCR은 시스템 패키지로 별도 설치되어 있어야 합니다.
-
-### 7.3 Ollama 준비 (기본 공급자)
-
-```bash
-# https://ollama.com 에서 설치한 뒤
-ollama pull qwen3:4b            # 채팅 모델
-ollama pull bge-m3              # 로컬 임베딩 (EMBEDDING_PROVIDER=ollama 인 경우)
-ollama serve                    # http://localhost:11434
-```
-
-> **기본 설정은 완전히 로컬입니다.** 채팅과 임베딩 모두 Ollama를 사용하므로 외부 AI API 키가 필요하지 않으며, 로그인용 외부 자격 증명도 없습니다.
-
-### 7.4 문서 준비 (RAG용)
-
-`documents` 폴더에 RAG에서 참조할 PDF 또는 TXT 파일을 넣습니다. 웹 UI의 업로드 기능으로도 현재 브라우저 작업공간의 지식 베이스에 문서를 추가할 수 있습니다.
-
-### 7.5 애플리케이션 실행
-
-```bash
 python app.py
-```
+~~~
 
-웹 브라우저에서 `http://localhost:5005`로 접속합니다. 구성 상태는 `GET /health`에서 확인할 수 있으며, `GET /health?probe=llm`은 Ollama 서버 도달 가능 여부까지 확인합니다.
+웹 화면은 http://localhost:5005에서 열립니다. 운영 환경에서는 Flask 세션용 SECRET_KEY도 설정해야 합니다.
 
-### 7.6 평가 실행 (Evaluation)
+## 8. 참고 문서 (References)
 
-```bash
-python -m evals.run_eval --provider ollama     # 로컬 qwen3:4b
-
-python -m evals.run_eval --provider ollama --no-judge   # 모델 판정 근거성 생략 (빠름)
-python -m evals.run_eval --provider ollama --limit 3    # 앞 N개 케이스만
-```
-
-실패한 케이스가 있으면 0이 아닌 종료 코드를 반환합니다. 실행 중에는 임시 영속 디렉터리와 전용 `user_id`를 사용하므로 실제 지식 베이스는 변경되지 않습니다.
-
-### 7.7 테스트 실행
-
-```bash
-python -m pytest tests/ -q
-```
-
-## 8. 향후 개선 방향 (Potential Future Improvements)
-
--   현재 통합 우선순위와 상태는 [`docs/integration-roadmap.md`](docs/integration-roadmap.md)에서 관리합니다.
--   더 다양한 문서 포맷 지원 (e.g., .pptx, .xls).
--   프롬프트 기반 `GET /chat?message=...`를 POST 스트리밍으로 전환하고 취소·타임아웃을 도입 (로드맵 5번, 미착수).
--   평가 픽스처를 청크 하나보다 크게 키워 검색 품질을 실제 점수로 읽을 수 있게 만들기.
--   더 큰 로컬 모델(예: 8B 이상)에서 `structured_response` 신뢰도 재측정.
--   프롬프트 엔지니어링 최적화 및 LLM 모델 파인튜닝 고려.
--   Streamlit 또는 Gradio를 이용한 인터페이스 개선 또는 대안 UI 제공.
--   비동기 처리 강화를 통한 동시 사용자 응답성 향상.
+-   [법률 RAG 개발 안내](docs/legal-rag-backend.md): API, CLI, 설정 및 자료 수집 방법.
+-   [검색 진단 문서](docs/retrieval-diagnostics.md): 검색 설정별 측정 결과와 해석.
