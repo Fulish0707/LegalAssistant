@@ -36,6 +36,7 @@ from legal_rag.schemas import Chunk, ChunkMetadata, CitationKind, DocumentType, 
 from legal_rag.schemas.documents import ImportedDocument
 
 from .korean_structure import ParsedStructure, Section, parse_structure, split_korean_sentences
+from .roles import ROLE_LABELS, section_role
 
 MAX_HEADER_CHARS = 200
 
@@ -119,7 +120,10 @@ class _Builder:
         else:
             line = self.label
         line = " ".join(line.split())
-        return line if len(line) <= MAX_HEADER_CHARS else line[: MAX_HEADER_CHARS - 1] + "…"
+        role = section_role(path, statute=self.kind == "statute")
+        suffix = "" if self.kind == "statute" else f" [역할: {ROLE_LABELS[role]}]"
+        room = MAX_HEADER_CHARS - len(suffix)
+        return (line if len(line) <= room else line[:room - 1] + "…") + suffix
 
     # -- chunk construction ---------------------------------------------------
 
@@ -142,6 +146,7 @@ class _Builder:
             decision_date=_date(self.nested.get("decision_date")),
             effective_date=_date(self.nested.get("effective_date")),
             section=" > ".join(headings) or None,
+            section_role=section_role(headings, statute=self.kind == "statute"),
         )
 
     def _unique(self, path_id: str) -> str:
@@ -235,6 +240,20 @@ def _emit(builder: _Builder, section: Section, ancestors: list[Section], path_id
     headings = [s.heading for s in path if s.heading]
     body = _render_body(section)
     header_cost = len(builder.header(headings)) + 1
+    # Never pack a party statement and an adjudicator's reasoning into one unlabeled unit.
+    def roles(node: Section, parents: list[str]) -> set[str]:
+        current = parents + [node.heading]
+        result = {section_role(current, statute=builder.kind == "statute")} if node.body else set()
+        for child in node.children:
+            result.update(roles(child, current))
+        return result
+
+    if builder.kind != "statute" and len(roles(section, [s.heading for s in ancestors])) > 1:
+        if section.body:
+            builder.add(path_id=f"{path_id}.body", headings=headings, sections=path, body=section.body)
+        for number, child in enumerate(section.children, 1):
+            _emit(builder, child, path, f"{path_id}.{number}")
+        return
     if header_cost + len(body) <= options.target_chars or not section.children:
         builder.add(path_id=path_id, headings=headings, sections=path, body=body)
         return
@@ -316,12 +335,18 @@ def _range(first: str, second: str) -> str:
 
 def _join(first: Chunk, second: Chunk) -> Chunk | None:
     """Concatenate two chunks, heading the result with the range they now cover."""
+    if first.metadata.section_role != second.metadata.section_role:
+        return None
     head_first, _, body_first = first.text.partition("\n")
     head_second, _, body_second = second.text.partition("\n")
+    role_suffix = f" [역할: {ROLE_LABELS[first.metadata.section_role]}]"
+    head_first = head_first.removesuffix(role_suffix)
+    head_second = head_second.removesuffix(role_suffix)
     prefix, separator, path_first = head_first.rpartition(" \u00b7 ")
     path_second = head_second.rpartition(" \u00b7 ")[-1]
     path = _range(path_first, path_second)
     header = f"{prefix}{separator}{path}" if separator else path
+    header += role_suffix
     if len(header) > MAX_HEADER_CHARS:
         return None
     # The second header only survives in the range above, so keep its path as a body line;

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from legal_rag.schemas import Chunk, CitationKind, Evidence, EvidenceBundle, ScoredChunk, citation_kind
+from legal_rag.chunking.roles import ROLE_LABELS
 
 
 class ContextBuilder:
@@ -77,6 +78,7 @@ class ContextBuilder:
                 "Case number": m.case_number or "",
                 "Decision date": m.decision_date.isoformat() if m.decision_date else "",
                 "Section": m.section or "",
+                "Section role": ROLE_LABELS[m.section_role],
             }
         else:
             header = {"Type": "Interpretation", "Authority": m.authority or "", "Reference number": m.reference_number or ""}
