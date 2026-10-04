@@ -75,3 +75,18 @@ The paired bootstrap 95% interval is [+11.25, +33.75] percentage points (10000
 resamples, seed42). These are exploratory AI-reference results, not independently
 held-out or human-calibrated legal correctness. The next step is reviewing changed
 cases and checking the grader's reasoning against the saved source evidence.
+
+## Maintained reporting code
+
+The `report` phase now calls `legal_rag.evaluation.answer_reporting` directly.
+Saved pairs, evidence, manifest fingerprints and retry-policy provenance are
+validated by `answer_run`. Report generation no longer executes Python stored
+inside a historical experiment directory or modifies source text with replacements.
+The existing report commands and output filenames remain the same; unavailable
+support is reported with an explicit applicable-pair denominator.
+
+The cleanup preserves the completed comparison JSON values, including deterministic
+bootstrap intervals and group scores. Changing the runner source still triggers
+its frozen generation-source check: reporting completed runs works, while resuming
+generation with changed sources requires a separate run with fresh provenance.
+The generation replay helper under `data/` remains a separate future refactor.

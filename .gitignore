@@ -8,7 +8,9 @@ __pycache__/
 venv/
 env/
 venv-310/
-scripts/
+scripts/*
+!scripts/eval_golden_answers.py
+!scripts/calibrate_golden_answers.py
 
 uploads/
 sqlite_db/*.db
