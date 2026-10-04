@@ -63,9 +63,10 @@ class VectorStore:
             hnsw_config=models.HnswConfigDiff(on_disk=True) if on_disk else None,
         )
         if self._server:  # payload indexes are a no-op in embedded mode
-            for key in ("document_type", "metadata.law_name", "metadata.court", "metadata.legal_domain"):
+            for key in ("document_type", "metadata.law_name", "metadata.court", "metadata.legal_domain",
+                        "document_id", "metadata.corpus_version"):
                 self.client.create_payload_index(self.collection, key, models.PayloadSchemaType.KEYWORD)
-            for key in _DERIVED_KEYS:
+            for key in (*_DERIVED_KEYS, "order"):
                 self.client.create_payload_index(self.collection, key, models.PayloadSchemaType.INTEGER)
 
     def count(self) -> int:
@@ -100,12 +101,48 @@ class VectorStore:
         return payload
 
     # Reads ----------------------------------------------------------------------
+    def matching_chunk_ids(self, chunks: list[Chunk]) -> set[str]:
+        """Find stored points and reject changed payloads before resuming an index."""
+        if not chunks:
+            return set()
+        expected = {point_id(chunk.id): chunk for chunk in chunks}
+        points = self.client.retrieve(self.collection, ids=list(expected),
+                                      with_payload=True, with_vectors=False)
+        matched: set[str] = set()
+        for point in points:
+            stored = Chunk.model_validate({key: value for key, value in point.payload.items()
+                                           if key not in _DERIVED_KEYS})
+            chunk = expected[str(point.id)]
+            if stored != chunk:
+                raise ValueError(f"Stored chunk {chunk.id!r} differs from the corpus; cannot resume.")
+            matched.add(chunk.id)
+        return matched
+
     def texts_by_chunk_id(self, chunk_ids: list[str]) -> dict[str, str]:
         """Point lookup by id: document_id and order carry no payload index."""
         if not chunk_ids:
             return {}
         points = self.client.retrieve(self.collection, ids=[point_id(i) for i in chunk_ids], with_payload=["id", "text"])
         return {point.payload["id"]: point.payload["text"] for point in points}
+
+    def chunks_near(self, chunk: Chunk, radius: int) -> list[Chunk]:
+        """Bounded neighbors from the same document and corpus, in original order."""
+        if radius < 1:
+            return []
+        points, _ = self.client.scroll(
+            self.collection,
+            scroll_filter=models.Filter(must=[
+                models.FieldCondition(key="document_id", match=models.MatchValue(value=chunk.document_id)),
+                models.FieldCondition(key="metadata.corpus_version",
+                                      match=models.MatchValue(value=chunk.metadata.corpus_version)),
+                models.FieldCondition(key="order", range=models.Range(
+                    gte=max(0, chunk.order - radius), lte=chunk.order + radius)),
+            ]),
+            limit=2 * radius + 1, with_payload=True, with_vectors=False,
+        )
+        neighbors = [Chunk.model_validate({key: value for key, value in point.payload.items()
+                                          if key not in _DERIVED_KEYS}) for point in points]
+        return sorted((other for other in neighbors if other.id != chunk.id), key=lambda other: other.order)
 
     def search_dense(self, vector: list[float], k: int, filters: RetrievalFilters | None = None) -> list[tuple[Chunk, float]]:
         return self._query(vector, self.DENSE, k, filters)

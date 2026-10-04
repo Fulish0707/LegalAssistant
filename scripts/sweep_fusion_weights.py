@@ -74,6 +74,8 @@ def main(
     depth: int = typer.Option(10, min=1, help='Pool depth of the new directory.'),
     model: str = typer.Option('qwen3:8b', help='Judge whose existing judgments count as done.'),
     think: bool = typer.Option(JUDGE_THINK, '--think/--no-think'),
+    prompt_profile: str = typer.Option('corpus', help='Relevance instructions: corpus, shared or corpus-experimental.'),
+    judge_domain: str = typer.Option(None, help='Use the same domain override as the judging command.'),
     profile: str = typer.Option(None),
     root: Path = typer.Option(None),
     corpus_version: str = typer.Option(None),
@@ -96,7 +98,7 @@ def main(
     runs = {**legs, **{variant_name(w): refuse(legs, {'dense': dense_weight, 'sparse': w}, rrf_k=rrf_k,
                                                depth=run_depth) for w in weights}}
 
-    key = judge_key(f'ollama:{model}', think=think)
+    key = judge_key(f'ollama:{model}', think=think, prompt_profile=prompt_profile, domain=judge_domain)
     _progress(describe_key(key, think=think))
     store = JudgmentStore(pool_dir / 'judgments.jsonl')
     judged = set(store.grades(key)) | set(store.failures(key))
