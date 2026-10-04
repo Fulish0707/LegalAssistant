@@ -63,7 +63,7 @@ def build_reranker(settings: Settings) -> Reranker:
         from legal_rag.reranking.cross_encoder import CrossEncoderReranker  # heavy import, optional extra
 
         return CrossEncoderReranker(model=settings.rerank.model, device=settings.rerank.device,
-                                    dtype=settings.rerank.dtype,
+                                    dtype=settings.rerank.dtype, max_length=settings.rerank.max_length,
                                     local_files_only=settings.rerank.local_files_only)
     raise ValueError(f"unknown rerank backend {settings.rerank.backend!r}")
 
