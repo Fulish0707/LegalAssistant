@@ -154,6 +154,22 @@ def test_factory_passes_local_files_only():
     assert Settings().rerank.local_files_only is False
 
 
+def test_factory_passes_max_length_and_the_default_stays_512():
+    """512 cut statute windows and judgments to their first quarter or third; the length is a setting, not a constant."""
+    assert Settings().rerank.max_length == 512
+    settings = Settings(rerank={'backend': 'cross_encoder', 'max_length': 2048})
+    assert build_reranker(settings).max_length == 2048
+    assert build_reranker(Settings(rerank={'backend': 'cross_encoder'})).max_length == 512
+
+
+def test_max_length_reaches_the_cross_encoder_loader():
+    reranker, loader = _reranker({})
+    reranker.max_length = 1024
+    reranker._encoder = None
+    reranker.rerank('q', _candidates(), k=1)
+    assert loader.calls[0]['max_length'] == 1024
+
+
 def test_concurrent_first_calls_load_the_model_once():
     """The startup warm-up and a user request can race; two loads mean two GPU copies."""
     import threading
