@@ -44,6 +44,7 @@ rerank:
   backend: noop            # noop | cross_encoder (requires the `rerank` extra)
   model: BAAI/bge-reranker-v2-m3
   device: cpu
+  max_length: 512          # tokens of query + passage; longer reads more of each chunk and costs more per query
 
 llm:
   backend: ollama          # ollama | gemini | fake | transformers (V0.4)

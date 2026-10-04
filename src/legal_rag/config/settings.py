@@ -85,6 +85,10 @@ class RerankSettings(_Section):
     # Load from the local Hugging Face cache without Hub checks: 1.9 s instead of 5.6 s.
     # Needs the model downloaded once; a fresh machine keeps the default.
     local_files_only: bool = False
+    # Tokens of query + passage the cross-encoder reads; the rest of a chunk is cut. 512 reads about a quarter to a third of a
+    # 3,000-character statute window or judgment chunk. On 319 held-out questions, covered-in-top-5 for statute questions rose
+    # 41 -> 60 -> 71 of 82 at 512 -> 1024 -> 2048 for 1.6 s -> 3.3 s -> 7.4 s per query (reranker-length-2026-10-03).
+    max_length: int = Field(default=512, ge=64, le=8192)
 
 
 class LLMSettings(_Section):
