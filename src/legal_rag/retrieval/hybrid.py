@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from legal_rag.reranking import Reranker
-from legal_rag.schemas import RetrievalFilters, ScoredChunk
+from legal_rag.schemas import Chunk, RetrievalFilters, ScoredChunk
 
 from .fusion import Fuser
 
@@ -26,6 +26,14 @@ class HybridRetriever:
         self.k_leg = k_leg
         self.k_fused = k_fused
         self.last_trace: dict[str, list[tuple[str, float]]] = {}
+
+    def neighbor_chunks(self, chunk: Chunk, radius: int) -> list[Chunk]:
+        """Use the hit's corpus store; the dense/sparse legs share that store."""
+        version = chunk.metadata.corpus_version
+        for leg in self.legs:
+            if leg.name.rsplit(":", 1)[0] == version and hasattr(leg, "store"):
+                return leg.store.chunks_near(chunk, radius)
+        raise ValueError(f"No neighbor store for corpus {version!r}.")
 
     def retrieve(self, query: str, k: int, filters: RetrievalFilters | None = None) -> list[ScoredChunk]:
         return self.retrieve_many([query], k, filters)

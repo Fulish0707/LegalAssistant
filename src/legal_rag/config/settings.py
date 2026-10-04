@@ -115,7 +115,10 @@ class RagSettings(_Section):
     hard_filter: bool = False
     history_turns: int = 4
     max_regenerations: int = 1
-    max_evidence_chars: int = 1500
+    max_evidence_chars: int = Field(default=1500, ge=1)
+    context_neighbor_radius: int = Field(default=0, ge=0, le=2)
+    context_neighbor_corpora: list[str] = Field(default_factory=list)
+    max_context_chars: int | None = Field(default=None, ge=1)
 
 
 class ApiSettings(_Section):

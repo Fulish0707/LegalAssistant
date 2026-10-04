@@ -92,6 +92,8 @@ def main(
     max_length: int = typer.Option(512, min=16),
     judge_model: str = typer.Option('qwen3:8b', help='Judge whose existing judgments count as done.'),
     think: bool = typer.Option(JUDGE_THINK, '--think/--no-think'),
+    prompt_profile: str = typer.Option('corpus', help='Relevance instructions: corpus, shared or corpus-experimental.'),
+    judge_domain: str = typer.Option(None, help='Use the same domain override as the judging command.'),
     profile: str = typer.Option(None),
     root: Path = typer.Option(None),
     corpus_version: str = typer.Option(None),
@@ -128,7 +130,7 @@ def main(
     elapsed = time.perf_counter() - started
     _progress(f'reranked in {elapsed / 60:.1f} min ({elapsed / max(len(fused_rows), 1):.2f} s/case)')
 
-    key = judge_key(f'ollama:{judge_model}', think=think)
+    key = judge_key(f'ollama:{judge_model}', think=think, prompt_profile=prompt_profile, domain=judge_domain)
     _progress(describe_key(key, think=think))
     store = JudgmentStore(pool_dir / 'judgments.jsonl')
     judged = set(store.grades(key)) | set(store.failures(key))

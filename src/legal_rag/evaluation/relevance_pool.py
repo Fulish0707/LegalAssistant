@@ -23,6 +23,7 @@ def _pair(case: dict, chunk: Chunk) -> dict:
                   text=chunk.text, authority=chunk.metadata.authority or chunk.metadata.court,
                   date=chunk.metadata.original.get('date'))
     return dict(case_id=case['case_id'], chunk_id=chunk.id, question=case['question'],
+                question_domain=case.get('legal_domain'),
                 reference_answer=case.get('answer'), **{**fields, **case_label(fields)},
                 ranks={}, is_gold_chunk=chunk.document_id == case['document_id'])
 

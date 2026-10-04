@@ -1,0 +1,32 @@
+# All four corpora use the civil pilot's smaller structural chunks.
+# Build the three remaining structural indexes before serving this profile.
+corpus:
+  version: civil-struct800-v1
+embedding:
+  model: bge-m3
+  query_num_ctx: 1024
+qdrant:
+  mode: server
+  url: http://localhost:6333
+retrieval:
+  corpora: [criminal-struct800-v1, civil-struct800-v1, administrative-struct800-v1, ip-struct800-v1]
+  k_dense: 100
+  k_sparse: 100
+  k_fused: 100
+  sparse_weight: 0.75
+  leg_floor: 3
+rerank:
+  backend: cross_encoder
+  device: cuda
+  local_files_only: true
+  dtype: float16
+llm:
+  model: qwen3:4b
+  num_ctx: 8192
+rag:
+  context_neighbor_radius: 0
+  context_neighbor_corpora: []
+  max_evidence_chars: 1500
+  max_context_chars: 7500
+api:
+  warmup: true
