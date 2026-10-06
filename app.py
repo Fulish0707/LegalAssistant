@@ -81,16 +81,6 @@ def establish_anonymous_user():
     # honoured: an old account cookie never recovers that account's records.
     for key in ("authenticated_user_id", "account_email", "auth_next", "oidc_nonce"):
         session.pop(key, None)
-    # Drafts used to live in the cookie itself. Migrate one once, without
-    # overwriting a draft the workspace has already saved server-side.
-    legacy_draft = session.pop("guest_draft", None)
-    if isinstance(legacy_draft, str):
-        connection = get_db()
-        connection.execute(
-            "INSERT OR IGNORE INTO personal_statement (user_id, draft) VALUES (?, ?)",
-            (session["user_id"], legacy_draft),
-        )
-        connection.commit()
 
 DB_FILE = os.getenv("APP_STATE_DB", "sqlite_db/app_state.db") # Define DB_FILE before use
 db_dir = os.path.dirname(DB_FILE)
@@ -129,13 +119,9 @@ CHECKPOINTER = build_checkpointer()
 
 def ensure_database_schema(conn):
     cursor = conn.cursor()
-    statement_columns = {row[1] for row in cursor.execute("PRAGMA table_info(personal_statement)")}
-    if statement_columns and "user_id" not in statement_columns:
-        cursor.execute("ALTER TABLE personal_statement RENAME TO personal_statement_legacy")
     chat_columns = {row[1] for row in cursor.execute("PRAGMA table_info(chat_history)")}
     if chat_columns and "user_id" not in chat_columns:
         cursor.execute("ALTER TABLE chat_history RENAME TO chat_history_legacy")
-    cursor.execute("CREATE TABLE IF NOT EXISTS personal_statement (user_id TEXT PRIMARY KEY, draft TEXT NOT NULL DEFAULT '')")
     cursor.execute("CREATE TABLE IF NOT EXISTS chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_user_id_id ON chat_history(user_id, id)")
     # The Google-era users table is no longer created. Existing installs keep
@@ -151,11 +137,6 @@ def ensure_database_schema(conn):
             PRIMARY KEY (identity_kind, identity_value, quota_day)
         )
     """)
-    if cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='personal_statement_legacy'").fetchone():
-        row = cursor.execute("SELECT draft FROM personal_statement_legacy WHERE id=1").fetchone()
-        if row:
-            cursor.execute("INSERT OR IGNORE INTO personal_statement (user_id, draft) VALUES ('legacy-unassigned', ?)", (row[0],))
-        cursor.execute("DROP TABLE personal_statement_legacy")
     if cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='chat_history_legacy'").fetchone():
         cursor.execute("INSERT INTO chat_history (user_id, role, content, timestamp) SELECT 'legacy-unassigned', role, content, timestamp FROM chat_history_legacy")
         cursor.execute("DROP TABLE chat_history_legacy")
@@ -192,19 +173,6 @@ def init_db():
         # For standalone init, explicitly closing is safer if not within app context management
         # but since we used `with app.app_context()`, `close_connection` will be triggered.
 
-
-def get_personal_statement_from_db(user_id):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT draft FROM personal_statement WHERE user_id=?', (user_id,))
-    row = c.fetchone()
-    return row['draft'] if row else ""
-
-def set_personal_statement_in_db(user_id, draft):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('INSERT INTO personal_statement (user_id, draft) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET draft=excluded.draft', (user_id, draft))
-    conn.commit()
 
 def get_chat_history_from_db(user_id):
     conn = get_db()
@@ -312,9 +280,6 @@ def _generate_legal_response_stream(user_input):
         yield _sse({
             "type": "final_response",
             "chat_response": chat_response,
-            "statement_suggestion": "",
-            "job_statement_suggestion": "",
-            "report_suggestion": "",
             "sources": sources,
         })
 
@@ -403,7 +368,6 @@ def chat():
     if request.method == 'POST':
         data = request.get_json(silent=True) or {}
         user_input = data.get('message')
-        current_personal_statement_draft = data.get('personal_statement_draft', '')
 
         if not user_input:
             return jsonify({"error": "No message provided"}), 400
@@ -438,23 +402,8 @@ def chat():
 def get_initial_state():
     user_id = session["user_id"]
     return jsonify({
-        "personal_statement_draft": get_personal_statement_from_db(user_id),
         "chat_history": get_chat_history_from_db(user_id)
     })
-
-@app.route('/update_statement', methods=['POST'])
-def update_statement():
-    data = request.get_json(silent=True) or {}
-    new_draft = data.get('personal_statement_draft')
-    if new_draft is None: # Check for None, as empty string is a valid draft
-        return jsonify({"error": "No personal_statement_draft provided"}), 400
-    
-    try:
-        set_personal_statement_in_db(session["user_id"], new_draft)
-        return jsonify({"message": "Personal statement updated successfully."}), 200
-    except Exception as e:
-        logging.exception("Error updating personal statement in DB")
-        return jsonify({"error": "Failed to update personal statement."}), 500
 
 
 def clear_agent_thread(user_id):

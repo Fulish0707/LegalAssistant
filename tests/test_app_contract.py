@@ -160,71 +160,21 @@ class AppContractTests(unittest.TestCase):
         self.assertNotEqual(first_id, second_id)
         self.assertGreaterEqual(len(first_id), 32)
 
-    # --- drafts and chat history -----------------------------------------
-
-    def test_browser_drafts_are_private_and_server_side(self):
-        first = self.app_module.app.test_client()
-        second = self.app_module.app.test_client()
-        for client, draft in ((first, "first private draft"), (second, "second private draft")):
-            response = client.post("/update_statement", json={"personal_statement_draft": draft})
-            self.assertEqual(response.status_code, 200)
-        self.assertEqual(first.get("/get_initial_state").json["personal_statement_draft"], "first private draft")
-        self.assertEqual(second.get("/get_initial_state").json["personal_statement_draft"], "second private draft")
-        with first.session_transaction() as cookie:
-            owner = cookie["user_id"]
-            self.assertNotIn("guest_draft", cookie)
-        with self.app_module.app.app_context():
-            self.assertEqual(self.app_module.get_personal_statement_from_db(owner), "first private draft")
-
-    def test_update_statement_still_validates_its_payload(self):
-        response = self.app_module.app.test_client().post("/update_statement", json={})
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json, {"error": "No personal_statement_draft provided"})
-
-    def test_legacy_cookie_draft_migrates_once_and_never_overwrites_a_saved_draft(self):
-        # A browser that still carries the old cookie-only draft, but no row yet.
-        migrating = self.app_module.app.test_client()
-        with migrating.session_transaction() as flask_session:
-            flask_session["user_id"] = "legacy-cookie-owner"
-            flask_session["guest_draft"] = "draft from the old cookie"
-
-        state = migrating.get("/get_initial_state")
-
-        self.assertEqual(state.json["personal_statement_draft"], "draft from the old cookie")
-        with migrating.session_transaction() as flask_session:
-            self.assertNotIn("guest_draft", flask_session)
-            self.assertEqual(flask_session["user_id"], "legacy-cookie-owner")
-
-        # A browser whose workspace already has a SQLite draft: the row wins.
-        with self.app_module.app.app_context():
-            self.app_module.set_personal_statement_in_db("saved-row-owner", "saved in sqlite")
-        saved = self.app_module.app.test_client()
-        with saved.session_transaction() as flask_session:
-            flask_session["user_id"] = "saved-row-owner"
-            flask_session["guest_draft"] = "stale cookie draft"
-
-        state = saved.get("/get_initial_state")
-
-        self.assertEqual(state.json["personal_statement_draft"], "saved in sqlite")
-        with saved.session_transaction() as flask_session:
-            self.assertNotIn("guest_draft", flask_session)
+    # --- chat history ----------------------------------------------------
 
     def test_a_cleared_cookie_starts_a_fresh_empty_workspace(self):
         original = self.app_module.app.test_client()
-        original.post("/update_statement", json={"personal_statement_draft": "kept on the server"})
         original.post("/chat", json={"message": "remembered"})
         original_id = self.session_user_id(original)
 
         fresh = self.app_module.app.test_client()
         state = fresh.get("/get_initial_state")
 
-        self.assertEqual(state.json["personal_statement_draft"], "")
         self.assertEqual(state.json["chat_history"], [])
         self.assertNotEqual(self.session_user_id(fresh), original_id)
         # Losing the cookie does not delete the server-side workspace.
         with self.app_module.app.app_context():
-            self.assertEqual(self.app_module.get_personal_statement_from_db(original_id), "kept on the server")
+            self.assertEqual(self.app_module.get_chat_history_from_db(original_id), [{"role": "user", "content": "remembered"}])
 
     def test_chat_histories_are_private_per_browser(self):
         first = self.app_module.app.test_client()
@@ -252,7 +202,6 @@ class AppContractTests(unittest.TestCase):
     def test_legacy_account_cookies_do_not_recover_account_data(self):
         legacy_id = "legacy-google-account"
         with self.app_module.app.app_context():
-            self.app_module.set_personal_statement_in_db(legacy_id, "legacy account draft")
             self.app_module.add_chat_message_to_db(legacy_id, "user", "legacy account chat")
 
         browser = self.app_module.app.test_client()
@@ -264,14 +213,12 @@ class AppContractTests(unittest.TestCase):
 
         state = browser.get("/get_initial_state")
 
-        self.assertEqual(state.json["personal_statement_draft"], "")
         self.assertEqual(state.json["chat_history"], [])
         with browser.session_transaction() as flask_session:
             self.assertNotEqual(flask_session["user_id"], legacy_id)
             for key in ("authenticated_user_id", "account_email", "auth_next", "oidc_nonce"):
                 self.assertNotIn(key, flask_session)
         with self.app_module.app.app_context():
-            self.assertEqual(self.app_module.get_personal_statement_from_db(legacy_id), "legacy account draft")
             self.assertEqual(
                 self.app_module.get_chat_history_from_db(legacy_id),
                 [{"role": "user", "content": "legacy account chat"}],
