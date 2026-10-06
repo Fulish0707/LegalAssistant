@@ -18,6 +18,8 @@ class ScriptedModel:
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
+        if response_schema is not RelevanceGrade:      # the quote-repair call
+            return ModelResponse(text='', parsed=response_schema(**reply))
         return ModelResponse(text='', parsed=RelevanceGrade(**{'evidence_quote': '', **reply}))
 
 
@@ -176,7 +178,7 @@ def test_verify_quote_rejects_short_empty_and_invented_quotes():
 def test_quote_beyond_the_shown_truncation_is_not_verified(tmp_path):
     hidden = '이 문장은 잘린 뒤에만 나오는 법리 설명이다'
     text = '가' * 3500 + hidden
-    model = ScriptedModel([{'grade': 2, 'reason': '', 'evidence_quote': hidden}])
+    model = ScriptedModel([{'grade': 2, 'reason': '', 'evidence_quote': hidden}, {'span_index': 0}])
     store = JudgmentStore(tmp_path / 'j.jsonl')
     judge_pool([pair(text=text)], model, store, think=False)
     row = store.rows(judge_key(model, think=False))[('c1', 'k1')]
@@ -187,14 +189,27 @@ def test_unverified_grade_2_is_downgraded_and_details_are_stored(tmp_path):
     store = JudgmentStore(tmp_path / 'j.jsonl')
     invented = '신용을 이용하여 부당한 이익을 얻을 목적이 있어야 한다'
     verbatim = '수요자를 기만할 염려가 있는 상표를 등록받을 수 없다'
-    model = ScriptedModel([{'grade': 2, 'reason': 'a', 'evidence_quote': invented},
+    model = ScriptedModel([{'grade': 2, 'reason': 'a', 'evidence_quote': invented}, {'span_index': 0},
                            {'grade': 2, 'reason': 'b', 'evidence_quote': verbatim}])
     judge_pool([pair('k1', text=CHUNK), pair('k2', text=CHUNK)], model, store, think=False)
     rows = JudgmentStore(tmp_path / 'j.jsonl').rows(judge_key(model, think=False))
-    assert rows[('c1', 'k1')]['grade'] == 1
-    assert rows[('c1', 'k1')]['details'] == {'model_grade': 2, 'evidence_quote': invented, 'quote_verified': False}
+
+    def kept(row):
+        return {k: row['details'][k] for k in ('model_grade', 'evidence_quote', 'quote_verified', 'quote_retry_attempted')}
+
+    assert rows[('c1', 'k1')]['grade'] == 1     # the repair call found no supporting span
+    assert kept(rows[('c1', 'k1')]) == {'model_grade': 2, 'evidence_quote': invented, 'quote_verified': False, 'quote_retry_attempted': True}
     assert rows[('c1', 'k2')]['grade'] == 2
-    assert rows[('c1', 'k2')]['details'] == {'model_grade': 2, 'evidence_quote': verbatim, 'quote_verified': True}
+    assert kept(rows[('c1', 'k2')]) == {'model_grade': 2, 'evidence_quote': verbatim, 'quote_verified': True, 'quote_retry_attempted': False}
+
+
+def test_an_invalid_grade_2_quote_is_repaired_from_the_shown_spans(tmp_path):
+    store = JudgmentStore(tmp_path / 'j.jsonl')
+    model = ScriptedModel([{'grade': 2, 'reason': 'a', 'evidence_quote': '원문에 없는 문장을 지어낸 인용문입니다'}, {'span_index': 1}])
+    judge_pool([pair(text=CHUNK)], model, store, think=False)
+    row = store.rows(judge_key(model, think=False))[('c1', 'k1')]
+    assert row['grade'] == 2 and row['details']['quote_retry_succeeded'] is True
+    assert verify_quote(row['details']['evidence_quote'], CHUNK)
 
 
 def test_grades_0_and_1_are_not_changed_by_quote_verification(tmp_path):
