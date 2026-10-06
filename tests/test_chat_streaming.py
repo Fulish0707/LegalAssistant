@@ -130,6 +130,20 @@ class ChatStreamingTests(ChatStreamBase):
 
         self.assertEqual(self.final(self.collect(body))["questions"], ["집을 비워 준 날이 언제인가요?", "임대차 계약이 실제로 종료된 날짜"])
 
+    def test_an_answer_with_a_deadline_or_an_amount_says_to_check_the_source(self):
+        """The model sometimes misuses a figure that is in its sources ("두 달 전" became "2개월 이내"),
+        which no text comparison catches (memory.md, 2026-10-06). The reader is told to check."""
+        for summary in ("해고일부터 3개월 이내에 신청해야 합니다.", "보증금 1억 2,000만 원을 청구할 수 있습니다.",
+                        "2026년 8월 31일에 계약이 끝났습니다.", "연 5%의 지연손해금이 붙습니다.", "두 달 안에 신청하세요."):
+            with self.subTest(summary=summary):
+                self.assertIn("※ 기간·날짜·금액", self.final(self.collect(backend_answer(summary)))["chat_response"])
+
+    def test_an_answer_without_figures_carries_no_such_notice(self):
+        for summary in ("노동위원회에 구제신청을 할 수 있습니다.", "주택임대차보호법 제3조의3 제1항에 따라 신청할 수 있습니다[1]."):
+            with self.subTest(summary=summary):
+                self.assertNotIn("※ 기간·날짜·금액", self.final(self.collect(backend_answer(summary)))["chat_response"])
+        self.assertNotIn("※ 기간·날짜·금액", self.final(self.collect({"kind": "rejected"}))["chat_response"])
+
     def test_a_refusal_and_a_greeting_ask_nothing(self):
         self.assertEqual(self.final(self.collect({"kind": "rejected", "reason": "unsupported citations"}))["questions"], [])
         self.assertEqual(self.final(self.collect(query="message=안녕하세요"))["questions"], [])

@@ -84,3 +84,15 @@ def annotate_unsupported(answer, missing):
         f"{answer}\n\n※ 확인 필요: {', '.join(missing)}은(는) 이번 답변에 쓰인 검색 근거에서 "
         "확인되지 않았습니다. 국가법령정보센터(law.go.kr)나 대법원 종합법률정보에서 직접 확인하세요."
     )
+
+
+# A time span, a date, an amount or a rate. The model sometimes misuses a figure that is in its
+# sources: the user's "두 달 전" became a "2개월 이내" deadline, and a lease's two dates became
+# one wrong period. Comparing text cannot catch that (memory.md, 2026-10-06), so the reader is
+# told to check, and only when the answer has such a figure.
+_FIGURE_RE = re.compile(r"\d[\d,]*\s*(?:억|천만|백만|만)?\s*(?:시간|일|주|개월|달|년|원|%|퍼센트)|(?:한|두|세|석|네|넉|다섯|여섯)\s*(?:달|주|해)")
+FIGURE_NOTICE = "※ 기간·날짜·금액은 잘못 옮겨질 수 있습니다. 중요한 결정 전에는 근거 원문과 올리신 자료에서 직접 확인하세요."
+
+
+def annotate_figures(answer):
+    return f"{answer}\n\n{FIGURE_NOTICE}" if _FIGURE_RE.search(answer or "") else answer
