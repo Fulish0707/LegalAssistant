@@ -122,6 +122,28 @@ class Orchestrator:
             bundle = self.context_builder.build(hits)
         trace.evidence_ids = [item.chunk_id for item in bundle.items]
 
+        answer, report, action = self._generate_verified(question, bundle, analysis, recent, open_questions, recorder)
+
+        if answer is None or report is None:
+            recorder.finish(policy_action=VerificationAction.reject.value)
+            self._remember(conversation_id, "답변을 생성하지 못했습니다.", trace.evidence_ids)
+            return ChatResponse(kind="rejected", conversation_id=conversation_id, reason="answer generation failed", evidence=bundle, trace=trace)
+
+        if action == VerificationAction.strip:
+            answer = self.policy.strip(answer, report)
+            action = self.policy.decide_after_strip(answer, evidence_required=True)
+        trace.verification = report
+        recorder.finish(policy_action=action.value)
+
+        if action == VerificationAction.reject:
+            self._remember(conversation_id, "근거를 확인할 수 없어 답변을 제공하지 못했습니다.", trace.evidence_ids)
+            return ChatResponse(kind="rejected", conversation_id=conversation_id, reason="unsupported citations", evidence=bundle, verification=report, trace=trace)
+
+        self._remember(conversation_id, f"{answer.summary}\n{answer.analysis}".strip(), trace.evidence_ids)
+        return ChatResponse(kind="answer", conversation_id=conversation_id, answer=answer, evidence=bundle, verification=report, trace=trace)
+
+    def _generate_verified(self, question, bundle, analysis, recent, open_questions, recorder):
+        """Generate, verify, and regenerate with the verifier's feedback while the policy asks for it."""
         answer: LegalAnswer | None = None
         report: VerificationReport | None = None
         action = VerificationAction.accept
@@ -141,26 +163,9 @@ class Orchestrator:
             action = self.policy.decide(report, attempt)
             if action != VerificationAction.regenerate:
                 break
-            trace.regenerations += 1
+            recorder.trace.regenerations += 1
             feedback = self.policy.feedback(report)
-
-        if answer is None or report is None:
-            recorder.finish(policy_action=VerificationAction.reject.value)
-            self._remember(conversation_id, "답변을 생성하지 못했습니다.", trace.evidence_ids)
-            return ChatResponse(kind="rejected", conversation_id=conversation_id, reason="answer generation failed", evidence=bundle, trace=trace)
-
-        if action == VerificationAction.strip:
-            answer = self.policy.strip(answer, report)
-            action = self.policy.decide_after_strip(answer, evidence_required=True)
-        trace.verification = report
-        recorder.finish(policy_action=action.value)
-
-        if action == VerificationAction.reject:
-            self._remember(conversation_id, "근거를 확인할 수 없어 답변을 제공하지 못했습니다.", trace.evidence_ids)
-            return ChatResponse(kind="rejected", conversation_id=conversation_id, reason="unsupported citations", evidence=bundle, verification=report, trace=trace)
-
-        self._remember(conversation_id, f"{answer.summary}\n{answer.analysis}".strip(), trace.evidence_ids)
-        return ChatResponse(kind="answer", conversation_id=conversation_id, answer=answer, evidence=bundle, verification=report, trace=trace)
+        return answer, report, action
 
     def _remember(self, conversation_id: str, content: str, evidence_ids: list[str]) -> None:
         self.store.append(conversation_id, Turn(role="assistant", content=content, created_at=_now(), evidence_ids=list(evidence_ids)))
