@@ -118,6 +118,8 @@ class RagSettings(_Section):
     # 55 of 80 formal and 29 of 60 everyday questions; without them 79 of 80 and 60 of 60, with
     # gold in the evidence unchanged (46 -> 45.5 of 80, 28 -> 30 of 60; 2026-10-05).
     analyzer_terms_in_search: bool = False
+    # Hide the dates and amounts inside judgment text from the answer model (not from the response).
+    mask_case_figures: bool = False
     history_turns: int = 4
     max_regenerations: int = 1
     max_evidence_chars: int = Field(default=1500, ge=1)
