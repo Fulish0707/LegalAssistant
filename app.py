@@ -41,15 +41,6 @@ except ModuleNotFoundError:
 
 from llm_prompt import prompt as main_chat_prompt_template
 from llm_model import describe_configuration, get_chat_model
-from statistics_analysis import (
-    ALLOWED_STATISTICS_EXTENSIONS,
-    analyze_dataframe,
-    build_ai_statistics_prompt,
-    build_statistics_knowledge_text,
-    load_table,
-    render_statistics_html,
-)
-from html_sanitizer import sanitize_report_html
 
 # Disable Flask's default request logging for cleaner output if not needed
 log = logging.getLogger('werkzeug')
@@ -563,83 +554,6 @@ def allowed_file(filename, allowed_extensions):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
-
-@app.route('/statistics/analyze', methods=['POST'])
-def analyze_statistics_route():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part"}), 400
-
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
-
-    if not allowed_file(file.filename, ALLOWED_STATISTICS_EXTENSIONS):
-        return jsonify({"error": "File type not allowed. Upload CSV, TSV, or XLSX."}), 400
-
-    filename = secure_filename(file.filename)
-    file_extension = filename.rsplit('.', 1)[1].lower()
-    user_question = request.form.get('question', '')
-    add_to_knowledge_base = request.form.get('add_to_knowledge_base', '').lower() in {'1', 'true', 'yes', 'on'}
-    temp_file_path = None
-
-    try:
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            dir=app.config['UPLOAD_FOLDER'],
-            suffix=os.path.splitext(filename)[1],
-        ) as temp_file_obj:
-            temp_file_path = temp_file_obj.name
-            file.save(temp_file_obj)
-
-        dataframe = load_table(temp_file_path, file_extension)
-        analysis = analyze_dataframe(dataframe)
-
-        llm = get_chat_model()
-        ai_insight = None
-        if llm is not None:
-            prompt_text = build_ai_statistics_prompt(filename, analysis, user_question)
-            quota_result = reserve_ai_request()
-            if not quota_result.allowed:
-                return quota_exceeded_response(quota_result)
-            ai_response = llm.invoke(prompt_text)
-            ai_insight = sanitize_report_html(getattr(ai_response, "content", str(ai_response)))
-
-        report_html = sanitize_report_html(render_statistics_html(
-            filename=filename,
-            analysis=analysis,
-            ai_insight=ai_insight,
-            ai_enabled=llm is not None,
-        ))
-
-        response_payload = {
-            "report_html": report_html,
-            "analysis": analysis,
-            "ai_enabled": llm is not None,
-            "filename": filename,
-        }
-
-        if add_to_knowledge_base:
-            response_payload["knowledge_base"] = ingest_text_to_vector_store(
-                text=build_statistics_knowledge_text(filename, analysis, ai_insight),
-                source_name=filename,
-                metadata={
-                    "analysis_type": "statistics",
-                    "uploaded_via": "statistics_workspace",
-                }, user_id=session["user_id"],
-            )
-
-        return jsonify(response_payload), 200
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        app.logger.error(f"Unhandled error in analyze_statistics_route for {filename}: {str(e)}", exc_info=True)
-        return jsonify({"error": f"An unexpected server error occurred during statistics analysis: {str(e)}"}), 500
-    finally:
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.remove(temp_file_path)
-            except Exception as e_clean:
-                app.logger.error(f"Error cleaning up temp file {temp_file_path}: {e_clean}")
 
 # --- OCR Processing Route (Existing) ---
 @app.route('/process_document_ocr', methods=['POST'])
