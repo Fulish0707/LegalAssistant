@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from legal_rag.config import Settings
 from legal_rag.llm import ChatModel
 from legal_rag.retrieval.hybrid import HybridRetriever, Retriever
-from legal_rag.schemas import ChatResponse, LegalAnswer, Turn, VerificationAction, VerificationReport
+from legal_rag.schemas import ChatResponse, EvidenceBundle, LegalAnswer, QueryAnalysis, Turn, VerificationAction, VerificationReport
 from legal_rag.verification import VerificationPolicy, Verifier, backfill_citations
 
 from .analyzer import QueryAnalyzer
@@ -142,7 +142,10 @@ class Orchestrator:
         self._remember(conversation_id, f"{answer.summary}\n{answer.analysis}".strip(), trace.evidence_ids)
         return ChatResponse(kind="answer", conversation_id=conversation_id, answer=answer, evidence=bundle, verification=report, trace=trace)
 
-    def _generate_verified(self, question, bundle, analysis, recent, open_questions, recorder):
+    def _generate_verified(
+        self, question: str, bundle: EvidenceBundle, analysis: QueryAnalysis, recent: list[Turn],
+        open_questions: list[str], recorder: TraceRecorder,
+    ) -> tuple[LegalAnswer | None, VerificationReport | None, VerificationAction]:
         """Generate, verify, and regenerate with the verifier's feedback while the policy asks for it."""
         answer: LegalAnswer | None = None
         report: VerificationReport | None = None

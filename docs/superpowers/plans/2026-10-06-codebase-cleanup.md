@@ -112,11 +112,25 @@ env APP_STATE_DB=$T/a.db RAG_PERSIST_DIR=$T/chroma APP_ENV=testing \
 - [x] 5.2 함수마다 테스트가 실제로 실행하는 줄을 측정했다 (`coverage`). 84% 이상 10개, 70% 1개, 7% 이하 11개
 - [x] 5.3 서비스 경로: `orchestrator.handle` 86 → 66줄 (생성·검증 반복을 `_generate_verified`로 분리), `process_document_ocr` 82 → 57줄
 - [ ] 5.4 평가 경로: 하지 않았다. `judge_saved_answers`, `eval_chat_pipeline.verify`, `_report_versioned`은 테스트가 한 줄도 실행하지 않는다
-- [ ] 5.5 적재 경로: 하지 않았다. `rechunk_corpus`, `import_processed`, `_parse_numbered`, `run_ingestion`은 읽어 보니 검사와 보고서를 한 번에 쓰는 일직선 코드다. 줄이면 줄이 옮겨질 뿐이다
+- [ ] 5.5 적재 경로와 그 밖의 테스트가 덮는 함수 9개: 읽었고 줄이지 않았다. 이유는 아래 표에 있다
 - [ ] 5.6 중복 제거: 하지 않았다. JSONL 읽기 5개 중 같은 것은 2개(3줄)뿐이고, 나머지는 오류 처리가 서로 다르다. 부트스트랩은 한 곳에만 있다
 - [x] 5.7 주석 정리: `app.py` 문서 올리기 경로와 `.env.example`의 에이전트 시절 설명
 - [x] 각 커밋에 전후 줄 수를 적었다
 - [x] 확인: `tests/legal_rag` 594 통과, Flask 108 통과
+
+테스트가 덮지만 줄이지 않은 긴 함수 (9개):
+
+| 함수 | 줄 | 실행률 | 줄이지 않은 이유 |
+|---|---|---|---|
+| `rechunk_corpus` | 112 | 92% | 문서를 한 번 읽으며 청크와 보고서를 함께 쓴다. 보고서 사전이 20줄이다 |
+| `import_processed` | 102 | 93% | 문서·청크 검사 14가지가 한 번의 읽기 안에 있다. 나누면 집합 4개를 넘겨야 한다 |
+| `rerank_relevance_pool.main` | 97 | 92% | 옵션 선언 21줄과 출처 기록 사전이 대부분이다 |
+| `run_retrieval_diagnostics` | 94 | 90% | 사전 검사와 요약 기록이 대부분이다 |
+| `diagnose_case` | 85 | 100% | 반환 사전 24줄이 출력 형식이다 |
+| `_parse_numbered` | 71 | 92% | 제목 단계별 분기가 있는 파서다. 6줄짜리 반복이 한 곳 있다 |
+| `build_index` | 70 | 70% | 이어하기 검사 분기를 테스트가 다 실행하지 않는다 |
+| `judge_pool` | 64 | 93% | 저장하는 채점 세부 항목이 출력 형식이다 |
+| `run_ingestion` | 61 | 86% | 단계마다 탈락 사유를 세는 일직선 코드다 |
 
 테스트가 덮지 않아 건드리지 않은 긴 함수 (11개): `judge_saved_answers` 159, `build_fanout_pool.main` 121, `probe_app_format.main` 112, `eval_chat_pipeline.verify` 104, `generate_sft_answers.main` 87, `compare_answers.main` 83, `sweep_fusion_weights.main` 78, `_report_versioned` 78, `build_sft_eval_contexts.main` 74, `judge_relevance.main` 61, `eval_golden_answers.generate` 60. 줄이려면 먼저 출력을 고정하는 테스트를 써야 한다.
 
