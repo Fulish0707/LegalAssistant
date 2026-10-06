@@ -70,8 +70,8 @@ app.config["QUOTA_IP_SALT"] = app.config["QUOTA_IP_SALT"] or secret_key
 def establish_anonymous_user():
     """Give every browser one opaque workspace id, carried in the signed cookie.
 
-    This is the only identity in the app: SQL rows, vector filters, the agent's
-    context and its checkpoint thread all key on it. Nothing submitted by the
+    This is the only identity in the app: SQL rows, vector filters and the
+    legal_rag conversation id all key on it. Nothing submitted by the
     client -- query string, JSON, headers, or the old account cookie keys --
     can pick a different owner.
     """
@@ -86,36 +86,6 @@ DB_FILE = os.getenv("APP_STATE_DB", "sqlite_db/app_state.db") # Define DB_FILE b
 db_dir = os.path.dirname(DB_FILE)
 if db_dir:
     os.makedirs(db_dir, exist_ok=True)
-
-# The agent's working state, kept deliberately apart from DB_FILE's chat_history
-# table. chat_history is the display record the UI renders; this is what the agent
-# actually reasons over between turns. Unifying them would mean the renderer and
-# the model share one schema, and they do not: the checkpointer stores tool calls,
-# tool results and structured-output messages the UI never shows.
-CHECKPOINT_DB_FILE = os.getenv("AGENT_CHECKPOINT_DB", "sqlite_db/checkpoints.db")
-checkpoint_db_dir = os.path.dirname(CHECKPOINT_DB_FILE)
-if checkpoint_db_dir:
-    os.makedirs(checkpoint_db_dir, exist_ok=True)
-
-
-def build_checkpointer():
-    """One long-lived SqliteSaver over one connection, shared by every request.
-
-    Not SqliteSaver.from_conn_string(): that is a context manager which closes the
-    connection on exit, which is right for a test and wrong for a process that must
-    keep it open. check_same_thread=False is not optional either -- Flask runs the
-    streaming generator on a different thread from the one that opens this
-    connection, and without it the first streamed request raises a thread-affinity
-    error from sqlite3.
-    """
-    from langgraph.checkpoint.sqlite import SqliteSaver
-
-    connection = sqlite3.connect(CHECKPOINT_DB_FILE, check_same_thread=False)
-    connection.execute("PRAGMA busy_timeout = 5000")
-    return SqliteSaver(connection)
-
-
-CHECKPOINTER = build_checkpointer()
 
 def ensure_database_schema(conn):
     cursor = conn.cursor()
@@ -341,7 +311,6 @@ def health():
     payload = {
         "status": "ok",
         "llm_configured": llm_available,
-        "agent_configured": llm_available,
         "llm_provider": None,
         "embedding_provider": None,
         "collection": None,
@@ -406,27 +375,11 @@ def get_initial_state():
     })
 
 
-def clear_agent_thread(user_id):
-    """Drop the agent's checkpointed thread when the display history is cleared.
-
-    These two stores are separate, but a user clearing their history means one
-    thing, not two: a user who clears the transcript and then finds the agent still
-    quoting it back would call that a bug, correctly. Failures here are logged and
-    swallowed -- clearing the record the user can see is this endpoint's job, and it
-    must not 500 because the checkpoint store is unhappy.
-    """
-    try:
-        CHECKPOINTER.delete_thread(user_id)
-    except Exception as error:
-        logging.warning(f"Could not clear the agent thread for {user_id}: {error}")
-
-
 @app.route('/clear_chat_history_endpoint', methods=['POST']) # Added specific endpoint name
 def clear_chat_history_endpoint():
     try:
         user_id = session["user_id"]
         clear_chat_history_in_db(user_id)
-        clear_agent_thread(user_id)
         session["conversation_epoch"] = session.get("conversation_epoch", 0) + 1
         return jsonify({"message": "Chat history cleared successfully."}), 200
     except Exception as e:
