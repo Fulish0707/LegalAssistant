@@ -3,7 +3,6 @@ import uuid
 from datetime import datetime, timezone
 
 from langchain_chroma import Chroma
-from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -47,39 +46,6 @@ def tracing_status():
     }
 
 
-def get_documents_dir():
-    return os.getenv("RAG_DOCUMENTS_DIR", "./documents")
-
-
-def load_rag_documents(source_folder):
-    supported_loaders = {
-        ".pdf": lambda path: PyPDFLoader(path).load(),
-        ".txt": lambda path: TextLoader(path, encoding="utf-8").load(),
-    }
-    loaded_documents = []
-    for root, _, files in os.walk(source_folder):
-        for filename in files:
-            extension = os.path.splitext(filename)[1].lower()
-            loader_factory = supported_loaders.get(extension)
-            if not loader_factory:
-                continue
-            file_path = os.path.join(root, filename)
-            try:
-                loaded_documents.extend(loader_factory(file_path))
-            except Exception as e:
-                print(f"Could not load RAG document {file_path}: {e}")
-    return loaded_documents
-
-def get_document_source_folder():
-    doc_folder = get_documents_dir()
-    if os.path.exists(doc_folder) and any(os.scandir(doc_folder)):
-        return doc_folder
-    legacy_doc_folder = "./doc_folder"
-    if os.path.exists(legacy_doc_folder) and any(os.scandir(legacy_doc_folder)):
-        print(f"No files found in {doc_folder}. Using legacy folder {legacy_doc_folder} for RAG ingestion.")
-        return legacy_doc_folder
-    return doc_folder
-
 def get_vector_store():
     """Build Chroma on demand with a collection scoped to the embedding model."""
     embedding_model = get_embedding_model()
@@ -90,51 +56,6 @@ def get_vector_store():
         persist_directory=get_persist_directory(),
         embedding_function=embedding_model,
     )
-
-
-def ingest_source_folder(user_id=None):
-    """Ingest ./documents into the provider-scoped collection.
-
-    Explicit by design: this used to run at import, which made the collection a
-    function of import order. Callers invoke it when they actually want ingestion.
-
-    user_id is what makes the result reachable. Every read path -- search,
-    status, the per-account retriever -- filters on user_id, so chunks ingested
-    without one are write-only: stored in Chroma and invisible to the app. The
-    old import-time block never stamped it either.
-
-    Not idempotent. The old block ran only when chroma_db/ was absent; calling
-    this twice ingests the same files twice.
-    """
-    vector_store = get_vector_store()
-    if vector_store is None:
-        return {"ok": False, "message": "Embedding model is not configured.", "chunk_count": 0}
-
-    doc_folder = get_documents_dir()
-    if not os.path.exists(doc_folder):
-        os.makedirs(doc_folder)
-        print(f"Created documents directory at {doc_folder}")
-
-    source_folder = get_document_source_folder()
-    documents = load_rag_documents(source_folder)
-    print(f"Loaded {len(documents)} documents from {source_folder}")
-    if not documents:
-        return {"ok": False, "message": f"No supported RAG documents found in {source_folder}.", "chunk_count": 0}
-
-    if user_id:
-        for document in documents:
-            document.metadata = {**(document.metadata or {}), "user_id": user_id}
-
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = text_splitter.split_documents(documents)
-    if not chunks:
-        return {"ok": False, "message": "Documents could not be split into chunks.", "chunk_count": 0}
-
-    vector_store.add_documents(chunks)
-    if hasattr(vector_store, "persist"):
-        vector_store.persist()
-    print(f"Ingested {len(chunks)} chunks into {get_collection_name()}")
-    return {"ok": True, "message": f"Ingested {len(chunks)} chunks.", "chunk_count": len(chunks)}
 
 
 def ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
@@ -281,20 +202,5 @@ def delete_knowledge_base_source(user_id, source):
         return {"ok": True, "deleted_count": len(ids)}
     except Exception as e:
         return {"ok": False, "message": f"Failed to delete source: {e}", "deleted_count": 0}
-
-def get_user_retriever(user_id):
-    """Build a retriever for one account without mutating process-global state."""
-    vector_store = get_vector_store()
-    if vector_store is None or not user_id:
-        return None
-    return vector_store.as_retriever(search_kwargs={"k": 3, "filter": {"user_id": user_id}})
-
-
-def retrieve_for_user(user_id, query, k=4):
-    """Similarity search scoped to one account. Seam for tests."""
-    store = get_vector_store()
-    if store is None or not user_id:
-        return []
-    return store.similarity_search(query, k=k, filter={"user_id": user_id})
 
 

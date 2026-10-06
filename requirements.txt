@@ -9,7 +9,6 @@ werkzeug==3.1.8
 bleach==6.2.0
 
 # LangChain 1.x stack — all resolve on langchain-core 1.6.1
-langchain-community==0.4.2
 langchain-chroma==1.1.0
 langchain-text-splitters==1.1.2
 langchain-core==1.6.1
