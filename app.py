@@ -15,7 +15,7 @@ from langchain_config import (
 )
 import logging
 
-from citation_guard import annotate_unsupported, named_citations, unsupported_citations
+from citation_guard import annotate_figures, annotate_unsupported, named_citations, unsupported_citations
 import legal_backend
 import sqlite3
 import json
@@ -281,7 +281,7 @@ def _generate_legal_response_stream(user_input):
             document_citations = [citation for d in documents for citation in named_citations(d["text"])]
             evidence_texts = [user_input, *document_citations] + legal_backend.evidence_texts(body)
             missing = unsupported_citations(chat_response, evidence_texts, own_clauses=[d["text"] for d in documents])
-            chat_response = annotate_unsupported(chat_response, missing)
+            chat_response = annotate_figures(annotate_unsupported(chat_response, missing))
         else:
             chat_response, sources, questions = GREETING_REPLY, [], []
 
