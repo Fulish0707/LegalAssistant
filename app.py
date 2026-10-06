@@ -456,29 +456,6 @@ def update_statement():
         logging.exception("Error updating personal statement in DB")
         return jsonify({"error": "Failed to update personal statement."}), 500
 
-@app.route('/get_similar_chats', methods=['POST']) # This seems more like a debug/utility endpoint
-def get_similar_chats_route(): # Renamed to avoid conflict with internal var
-    data = request.get_json(silent=True) or {}
-    query = data.get('query', '')
-    if not query:
-        return jsonify({"error": "No query provided"}), 400
-
-    user_id = session["user_id"]
-    conn = get_db()
-    c = conn.cursor()
-    # Example: find chats containing the query text, excluding very recent ones to avoid self-match
-    c.execute('''
-        SELECT role, content, timestamp
-        FROM chat_history
-        WHERE user_id=? AND content LIKE ? AND timestamp < datetime('now', '-5 seconds')
-        ORDER BY timestamp DESC
-        LIMIT 5
-    ''', (user_id, f'%{query}%'))
-    similar_chats = [{"role": row["role"], "content": row["content"], "timestamp": row["timestamp"]}
-                     for row in c.fetchall()]
-
-    return jsonify({"similar_chats": similar_chats})
-
 
 def clear_agent_thread(user_id):
     """Drop the agent's checkpointed thread when the display history is cleared.

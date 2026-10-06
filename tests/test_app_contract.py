@@ -236,22 +236,6 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(first.get("/get_initial_state").json["chat_history"], [{"role": "user", "content": "First chat"}])
         self.assertEqual(second.get("/get_initial_state").json["chat_history"], [{"role": "user", "content": "Second chat"}])
 
-    def test_similar_chats_only_search_the_callers_history(self):
-        first = self.app_module.app.test_client()
-        second = self.app_module.app.test_client()
-        first.post("/chat", json={"message": "needle in the first workspace"})
-        second.post("/chat", json={"message": "needle in the second workspace"})
-        # The route excludes rows younger than five seconds; backdate both.
-        with self.app_module.app.app_context():
-            connection = self.app_module.get_db()
-            connection.execute("UPDATE chat_history SET timestamp=datetime('now', '-1 hour') WHERE content LIKE 'needle%'")
-            connection.commit()
-
-        response = first.post("/get_similar_chats", json={"query": "needle"})
-
-        self.assertEqual(response.status_code, 200)
-        contents = [row["content"] for row in response.json["similar_chats"]]
-        self.assertEqual(contents, ["needle in the first workspace"])
 
     def test_clearing_one_history_leaves_the_other_untouched(self):
         first = self.app_module.app.test_client()
