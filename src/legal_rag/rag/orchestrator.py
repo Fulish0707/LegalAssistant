@@ -9,6 +9,7 @@ from legal_rag.config import Settings
 from legal_rag.llm import ChatModel
 from legal_rag.retrieval.hybrid import HybridRetriever, Retriever
 from legal_rag.schemas import ChatResponse, EvidenceBundle, LegalAnswer, QueryAnalysis, Turn, UserDocument, VerificationAction, VerificationReport
+from legal_rag.textutil.refs import extract_case_refs, extract_statute_refs
 from legal_rag.verification import VerificationPolicy, Verifier, backfill_citations
 
 from .analyzer import QueryAnalyzer
@@ -152,10 +153,15 @@ class Orchestrator:
         report: VerificationReport | None = None
         action = VerificationAction.accept
         feedback: str | None = None
-        # What the user's documents say counts as the user's own words, and a document is not a
-        # legal source: listing one under citations is dropped, not treated as a fabricated source.
+        # A document is not a legal source: listing one under citations is dropped, not treated as
+        # a fabricated source. An article it names with its law, or a case number, counts as the
+        # user's own words. Its bare 제4조 is the contract's own clause: the answer may point to
+        # it without a law, and it must not let any law's 제4조 through.
         document_ids = {f"D{number}" for number in range(1, len(user_documents) + 1)}
-        user_refs = [*analysis.statute_refs, *analysis.case_refs, *(document.text for document in user_documents)]
+        refs = [ref for document in user_documents for ref in extract_statute_refs(document.text)]
+        own_clauses = {ref.article for ref in refs if ref.law_name is None}
+        user_refs = [*analysis.statute_refs, *analysis.case_refs, *(ref.render() for ref in refs if ref.law_name),
+                     *(case for document in user_documents for case in extract_case_refs(document.text))]
         for attempt in range(self.settings.rag.max_regenerations + 1):
             try:
                 with recorder.stage(f"generate[{attempt}]"):
@@ -169,7 +175,7 @@ class Orchestrator:
             with recorder.stage(f"verify[{attempt}]"):
                 draft = draft.model_copy(update={"citations": [c for c in draft.citations if c.source_id not in document_ids]})
                 answer = backfill_citations(draft, bundle)
-                report = self.verifier.verify(answer, bundle, user_refs=user_refs)
+                report = self.verifier.verify(answer, bundle, user_refs=user_refs, own_clauses=own_clauses)
             action = self.policy.decide(report, attempt)
             if action != VerificationAction.regenerate:
                 break

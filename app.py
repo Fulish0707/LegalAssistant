@@ -15,7 +15,7 @@ from langchain_config import (
 )
 import logging
 
-from citation_guard import annotate_unsupported, unsupported_citations
+from citation_guard import annotate_unsupported, named_citations, unsupported_citations
 import legal_backend
 import sqlite3
 import json
@@ -215,15 +215,21 @@ def _legal_conversation_id():
     return f"{session['user_id']}-{session.get('conversation_epoch', 0)}"
 
 
-CASE_DOCUMENT_LIMIT = 3      # passages per turn; /v1/chat accepts no more
-CASE_DOCUMENT_CHARS = 1500   # what one legal evidence block carries (rag.max_evidence_chars)
+# Passages of the user's files sent with a turn. They share the answer model's 8,192-token
+# context with the legal evidence, which alone is 7,500 characters on 43 of 274 measured turns
+# (2026-10-06), so the passages are kept to about 1,100 tokens.
+CASE_DOCUMENT_LIMIT = 2
+CASE_DOCUMENT_CHARS = 700
+# One lease against eight questions (bge-m3, 2026-10-06): four about the lease scored 0.52,
+# 0.38, 0.34 and 0.17 (a short follow-up), four about other matters 0.21, 0.21, 0.14, 0.12.
+CASE_DOCUMENT_MIN_SCORE = 0.25
 
 
 def _case_documents(user_input):
     """Passages of this browser's uploaded files that are closest to the message."""
     found = search_knowledge_base(session["user_id"], user_input, k=CASE_DOCUMENT_LIMIT)
     return [{"name": hit["source"], "text": hit["quote"][:CASE_DOCUMENT_CHARS], "score": hit["score"]}
-            for hit in found.get("results", []) if hit.get("quote")]
+            for hit in found.get("results", []) if hit.get("quote") and hit["score"] >= CASE_DOCUMENT_MIN_SCORE]
 
 
 def _generate_legal_response_stream(user_input):
@@ -253,9 +259,12 @@ def _generate_legal_response_stream(user_input):
             chat_response, sources = legal_backend.render(body, documents)
             yield _sse({'type': 'thought', 'content': f'근거 {len(sources)}건 확인'})
             # Second check on the shown text, whatever the service's verifier decided. It reads
-            # the full evidence; the source cards carry only an excerpt.
-            evidence_texts = [user_input, *(d["text"] for d in documents)] + legal_backend.evidence_texts(body)
-            chat_response = annotate_unsupported(chat_response, unsupported_citations(chat_response, evidence_texts))
+            # the full evidence; the source cards carry only an excerpt. Of the user's documents it
+            # reads what they cite by name; their own clause numbers vouch only for a bare 제5조.
+            document_citations = [citation for d in documents for citation in named_citations(d["text"])]
+            evidence_texts = [user_input, *document_citations] + legal_backend.evidence_texts(body)
+            missing = unsupported_citations(chat_response, evidence_texts, own_clauses=[d["text"] for d in documents])
+            chat_response = annotate_unsupported(chat_response, missing)
         else:
             chat_response, sources = GREETING_REPLY, []
 

@@ -51,6 +51,18 @@ def test_an_article_written_in_the_document_is_not_a_fabricated_citation(retriev
     assert without.trace.policy_action != "accept"
 
 
+def test_a_contracts_own_clause_number_does_not_excuse_an_invented_article(retriever):
+    """A lease numbers its clauses 제1조, 제2조 ...; that must not let any law's 제4조 through."""
+    settings, r = retriever
+    lease = UserDocument(name="계약서.pdf", text="제4조 (계약의 갱신) 갱신하지 않으려면 2개월 전까지 알려야 한다.")
+    invented = _answer(analysis="주택임대차보호법 제4조에 따라 갱신을 거절할 수 있습니다. "
+                                "주택임대차보호법 제3조의3에 따라 임차권등기명령을 신청할 수 있습니다.")
+    response = _orchestrator(settings, r, _model(invented, invented)).handle(QUESTION, conversation_id="g", user_documents=[lease])
+    assert response.trace.policy_action != "accept"
+    assert "주택임대차보호법 제4조" in response.trace.verification.checked_statutes
+    assert "제4조에 따라 갱신" not in (response.answer.analysis if response.answer else "")
+
+
 def test_a_document_listed_as_a_citation_is_dropped_not_punished(retriever):
     settings, r = retriever
     base = _answer()
