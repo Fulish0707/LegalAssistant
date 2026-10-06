@@ -1,5 +1,7 @@
 # Project Integration Roadmap
 
+> **2026-10-06:** The LangGraph agent, its checkpointer and `evals/` described below were removed. Web chat now sends every turn to legal_rag `/v1/chat`. This page is kept as a record.
+
 This tracker records the integration status and implementation order for production readiness. Status reflects `main` plus the LangGraph agent migration on `feat/langgraph-rag-agent`, as of 2026-09-06.
 
 | Priority | Integration | Status | Next deliverable |
