@@ -23,11 +23,7 @@
   ${LC.matterList()}
   <div style="display:flex;flex-direction:column;gap:3px">
     <div style="padding:0 8px 7px;font-size:10px;letter-spacing:.16em;color:#9aa0a5">도구</div>
-    ${[{l:'내용증명 만들기', ic:'doc', act:'draftDoc'},{l:'계약서 검토', ic:'search', href:'documents.html'}].map(t =>
-      t.href
-        ? `<a class="lc-ghost" href="${t.href}" style="display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border-radius:10px;font-size:12.5px;color:#3d4348;text-decoration:none">${LC.icon(t.ic, 15, '#9aa0a5')}${esc(t.l)}</a>`
-        : `<button class="lc-ghost" data-act="${t.act}" style="display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:9px 10px;border:0;border-radius:10px;background:transparent;font-size:12.5px;color:#3d4348;cursor:pointer">${LC.icon(t.ic, 15, '#9aa0a5')}${esc(t.l)}</button>`
-    ).join('')}
+    <a class="lc-ghost" href="documents.html" style="display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border-radius:10px;font-size:12.5px;color:#3d4348;text-decoration:none">${LC.icon('search', 15, '#9aa0a5')}계약서 검토</a>
   </div>
   ${LC.helpCard()}
 </div>`;
@@ -198,7 +194,6 @@
       tone: k => { P.tone = k; },
       railTab: k => { P.railTab = k; },
       prompt: k => { P.draft = k; setTimeout(() => { const el = document.getElementById('userInput'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 0); },
-      draftDoc: () => { P.draft = '내용증명 초안을 만들어 주세요.'; },
       easier: () => { P.tone = '쉬운 말'; P.draft = '위 내용을 더 쉽게 설명해 주세요.'; },
       newCase: () => {
         if (sse) { sse.close(); sse = null; }
