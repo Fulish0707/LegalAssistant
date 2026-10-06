@@ -6,26 +6,20 @@ load_dotenv()
 
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context, g, session
 from langchain_config import (
-    AgentContext,
-    build_agent,
-    extract_agent_sections,
-    SECTION_FIELDS,
-    search_legal_evidence,
     ingest_text_to_vector_store,
     get_knowledge_base_status,
     clear_knowledge_base,
     search_knowledge_base,
     delete_knowledge_base_source,
-    build_run_config,
     tracing_status,
 )
 import logging
 
 from citation_guard import annotate_unsupported, unsupported_citations
+import legal_backend
 import sqlite3
 import json
 import re
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 import os
 import secrets
 from werkzeug.utils import secure_filename
@@ -262,254 +256,6 @@ def quota_exceeded_response(result: QuotaResult):
 
 
 # --- Text Cleaning Utility ---
-def clean_agent_output(text_content):
-    if not text_content:
-        return ""
-    
-    # Remove ANSI escape codes
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    cleaned_text = ansi_escape.sub('', text_content)
-
-    # Remove Markdown code blocks (```text``` or ```lang\ntext\n```)
-    # This regex looks for ``` followed by an optional language, then newline, then content, then newline, then ```
-    # Or ``` followed by content then ```
-    # It captures the content in between.
-    
-    # Pattern for ```lang\ncontent\n``` (multiline with language)
-    # and ```\ncontent\n``` (multiline without language)
-    multiline_code_block_pattern = re.compile(r"^```(?:[a-zA-Z]*)?\n(.*?)\n```$", re.DOTALL | re.MULTILINE)
-    
-    # Pattern for ```content``` (inline)
-    inline_code_block_pattern = re.compile(r"^```(.*?)```$", re.DOTALL | re.MULTILINE)
-
-    match = multiline_code_block_pattern.match(cleaned_text)
-    if match:
-        # For multiline blocks, we want the content inside
-        cleaned_text = match.group(1)
-    else:
-        # Check for inline blocks if multiline didn't match
-        match = inline_code_block_pattern.match(cleaned_text)
-        if match:
-            cleaned_text = match.group(1)
-            
-    return cleaned_text.strip()
-
-def parse_agent_output_sections(text_content):
-    """Split model output into user-facing chat and writing/report suggestions."""
-    section_names = [
-        "CHAT",
-        "STATEMENT_SUGGESTION",
-        "JOB_STATEMENT_SUGGESTION",
-        "REPORT_SUGGESTION",
-    ]
-    parsed = {name: "" for name in section_names}
-    if not text_content:
-        return {
-            "chat_response": "",
-            "statement_suggestion": "",
-            "job_statement_suggestion": "",
-            "report_suggestion": "",
-        }
-
-    section_pattern = re.compile(
-        r"\[(CHAT|STATEMENT_SUGGESTION|JOB_STATEMENT_SUGGESTION|REPORT_SUGGESTION)\]",
-        re.IGNORECASE,
-    )
-    matches = list(section_pattern.finditer(text_content))
-    if not matches:
-        return {
-            "chat_response": text_content.strip(),
-            "statement_suggestion": "",
-            "job_statement_suggestion": "",
-            "report_suggestion": "",
-        }
-
-    for index, match in enumerate(matches):
-        name = match.group(1).upper()
-        start = match.end()
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text_content)
-        parsed[name] = text_content[start:end].strip()
-
-    chat_response = parsed["CHAT"].strip()
-    if not chat_response:
-        chat_response = text_content[:matches[0].start()].strip()
-    if not chat_response:
-        chat_response = "I prepared suggestions for your document."
-
-    return {
-        "chat_response": chat_response,
-        "statement_suggestion": parsed["STATEMENT_SUGGESTION"].strip(),
-        "job_statement_suggestion": parsed["JOB_STATEMENT_SUGGESTION"].strip(),
-        "report_suggestion": parsed["REPORT_SUGGESTION"].strip(),
-    }
-
-# --- Streaming helpers ---
-
-DRAFT_CONTEXT_HEADER = "[Current Draft Context]"
-
-_THINK_OPEN = "<think>"
-_THINK_CLOSE = "</think>"
-
-
-def _message_text(content):
-    """Normalise a message's content to a plain string.
-
-    ChatOllama with reasoning enabled can hand back a list of content blocks
-    rather than a str; json.dumps-ing that straight to the browser arrives as
-    "[object Object]" because the frontend does `streamed += data.content`. Only
-    text blocks are visible answer; reasoning blocks are dropped here.
-    """
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("type") == "text":
-                parts.append(block.get("text") or "")
-        return "".join(parts)
-    return ""
-
-
-def _tail_prefix_length(text, tag):
-    """Length of the longest suffix of text that is a proper prefix of tag."""
-    for size in range(min(len(text), len(tag) - 1), 0, -1):
-        if text.endswith(tag[:size]):
-            return size
-    return 0
-
-
-_SECTION_LABEL = re.compile(r'\**"?(' + "|".join(SECTION_FIELDS) + r')"?\**\s*:')
-
-
-def _could_become_section_label(text):
-    """True while text is still a prefix of a `key:` label, so the gate must wait."""
-    core = text.lstrip('*"')
-    for key in SECTION_FIELDS:
-        if key.startswith(core):
-            return True
-        if core.startswith(key) and re.fullmatch(r'"?\**\s*', core[len(key):]):
-            return True
-    return False
-
-
-class _AnswerTokenFilter:
-    """Decide once, per model call, whether a message stream is visible answer.
-
-    Two things must never reach the browser as answer tokens. Reasoning, which
-    some models emit inline as <think>...</think>, is stripped wherever it appears.
-    Schema JSON can appear in message content instead of a structured tool call;
-    its field names and delimiters must not reach users as answer tokens.
-
-    The gate is deliberately decide-once rather than an incremental JSON parser.
-    The frontend overwrites the streamed text with final_response.chat_response
-    anyway, so a partial-JSON extractor would buy progressive reveal at the cost
-    of a new class of leak (escapes, keys split across chunks, braces inside a
-    value). Here the first non-whitespace character settles it: `{` or a code
-    fence means structured output, and nothing from that message is streamed.
-    The sections still arrive, once, in final_response.
-    """
-
-    def __init__(self):
-        self._pending = ""
-        self._in_think = False
-        self._decided = False
-        self._suppressed = False
-        self._head = ""
-
-    def feed(self, text):
-        if not text:
-            return ""
-        self._pending += text
-        visible = []
-        while self._pending:
-            if self._in_think:
-                index = self._pending.find(_THINK_CLOSE)
-                if index == -1:
-                    keep = _tail_prefix_length(self._pending, _THINK_CLOSE)
-                    self._pending = self._pending[len(self._pending) - keep:] if keep else ""
-                    break
-                self._pending = self._pending[index + len(_THINK_CLOSE):]
-                self._in_think = False
-                continue
-            index = self._pending.find(_THINK_OPEN)
-            if index == -1:
-                keep = _tail_prefix_length(self._pending, _THINK_OPEN)
-                cut = len(self._pending) - keep
-                if cut:
-                    visible.append(self._pending[:cut])
-                self._pending = self._pending[cut:]
-                break
-            visible.append(self._pending[:index])
-            self._pending = self._pending[index + len(_THINK_OPEN):]
-            self._in_think = True
-        return self._gate("".join(visible))
-
-    def flush(self):
-        """Emit whatever was held back waiting on a possible tag or label boundary."""
-        if self._in_think:
-            self._pending = ""
-            return ""
-        remainder, self._pending = self._pending, ""
-        emitted = self._gate(remainder)
-        if not self._decided and not self._suppressed and self._head:
-            # The message ended while still looking like the start of a label.
-            emitted, self._head = emitted + self._head, ""
-        return emitted
-
-    def _gate(self, text):
-        if self._suppressed or not text:
-            return ""
-        if self._decided:
-            return text
-        self._head += text
-        stripped = self._head.lstrip()
-        if not stripped:
-            return ""
-        if stripped[0] in "{`" or _SECTION_LABEL.match(stripped):
-            self._suppressed = True
-            self._head = ""
-            return ""
-        if _could_become_section_label(stripped):
-            return ""
-        self._decided = True
-        emitted, self._head = self._head, ""
-        return emitted
-
-
-def _tool_activity(node, update):
-    """One short trace line per tool result, mirroring the old on_tool_end.
-
-    The frontend shows only the newest trace line while a turn is in flight, and
-    the surrounding UI is Korean, so these are written for a reader rather than
-    emitted as raw node names.
-    """
-    lines = []
-    messages = (update or {}).get("messages") if isinstance(update, dict) else None
-    for message in messages or []:
-        if not isinstance(message, ToolMessage):
-            continue
-        output = clean_agent_output(_message_text(message.content))
-        if len(output) > 200:
-            output = output[:200] + "..."
-        name = getattr(message, "name", None) or "tool"
-        lines.append(f"도구 결과 ({name}): {output}" if output else f"도구 실행: {name}")
-    if lines:
-        return lines
-    return ["답변 생성 중" if node == "model" else f"단계: {node}"]
-
-
-def _tool_sources(update):
-    """Structured retrieval hits a tool attached to its ToolMessage.artifact."""
-    sources = []
-    messages = (update or {}).get("messages") if isinstance(update, dict) else None
-    for message in messages or []:
-        if isinstance(message, ToolMessage) and isinstance(message.artifact, list):
-            sources.extend(hit for hit in message.artifact if isinstance(hit, dict))
-    return sources
-
-
 _SMALL_TALK = re.compile(r"^(?:안녕|반가|고마|감사|수고|ㅎㅇ|hi|hello|thanks?|thank you|bye)", re.IGNORECASE)
 
 
@@ -521,66 +267,37 @@ def _needs_legal_search(text):
     return not (_SMALL_TALK.match(stripped) and len(stripped) <= 20)
 
 
-def _draft_is_already_in_thread(agent, run_config, draft):
-    """True when the thread's last user turn already carried this exact draft.
-
-    The draft used to be appended to every user message. That was harmless while
-    turns were stateless, but the thread is persisted now, so turn N carried N
-    copies of the draft into the model's context window. The fix keeps the draft in
-    the message (the model needs it inline; the system prompt is static and the
-    typed context is not interpolated into it) but sends it only when it changed.
-
-    The thread itself is the source of truth, not a process-local cache: multiple
-    workers would each hold a different one. A workspace whose thread has no
-    state yet (its first turn) always gets the draft.
-    """
-    if not draft:
-        return True
-    if "thread_id" not in (run_config.get("configurable") or {}):
-        return False
-    try:
-        state = agent.get_state(run_config)
-    except Exception:
-        logging.debug("Could not read thread state for draft de-duplication", exc_info=True)
-        return False
-    messages = (getattr(state, "values", None) or {}).get("messages") or []
-    # Scan back to the most recent turn that actually carried a draft, not merely
-    # the most recent user turn: once a draft is skipped, the latest user message
-    # has no draft in it, and comparing against that would re-send on every other
-    # turn -- half-rate accumulation is still accumulation.
-    for message in reversed(messages):
-        if isinstance(message, HumanMessage):
-            content = _message_text(message.content)
-            if DRAFT_CONTEXT_HEADER in content:
-                carried = content.split(DRAFT_CONTEXT_HEADER, 1)[1].strip()
-                return carried == draft.strip()
-    return False
-
-
 def _sse(payload):
     return f"data: {json.dumps(payload)}\n\n"
 
 
 # --- Flask Routes ---
 
-def _generate_agent_response_stream(user_input, current_personal_statement_draft):
-    """Stream a chat turn as SSE events from the LangGraph agent's own stream.
+GREETING_REPLY = "안녕하세요. 법률 관련 궁금한 점을 구체적으로 적어 주시면 법령과 판례를 찾아 안내해 드리겠습니다."
+LEGAL_BACKEND_UNSET = "법률 답변 서비스가 설정되지 않았습니다. LEGAL_RAG_URL을 설정한 뒤 다시 시작하세요."
+LEGAL_BACKEND_DOWN = "법률 답변 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."
 
-    The old producer pushed AgentExecutor callbacks (on_agent_action,
-    on_tool_end, on_agent_finish) into a queue. Those callbacks never fire under
-    create_agent, and the drain loop also broke on the first on_llm_end, which in
-    a tool loop discarded the final turn. Iterating agent.stream() to exhaustion
-    replaces both.
+
+def _legal_conversation_id():
+    """The browser's workspace id plus an epoch that clearing the chat advances.
+
+    legal_rag keeps recent turns per conversation id and has no call to forget them,
+    so a cleared chat continues under a new id instead.
+    """
+    return f"{session['user_id']}-{session.get('conversation_epoch', 0)}"
+
+
+def _generate_legal_response_stream(user_input):
+    """Stream a chat turn as SSE events; legal_rag's /v1/chat writes the answer.
+
+    The service retrieves, generates and verifies, so the reply arrives whole and
+    there are no token chunks. There is no fallback to a local model: an answer that
+    skipped verification must not look like one that passed it.
     """
     try:
-        # thread_id is the browser's own workspace id and nothing else: the same
-        # opaque session token that owns its SQL rows and vector chunks. Two
-        # browsers therefore cannot land in one thread, and one browser always
-        # returns to its own.
-        thread_user_id = session["user_id"]
-        agent = build_agent(thread_user_id, checkpointer=CHECKPOINTER)
-        if agent is None:
-            yield _sse({'type': 'error', 'content': 'AI chat is not configured. Set LLM_PROVIDER and start Ollama, then restart the app.'})
+        legal_rag_url = os.getenv("LEGAL_RAG_URL", "").strip()
+        if not legal_rag_url:
+            yield _sse({'type': 'error', 'content': LEGAL_BACKEND_UNSET})
             return
 
         quota_result = reserve_ai_request()
@@ -588,112 +305,34 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
             yield _sse({'type': 'error', 'content': 'Daily AI request quota exceeded.', 'error': 'daily_ai_quota_exceeded', 'limit': quota_result.limit})
             return
 
-        # Metadata and tags ride on the runnable config, which is how LangChain
-        # gets them onto the LangSmith run, and configurable.thread_id is what
-        # the checkpointer keys on.
-        run_config = build_run_config(thread_user_id)
+        if _needs_legal_search(user_input):
+            yield _sse({'type': 'thought', 'content': '법령·판례 검색 및 답변 작성 중'})
+            body = legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id())
+            chat_response, sources = legal_backend.render(body)
+            yield _sse({'type': 'thought', 'content': f'근거 {len(sources)}건 확인'})
+            # Second check on the shown text, whatever the service's verifier decided. It reads
+            # the full evidence; the source cards carry only an excerpt.
+            evidence_texts = [user_input] + legal_backend.evidence_texts(body)
+            chat_response = annotate_unsupported(chat_response, unsupported_citations(chat_response, evidence_texts))
+        else:
+            chat_response, sources = GREETING_REPLY, []
 
-        # Only the new turn goes in. The checkpointer replays the thread's earlier
-        # messages, so passing history here as well would duplicate every turn.
-        agent_prompt = user_input
-        if current_personal_statement_draft and not _draft_is_already_in_thread(
-            agent, run_config, current_personal_statement_draft
-        ):
-            agent_prompt += f"\n\n{DRAFT_CONTEXT_HEADER}\n{current_personal_statement_draft}"
-
-        final_state = None
-        sources = []
-        # Search statutes and case law before the model runs. Left to the model,
-        # qwen3:4b skipped the search and invented a deadline (2026-09-27).
-        legal_evidence = ""
-        legal_rag_url = os.getenv("LEGAL_RAG_URL", "").strip()
-        if legal_rag_url and _needs_legal_search(user_input):
-            yield _sse({'type': 'thought', 'content': '법령·판례 검색 중'})
-            legal_evidence, hits = search_legal_evidence(legal_rag_url, user_input)
-            sources.extend(hits)
-            yield _sse({'type': 'thought', 'content': f'법령·판례 {len(hits)}건 확인'})
-        filters = {}
-        buffer = ""
-        for mode, chunk in agent.stream(
-            {"messages": [("user", agent_prompt)]},
-            run_config,
-            context=AgentContext(user_id=thread_user_id, legal_evidence=legal_evidence),
-            stream_mode=["messages", "updates", "values"],
-        ):
-            if mode == "messages":
-                message = chunk[0] if isinstance(chunk, tuple) else chunk
-                # ToolMessages ride this same channel; RAG hits are trace, not answer.
-                if not isinstance(message, AIMessage):
-                    if isinstance(message, ToolMessage):
-                        # A tool result always separates two model calls, so it is a
-                        # safe place to retire the per-call filters. Verified that
-                        # ChatOllama gives each call a distinct chunk id, but this
-                        # keeps the id-less fallback key from being shared across
-                        # calls, which would let prose in call 1 open the gate for
-                        # the schema JSON in call 2.
-                        for retired in filters.values():
-                            buffer += retired.flush()
-                        filters.clear()
-                    continue
-                key = getattr(message, "id", None) or "default"
-                token_filter = filters.get(key)
-                if token_filter is None:
-                    token_filter = filters[key] = _AnswerTokenFilter()
-                visible = token_filter.feed(_message_text(getattr(message, "content", "")))
-                if visible:
-                    buffer += visible
-                    if len(buffer) >= 20 or any(p in visible for p in ('.', '!', '?', '\n', ' ')):
-                        yield _sse({'type': 'token_chunk', 'content': buffer})
-                        buffer = ""
-            elif mode == "updates":
-                for node, update in (chunk or {}).items():
-                    sources.extend(_tool_sources(update))
-                    for line in _tool_activity(node, update):
-                        yield _sse({'type': 'thought', 'content': line})
-            elif mode == "values":
-                final_state = chunk
-
-        for token_filter in filters.values():
-            buffer += token_filter.flush()
-        if buffer:
-            yield _sse({'type': 'token_chunk', 'content': buffer})
-
-        # Preferred route: the schema-enforced sections, from structured_response
-        # or from JSON in the final message content. Falls back
-        # to the legacy [CHAT] marker parser when neither is available.
-        parsed_sections = extract_agent_sections(final_state)
-        if parsed_sections is None:
-            messages = (final_state or {}).get("messages") or []
-            agent_output_string = getattr(messages[-1], "content", "") if messages else ""
-            cleaned_agent_output_string = clean_agent_output(_message_text(agent_output_string))
-            parsed_sections = parse_agent_output_sections(cleaned_agent_output_string)
-            if not agent_output_string:
-                print(f"Warning: Agent returned no final message. Full response object: {final_state}")
-            elif not cleaned_agent_output_string:
-                print(f"Warning: Agent output became empty after cleaning. Original: '{agent_output_string}'")
-        parsed_chat_response = parsed_sections["chat_response"] if parsed_sections["chat_response"] else "Sorry, I couldn't generate a response."
-        # Citations the evidence does not back get a visible notice, whatever the model did.
-        evidence_texts = [legal_evidence, user_input, current_personal_statement_draft]
-        evidence_texts += [f"{hit.get('source', '')} {hit.get('quote', '')}" for hit in sources]
-        parsed_chat_response = annotate_unsupported(
-            parsed_chat_response, unsupported_citations(parsed_chat_response, evidence_texts)
-        )
-
-        add_chat_message_to_db(thread_user_id, "assistant", parsed_chat_response)
-
-        final_data = {
+        add_chat_message_to_db(session["user_id"], "assistant", chat_response)
+        yield _sse({
             "type": "final_response",
-            "chat_response": parsed_chat_response,
-            "statement_suggestion": parsed_sections["statement_suggestion"],
-            "job_statement_suggestion": parsed_sections["job_statement_suggestion"],
-            "report_suggestion": parsed_sections["report_suggestion"],
+            "chat_response": chat_response,
+            "statement_suggestion": "",
+            "job_statement_suggestion": "",
+            "report_suggestion": "",
             "sources": sources,
-            "current_draft_processed": current_personal_statement_draft
-        }
-        yield _sse(final_data)
+        })
 
-    except Exception as e:
-        logging.exception("Error during AI processing stream (_generate_agent_response_stream)")
+    except legal_backend.LegalBackendUnavailable:
+        logging.exception("legal_rag /v1/chat is unavailable")
+        add_chat_message_to_db(session["user_id"], "assistant", LEGAL_BACKEND_DOWN)
+        yield _sse({'type': 'error', 'content': LEGAL_BACKEND_DOWN})
+    except Exception:
+        logging.exception("Error during AI processing stream (_generate_legal_response_stream)")
         error_response_content = "An error occurred while processing your request. Please check server logs."
         add_chat_message_to_db(session["user_id"], "assistant", error_response_content)
         yield _sse({'type': 'error', 'content': error_response_content})
@@ -786,7 +425,6 @@ def chat():
     elif request.method == 'GET':
         # For SSE, data comes from query parameters
         user_input = request.args.get('message')
-        current_personal_statement_draft = request.args.get('personal_statement_draft', '')
 
         if not user_input:
             # SSE requires a specific format for errors if connection is established
@@ -800,7 +438,7 @@ def chat():
         # If GET is called without a preceding POST, this could lead to inconsistencies
         # in chat history if not handled carefully. The current frontend flow (POST then GET) is assumed.
 
-        return Response(stream_with_context(_generate_agent_response_stream(user_input, current_personal_statement_draft)), mimetype='text/event-stream')
+        return Response(stream_with_context(_generate_legal_response_stream(user_input)), mimetype='text/event-stream')
 
     # Fallback to satisfy type checkers: ensure the route always returns a valid response
     return jsonify({"error": "Invalid request method."}), 405
@@ -872,6 +510,7 @@ def clear_chat_history_endpoint():
         user_id = session["user_id"]
         clear_chat_history_in_db(user_id)
         clear_agent_thread(user_id)
+        session["conversation_epoch"] = session.get("conversation_epoch", 0) + 1
         return jsonify({"message": "Chat history cleared successfully."}), 200
     except Exception as e:
         logging.error(f"Error clearing chat history: {e}")
@@ -908,14 +547,6 @@ def delete_knowledge_base_source_route():
     result = delete_knowledge_base_source(session["user_id"], source)
     return jsonify(result), 200 if result.get("ok") else 500
 
-
-def application_setup():
-    """Encapsulates setup that should happen in the worker process."""
-    print("--- Worker Process Setup ---")
-    print("Initializing DB...")
-    init_db()
-    # Add any other one-time initializations for the worker here
-    print("--- Worker Process Setup Complete ---")
 
 #################################################
 # --- File Upload Configuration (for OCR) --- #

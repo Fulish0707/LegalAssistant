@@ -17,7 +17,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from quota import guest_ip_identity, reserve_daily_quota
 
@@ -71,6 +71,7 @@ class AppContractTests(unittest.TestCase):
         "LLM_PROVIDER",
         "EMBEDDING_PROVIDER",
         "LANGSMITH_TRACING",
+        "DAILY_AI_REQUEST_LIMIT",
     )
 
     @classmethod
@@ -91,6 +92,8 @@ class AppContractTests(unittest.TestCase):
         os.environ["LLM_PROVIDER"] = "none"
         os.environ["EMBEDDING_PROVIDER"] = "none"
         os.environ["LANGSMITH_TRACING"] = "false"
+        # The quota tests exhaust 20 requests; .env may set another limit.
+        os.environ["DAILY_AI_REQUEST_LIMIT"] = "20"
 
         for module_name in cls.MODULE_NAMES:
             sys.modules.pop(module_name, None)
@@ -292,19 +295,28 @@ class AppContractTests(unittest.TestCase):
 
     # --- chat streaming and quota -----------------------------------------
 
-    def test_chat_sse_reports_missing_ai_configuration(self):
-        response = self.client.get("/chat?message=hello")
-        body = response.data.decode("utf-8")
+    def backend(self, ask):
+        """/chat with legal_rag configured and its call replaced by `ask`."""
+        return patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
+            patch.object(self.app_module.legal_backend, "ask", ask)
+
+    def test_chat_sse_reports_a_missing_legal_backend(self):
+        with patch.dict(os.environ, {"LEGAL_RAG_URL": ""}):
+            response = self.client.get("/chat?message=hello")
+        body = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("AI chat is not configured", body)
+        self.assertIn("LEGAL_RAG_URL", body)
         self.assertIn("stream_end", body)
 
-    def test_chat_sse_reports_quota_exhaustion_without_invoking_the_agent(self):
+    def test_chat_sse_reports_quota_exhaustion_without_calling_the_backend(self):
         self.exhaust_ip_quota("127.0.0.1")
-        with patch.object(self.app_module, "build_agent", lambda user_id, checkpointer=None: object()):
+        ask = Mock(return_value={"kind": "rejected"})
+        env, stub = self.backend(ask)
+        with env, stub:
             response = self.app_module.app.test_client().get("/chat?message=hello")
 
+        ask.assert_not_called()
         self.assertEqual(response.status_code, 200)
         self.assertIn("daily_ai_quota_exceeded", response.get_data(as_text=True))
         self.assertIn("stream_end", response.get_data(as_text=True))
@@ -312,31 +324,27 @@ class AppContractTests(unittest.TestCase):
     def test_quota_is_shared_per_ip_and_survives_a_cleared_cookie(self):
         shared_ip, other_ip = "203.0.113.10", "203.0.113.11"
         self.exhaust_ip_quota(shared_ip, count=19)
-        agent_calls = []
-
-        class CountingAgent:
-            def stream(self, payload, config=None, **kwargs):
-                agent_calls.append(config["configurable"]["thread_id"])
-                yield "values", {"messages": []}
-
-            def get_state(self, config):
-                raise ValueError("no state")
+        ask = Mock(return_value={"kind": "rejected"})
 
         first = self.app_module.app.test_client()
         second = self.app_module.app.test_client()
         third = self.app_module.app.test_client()
-        with patch.object(self.app_module, "build_agent", lambda user_id, checkpointer=None: CountingAgent()):
-            first_body = first.get("/chat?message=hello", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
-            second_body = second.get("/chat?message=hello", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
-            third_body = third.get("/chat?message=hello", environ_base={"REMOTE_ADDR": other_ip}).get_data(as_text=True)
+        env, stub = self.backend(ask)
+        with env, stub:
+            first_body = first.get("/chat?message=보증금 문의", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
+            second_body = second.get("/chat?message=보증금 문의", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
+            third_body = third.get("/chat?message=보증금 문의", environ_base={"REMOTE_ADDR": other_ip}).get_data(as_text=True)
             cleared = self.app_module.app.test_client()
-            cleared_body = cleared.get("/chat?message=hello", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
+            cleared_body = cleared.get("/chat?message=보증금 문의", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
 
         self.assertNotIn("daily_ai_quota_exceeded", first_body)
         self.assertIn("daily_ai_quota_exceeded", second_body)
         self.assertNotIn("daily_ai_quota_exceeded", third_body)
         self.assertIn("daily_ai_quota_exceeded", cleared_body)
-        self.assertEqual(agent_calls, [self.session_user_id(first), self.session_user_id(third)])
+        conversations = [call.args[2] for call in ask.call_args_list]
+        self.assertEqual(len(conversations), 2)
+        self.assertTrue(conversations[0].startswith(self.session_user_id(first)))
+        self.assertTrue(conversations[1].startswith(self.session_user_id(third)))
         self.assertNotEqual(self.session_user_id(cleared), self.session_user_id(first))
 
     def test_guest_quota_identity_ignores_forwarded_for_headers(self):

@@ -1,8 +1,8 @@
 """SSE contract tests for /chat.
 
-The subject here is the event contract static/lc-chat.js consumes, not model
-output: every test patches build_agent with a stub whose .stream() yields fixed
-LangGraph chunks. A real agent would run live inference on every suite run.
+The subject here is the event contract static/lc-chat.js consumes, not answer
+quality: every test stubs legal_backend.ask, the call to legal_rag's /v1/chat.
+A real call would need the service, its indexes and a model.
 """
 
 import importlib
@@ -12,8 +12,6 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
-
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 
 
 # Exactly the set static/lc-chat.js branches on (sendMessage, sse.onmessage).
@@ -25,41 +23,20 @@ FRONTEND_EVENT_TYPES = {
     "stream_end",
 }
 
-SCHEMA_JSON = json.dumps(
-    {
-        "chat_response": "보증금은 돌려받을 수 있습니다.",
-        "statement_suggestion": "",
-        "job_statement_suggestion": "",
-        "report_suggestion": "",
-    },
-    ensure_ascii=False,
-)
+
+def backend_answer(summary="보증금은 돌려받을 수 있습니다.", analysis="", items=()):
+    """A /v1/chat body of kind "answer"."""
+    return {
+        "kind": "answer",
+        "answer": {"summary": summary, "analysis": analysis, "possible_actions": [],
+                   "additional_information_needed": [], "uncertainty": "", "confidence": "medium"},
+        "evidence": {"items": list(items)},
+    }
 
 
-class StubAgent:
-    """Stands in for a compiled LangGraph agent."""
-
-    def __init__(self, events, state_messages=None):
-        self._events = events
-        self._state_messages = state_messages
-        self.stream_calls = []
-
-    def stream(self, payload, config=None, **kwargs):
-        self.stream_calls.append((payload, config, kwargs))
-        yield from self._events
-
-    def get_state(self, config):
-        if self._state_messages is None:
-            raise ValueError("No checkpointer set")
-        return mock.Mock(values={"messages": self._state_messages})
-
-
-def ai_chunks(text, message_id="run-1"):
-    """One ("messages", ...) event per character-run, as the model streams."""
-    return [
-        ("messages", (AIMessageChunk(content=piece, id=message_id), {}))
-        for piece in text
-    ]
+STATUTE_ITEM = {"source_id": "S1", "document_type": "statute", "score": 0.9,
+                "header": {"Type": "Statute", "Law": "주택임대차보호법", "Article": "제3조"},
+                "text": "임차인은 보증금의 반환을 청구할 수 있다."}
 
 
 class ChatStreamBase(unittest.TestCase):
@@ -101,8 +78,15 @@ class ChatStreamBase(unittest.TestCase):
         with self.client.session_transaction() as flask_session:
             flask_session["user_id"] = user_id
 
-    def collect(self, agent, query="message=hello"):
-        with mock.patch.object(self.app_module, "build_agent", return_value=agent):
+    def collect(self, backend=None, query="message=보증금 문의", url="http://legal:8000"):
+        """Stream one turn; `backend` is a /v1/chat body, an exception to raise, or a Mock."""
+        ask = backend if isinstance(backend, mock.Mock) else mock.Mock(
+            side_effect=backend if isinstance(backend, Exception) else None,
+            return_value=backend_answer() if backend is None else backend,
+        )
+        self.ask = ask
+        with mock.patch.dict(os.environ, {"LEGAL_RAG_URL": url}), \
+                mock.patch.object(self.app_module.legal_backend, "ask", ask):
             response = self.client.get("/chat?" + query)
             body = response.get_data(as_text=True)
         return [
@@ -111,139 +95,78 @@ class ChatStreamBase(unittest.TestCase):
             if line.startswith("data: ")
         ]
 
+    def final(self, events):
+        return [e for e in events if e["type"] == "final_response"][0]
+
 
 class ChatStreamingTests(ChatStreamBase):
     def test_stream_emits_known_event_types_and_terminates(self):
-        agent = StubAgent(
-            ai_chunks("Hello there.")
-            + [("values", {"messages": [AIMessage(content=SCHEMA_JSON)]})]
-        )
-        events = self.collect(agent)
+        events = self.collect()
 
-        self.assertTrue(events)
         for event in events:
             self.assertIn(event["type"], FRONTEND_EVENT_TYPES)
-        self.assertEqual(events[-1]["type"], "stream_end")
+        self.assertEqual(events[0]["type"], "thought")
         self.assertEqual(events[-2]["type"], "final_response")
-
-    def test_final_response_carries_the_four_sections(self):
-        agent = StubAgent(
-            [("values", {"messages": [AIMessage(content=SCHEMA_JSON)]})]
-        )
-        final = [e for e in self.collect(agent) if e["type"] == "final_response"][0]
-
-        self.assertEqual(final["chat_response"], "보증금은 돌려받을 수 있습니다.")
-        for field in ("statement_suggestion", "job_statement_suggestion", "report_suggestion"):
-            self.assertIn(field, final)
-
-    def test_schema_json_never_leaks_into_token_chunks(self):
-        """qwen3:4b writes the schema JSON as the final message content."""
-        agent = StubAgent(
-            ai_chunks(SCHEMA_JSON)
-            + [("values", {"messages": [AIMessage(content=SCHEMA_JSON)]})]
-        )
-        events = self.collect(agent)
-
-        streamed = "".join(e["content"] for e in events if e["type"] == "token_chunk")
-        self.assertNotIn("job_statement_suggestion", streamed)
-        self.assertNotIn("chat_response", streamed)
-        self.assertNotIn("{", streamed)
-        final = [e for e in events if e["type"] == "final_response"][0]
-        self.assertEqual(final["chat_response"], "보증금은 돌려받을 수 있습니다.")
-
-    def test_reasoning_blocks_are_not_streamed_as_answer_tokens(self):
-        agent = StubAgent(
-            ai_chunks("<think>먼저 검색한다</think>답변입니다.")
-            + [("values", {"messages": [AIMessage(content='{"chat_response": "답변입니다."}')]})]
-        )
-        streamed = "".join(
-            e["content"] for e in self.collect(agent) if e["type"] == "token_chunk"
-        )
-        self.assertNotIn("먼저 검색한다", streamed)
-        self.assertNotIn("<think>", streamed)
-        self.assertEqual(streamed.strip(), "답변입니다.")
-
-    def test_tool_messages_do_not_stream_as_answer_tokens(self):
-        agent = StubAgent(
-            [("messages", (ToolMessage(content="RAG hit: 임대차보호법 제3조", tool_call_id="t1"), {}))]
-            + ai_chunks("정리하면 이렇습니다.")
-            + [("values", {"messages": [AIMessage(content="정리하면 이렇습니다.")]})]
-        )
-        events = self.collect(agent)
-        streamed = "".join(e["content"] for e in events if e["type"] == "token_chunk")
-
-        self.assertNotIn("RAG hit", streamed)
-        self.assertEqual(streamed.strip(), "정리하면 이렇습니다.")
-
-    def test_tool_loop_does_not_truncate_the_final_turn(self):
-        """on_llm_end used to break the drain loop after the first model call."""
-        agent = StubAgent(
-            ai_chunks("먼저 찾아보겠습니다. ", message_id="run-1")
-            + [("updates", {"tools": {"messages": [ToolMessage(content="근거", tool_call_id="t1")]}})]
-            + ai_chunks("최종 답변입니다.", message_id="run-2")
-            + [("values", {"messages": [AIMessage(content="최종 답변입니다.")]})]
-        )
-        events = self.collect(agent)
-        streamed = "".join(e["content"] for e in events if e["type"] == "token_chunk")
-
-        self.assertIn("최종 답변입니다.", streamed)
-        self.assertTrue([e for e in events if e["type"] == "thought"])
-
-    def test_final_response_carries_the_evidence_the_tools_returned(self):
-        """The evidence rail renders only what retrieval actually handed the model."""
-        hit = {"source": "계약서.pdf", "quote": "만료일로부터 14일 내 반환"}
-        agent = StubAgent(
-            [("updates", {"tools": {"messages": [
-                ToolMessage(content="[source: 계약서.pdf]\n만료일로부터 14일 내 반환",
-                            tool_call_id="t1", artifact=[hit])
-            ]}})]
-            + [("values", {"messages": [AIMessage(content=SCHEMA_JSON)]})]
-        )
-        final = [e for e in self.collect(agent) if e["type"] == "final_response"][0]
-
-        self.assertEqual(final["sources"], [hit])
-
-    def test_answer_without_retrieval_has_no_evidence(self):
-        agent = StubAgent(
-            [("updates", {"tools": {"messages": [ToolMessage(content="근거", tool_call_id="t1")]}})]
-            + [("values", {"messages": [AIMessage(content=SCHEMA_JSON)]})]
-        )
-        final = [e for e in self.collect(agent) if e["type"] == "final_response"][0]
-
-        self.assertEqual(final["sources"], [])
-
-    def test_labelled_output_is_split_into_sections_not_leaked(self):
-        labelled = (
-            'chat_response: "임차권등기명령을 신청하세요."\n\n'
-            'statement_suggestion: "신청서 초안\n- [성명]"\n\n'
-            'job_statement_suggestion: ""'
-        )
-        agent = StubAgent(
-            ai_chunks(labelled)
-            + [("values", {"messages": [AIMessage(content=labelled)]})]
-        )
-        events = self.collect(agent)
-        streamed = "".join(e["content"] for e in events if e["type"] == "token_chunk")
-        final = [e for e in events if e["type"] == "final_response"][0]
-
-        self.assertNotIn("chat_response", streamed)
-        self.assertEqual(final["chat_response"], "임차권등기명령을 신청하세요.")
-        self.assertEqual(final["statement_suggestion"], "신청서 초안\n- [성명]")
-        self.assertEqual(final["job_statement_suggestion"], "")
-
-    def test_stream_is_threaded_on_the_browsers_workspace_and_terminates(self):
-        agent = StubAgent(
-            ai_chunks("안녕하세요.")
-            + [("values", {"messages": [AIMessage(content="안녕하세요.")]})]
-        )
-        events = self.collect(agent)
-
         self.assertEqual(events[-1]["type"], "stream_end")
-        _payload, config, kwargs = agent.stream_calls[0]
+
+    def test_final_response_carries_the_answer_and_empty_suggestions(self):
+        final = self.final(self.collect(backend_answer("요약입니다.", "분석입니다.")))
+
+        self.assertEqual(final["chat_response"], "요약입니다.\n\n분석입니다.")
+        for field in ("statement_suggestion", "job_statement_suggestion", "report_suggestion"):
+            self.assertEqual(final[field], "")
+
+    def test_final_response_carries_the_evidence_the_backend_used(self):
+        final = self.final(self.collect(backend_answer("보증금 반환을 청구할 수 있습니다(S1).", items=[STATUTE_ITEM])))
+
+        self.assertEqual(final["sources"], [{"source": "주택임대차보호법 제3조", "kind": "법령", "score": 0.9,
+                                             "quote": "임차인은 보증금의 반환을 청구할 수 있다."}])
+
+    def test_the_backend_gets_the_message_and_a_conversation_of_this_browser(self):
+        self.collect(query="message=해고당했어요")
+
+        url, message, conversation_id = self.ask.call_args.args
         with self.client.session_transaction() as flask_session:
             browser_id = flask_session["user_id"]
-        self.assertEqual(config["configurable"]["thread_id"], browser_id)
-        self.assertEqual(kwargs["context"].user_id, browser_id)
+        self.assertEqual((url, message), ("http://legal:8000", "해고당했어요"))
+        self.assertTrue(conversation_id.startswith(browser_id))
+
+    def test_a_greeting_is_answered_without_calling_the_backend(self):
+        events = self.collect(query="message=안녕하세요")
+
+        self.ask.assert_not_called()
+        self.assertEqual(self.final(events)["sources"], [])
+        self.assertEqual(events[-1]["type"], "stream_end")
+
+    def test_a_clarification_shows_the_backends_questions(self):
+        final = self.final(self.collect({"kind": "clarification", "questions": ["언제 해고되었나요?"]}))
+
+        self.assertIn("언제 해고되었나요?", final["chat_response"])
+
+    def test_a_rejected_answer_says_it_could_not_be_grounded(self):
+        final = self.final(self.collect({"kind": "rejected", "reason": "unsupported citations"}))
+
+        self.assertIn("근거를 확인할 수 없어", final["chat_response"])
+
+    def test_an_unavailable_backend_is_an_error_not_an_answer(self):
+        events = self.collect(self.app_module.legal_backend.LegalBackendUnavailable("ConnectError"))
+
+        self.assertEqual([e["type"] for e in events], ["thought", "error", "stream_end"])
+        self.assertIn("사용할 수 없습니다", events[1]["content"])
+
+    def test_without_a_configured_backend_the_stream_says_so(self):
+        events = self.collect(url="")
+
+        self.ask.assert_not_called()
+        self.assertEqual([e["type"] for e in events], ["error", "stream_end"])
+        self.assertIn("LEGAL_RAG_URL", events[0]["content"])
+
+    def test_the_reply_is_stored_in_the_chat_history(self):
+        self.as_browser("history-browser")
+        self.collect(backend_answer("저장되는 답변입니다."))
+
+        history = self.client.get("/get_initial_state").json["chat_history"]
+        self.assertEqual(history[-1], {"role": "assistant", "content": "저장되는 답변입니다."})
 
     def test_missing_message_still_ends_the_stream(self):
         response = self.client.get("/chat")
@@ -254,103 +177,6 @@ class ChatStreamingTests(ChatStreamBase):
             if line.startswith("data: ")
         ]
         self.assertEqual(types, ["error", "stream_end"])
-
-
-class DraftContextTests(ChatStreamBase):
-    """The draft must not accumulate into every turn of a persisted thread."""
-
-    def test_a_first_turn_carries_the_draft(self):
-        """StubAgent.get_state raises when no thread state exists: a new
-        workspace's first turn, where nothing has carried the draft yet."""
-        agent = StubAgent([("values", {"messages": [AIMessage(content="ok")]})])
-        self.collect(agent, "message=hi&personal_statement_draft=MY_DRAFT")
-        payload, _config, _kwargs = agent.stream_calls[0]
-        self.assertIn("MY_DRAFT", payload["messages"][0][1])
-
-    def test_unchanged_draft_is_not_resent_when_the_thread_already_has_it(self):
-        prior = HumanMessage(content="hi\n\n[Current Draft Context]\nMY_DRAFT")
-        agent = StubAgent(
-            [("values", {"messages": [AIMessage(content="ok")]})],
-            state_messages=[prior, AIMessage(content="ok")],
-        )
-        self.as_browser("u1")
-        self.collect(agent, "message=hi+again&personal_statement_draft=MY_DRAFT")
-        payload, config, _kwargs = agent.stream_calls[0]
-        self.assertNotIn("MY_DRAFT", payload["messages"][0][1])
-        self.assertEqual(config["configurable"]["thread_id"], "u1")
-
-    def test_unchanged_draft_stays_out_of_later_turns(self):
-        """The naive check -- look only at the newest user turn -- re-sends the
-        draft on every other turn, because the turn that skipped it has none."""
-        agent = StubAgent(
-            [("values", {"messages": [AIMessage(content="ok")]})],
-            state_messages=[
-                HumanMessage(content="turn one\n\n[Current Draft Context]\nMY_DRAFT"),
-                AIMessage(content="ok"),
-                HumanMessage(content="turn two"),
-                AIMessage(content="ok"),
-            ],
-        )
-        self.as_browser("u3")
-        self.collect(agent, "message=turn+three&personal_statement_draft=MY_DRAFT")
-        payload, _config, _kwargs = agent.stream_calls[0]
-        self.assertNotIn("MY_DRAFT", payload["messages"][0][1])
-
-    def test_changed_draft_is_resent(self):
-        prior = HumanMessage(content="hi\n\n[Current Draft Context]\nOLD_DRAFT")
-        agent = StubAgent(
-            [("values", {"messages": [AIMessage(content="ok")]})],
-            state_messages=[prior, AIMessage(content="ok")],
-        )
-        self.as_browser("u2")
-        self.collect(agent, "message=hi+again&personal_statement_draft=NEW_DRAFT")
-        payload, _config, _kwargs = agent.stream_calls[0]
-        self.assertIn("NEW_DRAFT", payload["messages"][0][1])
-
-
-class AnswerTokenFilterTests(ChatStreamBase):
-    """Unit tests for the decide-once gate that keeps schema JSON off the wire."""
-
-    @property
-    def filter_cls(self):
-        return self.app_module._AnswerTokenFilter
-
-    def feed_all(self, pieces):
-        f = self.filter_cls()
-        out = "".join(f.feed(p) for p in pieces)
-        return out + f.flush()
-
-    def test_prose_passes_through(self):
-        self.assertEqual(self.feed_all(["Hel", "lo ", "world"]), "Hello world")
-
-    def test_json_object_is_suppressed_entirely(self):
-        self.assertEqual(self.feed_all(['{"chat_', 'response": "hi"}']), "")
-
-    def test_fenced_json_is_suppressed(self):
-        self.assertEqual(self.feed_all(["```json\n", '{"a": 1}\n```']), "")
-
-    def test_labelled_sections_are_suppressed(self):
-        """qwen3:4b sometimes writes the schema as `key: "value"` lines, not JSON."""
-        self.assertEqual(self.feed_all(["chat_", 'response: "보증금은', ' 돌려받습니다"']), "")
-
-    def test_labelled_sections_after_whitespace_and_bold_are_suppressed(self):
-        self.assertEqual(self.feed_all(["\n**chat_response**", ': "x"']), "")
-
-    def test_prose_sharing_a_prefix_with_a_key_passes_through(self):
-        self.assertEqual(self.feed_all(["chat", " with me"]), "chat with me")
-        self.assertEqual(self.feed_all(["report_suggestion은 비어 있습니다"]), "report_suggestion은 비어 있습니다")
-
-    def test_think_block_split_across_chunks_is_stripped(self):
-        self.assertEqual(self.feed_all(["<thi", "nk>secret</th", "ink>answer"]), "answer")
-
-    def test_json_after_a_think_block_is_still_suppressed(self):
-        self.assertEqual(self.feed_all(["<think>plan</think>", '{"chat_response": "x"}']), "")
-
-    def test_list_content_keeps_only_text_blocks(self):
-        text = self.app_module._message_text(
-            [{"type": "reasoning", "reasoning": "hmm"}, {"type": "text", "text": "hi"}]
-        )
-        self.assertEqual(text, "hi")
 
 
 if __name__ == "__main__":
