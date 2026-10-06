@@ -67,8 +67,8 @@ class ChatWithCaseDocumentsTests(ChatStreamBase):
         with mock.patch.object(self.app_module, "search_knowledge_base", search):
             return self.collect(backend)
 
-    def stored(self, quote="제5조 임대인은 계약 종료일에 보증금 1억 원을 반환한다.", source="임대차계약서.pdf"):
-        return {"source": source, "score": 0.82, "quote": quote, "analysis_mode": "report"}
+    def stored(self, quote="제5조 임대인은 계약 종료일에 보증금 1억 원을 반환한다.", source="임대차계약서.pdf", score=0.82):
+        return {"source": source, "score": score, "quote": quote, "analysis_mode": "report"}
 
     def test_this_browsers_documents_are_searched_with_the_message_and_sent(self):
         self.as_browser("browser-with-lease")
@@ -86,7 +86,12 @@ class ChatWithCaseDocumentsTests(ChatStreamBase):
     def test_a_long_passage_is_cut_to_what_the_backend_reads(self):
         self.collect_with([self.stored(quote="가" * 5000)])
 
-        self.assertEqual(len(self.ask.call_args.args[3][0]["text"]), 1500)
+        self.assertEqual(len(self.ask.call_args.args[3][0]["text"]), self.app_module.CASE_DOCUMENT_CHARS)
+
+    def test_a_passage_far_from_the_message_is_not_sent(self):
+        self.collect_with([self.stored(score=0.52), self.stored(source="무관한자료.pdf", score=0.12)])
+
+        self.assertEqual([d["name"] for d in self.ask.call_args.args[3]], ["임대차계약서.pdf"])
 
     def test_a_failed_document_search_does_not_stop_the_answer(self):
         events = self.collect_with([], ok=False)
@@ -107,6 +112,19 @@ class ChatWithCaseDocumentsTests(ChatStreamBase):
 
         self.assertNotIn("확인 필요", with_document["chat_response"])
         self.assertIn("확인 필요: 민법 제618조", without["chat_response"])
+
+    def test_a_contracts_own_clause_number_does_not_excuse_an_invented_article(self):
+        """A lease numbers its clauses 제1조, 제2조 ...; that must not vouch for a law's 제4조."""
+        lease = self.stored(quote="주택임대차보호법을 따른다. 제4조 (계약의 갱신) 2개월 전까지 알려야 한다.")
+        final = self.final(self.collect_with([lease], backend_answer("주택임대차보호법 제4조에 따라 갱신을 거절할 수 있습니다(D1).")))
+
+        self.assertIn("확인 필요: 주택임대차보호법 제4조", final["chat_response"])
+
+    def test_pointing_to_the_contracts_own_clause_gets_no_warning(self):
+        lease = self.stored(quote="제5조 (보증금의 반환) 갑은 종료일에 보증금 전액을 반환한다.")
+        final = self.final(self.collect_with([lease], backend_answer("계약서 제5조에 따라 종료일에 반환해야 합니다(D1).")))
+
+        self.assertNotIn("확인 필요", final["chat_response"])
 
 
 if __name__ == "__main__":

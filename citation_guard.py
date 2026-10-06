@@ -40,8 +40,13 @@ _GENERIC_LAW_WORDS = {"법", "법령", "법률", "동법", "본법", "이법", "
                       "구법", "신법", "현행법", "개정법", "종전법"}
 
 
-def unsupported_citations(answer, evidence_texts):
-    """Citations in answer (in order, deduplicated) that no evidence text contains."""
+def unsupported_citations(answer, evidence_texts, own_clauses=()):
+    """Citations in answer (in order, deduplicated) that no evidence text contains.
+
+    `own_clauses` are texts of the user's own documents. Their clause numbers vouch only for
+    an article the answer names without a law.
+    """
+    own = _squash(" ".join(own_clauses))
     evidence = _squash(" ".join(t for t in evidence_texts if t))
     evidence_short = _short_title(evidence)
     missing = []
@@ -51,7 +56,7 @@ def unsupported_citations(answer, evidence_texts):
             law = None
         # 제3조 must not be satisfied by 제3조의3, but "제124조의 규정" is 제124조.
         law_found = not law or _squash(law) in evidence or _short_title(_squash(law)) in evidence_short
-        found = re.search(re.escape(article) + r"(?!의\d)", evidence) and law_found
+        found = re.search(re.escape(article) + r"(?!의\d)", evidence if law else evidence + own) and law_found
         label = f"{law} {match.group('art')}" if law else match.group("art")
         if not found and label not in missing:
             missing.append(label)
@@ -59,6 +64,17 @@ def unsupported_citations(answer, evidence_texts):
         if case not in evidence and case not in missing:
             missing.append(case)
     return missing
+
+
+def named_citations(text):
+    """Articles named with their law, and case numbers, in text.
+
+    A bare 제4조 is left out: a contract numbers its own clauses that way, and that must not
+    vouch for some law's 제4조.
+    """
+    named = [match.group(0) for match in STATUTE_RE.finditer(text or "")
+             if match.group("law") and _squash(match.group("law")) not in _GENERIC_LAW_WORDS]
+    return named + CASE_RE.findall(text or "")
 
 
 def annotate_unsupported(answer, missing):
