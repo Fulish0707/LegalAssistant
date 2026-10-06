@@ -111,7 +111,28 @@ class ChatStreamingTests(ChatStreamBase):
         final = self.final(self.collect(backend_answer("요약입니다.", "분석입니다.")))
 
         self.assertEqual(final["chat_response"], "요약입니다.\n\n분석입니다.")
-        self.assertEqual(set(final), {"type", "chat_response", "sources"})
+        self.assertEqual(set(final), {"type", "chat_response", "sources", "questions"})
+
+    def test_final_response_lists_the_questions_the_answer_asks_the_user(self):
+        body = backend_answer()
+        body["answer"]["additional_information_needed"] = ["계약 종료일이 언제인가요?", "보증금은 얼마인가요?"]
+
+        self.assertEqual(self.final(self.collect(body))["questions"], ["계약 종료일이 언제인가요?", "보증금은 얼마인가요?"])
+        asked = self.final(self.collect({"kind": "clarification", "questions": ["언제 해고되었나요?"]}))
+        self.assertEqual(asked["questions"], ["언제 해고되었나요?"])
+
+    def test_a_statement_is_not_offered_for_answering(self):
+        """qwen3:4b sometimes writes a statement in this field; a button for it has no answer (2026-10-06).
+        It also writes the fact it needs as a noun phrase, and that one can be answered."""
+        body = backend_answer()
+        body["answer"]["additional_information_needed"] = ["임대인은 24시간 이내에 반환해야 합니다.", "집을 비워 준 날이 언제인가요?",
+                                                           "임대차 계약이 실제로 종료된 날짜"]
+
+        self.assertEqual(self.final(self.collect(body))["questions"], ["집을 비워 준 날이 언제인가요?", "임대차 계약이 실제로 종료된 날짜"])
+
+    def test_a_refusal_and_a_greeting_ask_nothing(self):
+        self.assertEqual(self.final(self.collect({"kind": "rejected", "reason": "unsupported citations"}))["questions"], [])
+        self.assertEqual(self.final(self.collect(query="message=안녕하세요"))["questions"], [])
 
     def test_final_response_carries_the_evidence_the_backend_used(self):
         final = self.final(self.collect(backend_answer("보증금 반환을 청구할 수 있습니다(S1).", items=[STATUTE_ITEM])))
