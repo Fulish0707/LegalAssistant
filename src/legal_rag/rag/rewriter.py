@@ -8,13 +8,16 @@ from legal_rag.schemas import QueryAnalysis, RetrievalFilters, RewrittenQueries,
 
 
 class QueryRewriter:
-    def __init__(self, model: ChatModel | None = None, *, max_queries: int = 4) -> None:
+    def __init__(self, model: ChatModel | None = None, *, max_queries: int = 4, analyzer_terms: bool = True) -> None:
         self.model = model
         self.max_queries = max_queries
+        # The analyzer's issues and keywords as one more search query. They come from a model
+        # and differ between runs of the same question, and so does the evidence.
+        self.analyzer_terms = analyzer_terms
 
     def rewrite(self, message: str, analysis: QueryAnalysis) -> RewrittenQueries:
         queries = [message, *analysis.statute_refs, *analysis.case_refs]
-        terms = list(dict.fromkeys([*analysis.issues, *analysis.keywords]))
+        terms = list(dict.fromkeys([*analysis.issues, *analysis.keywords])) if self.analyzer_terms else []
         if terms:
             queries.append(" ".join(terms))
         if self.model is not None:

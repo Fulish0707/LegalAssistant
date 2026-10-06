@@ -82,4 +82,8 @@ class Verifier:
         cases = extract_case_refs(reference)
         if cases:
             return cases[0] in extract_case_refs(haystack) or evidence.header.get("Case number") == cases[0]
-        return reference.strip() in haystack
+        # A label naming no article or case number ("서울고등법원 판결") asserts no authority. The
+        # model writes one when the block has no case number, and demanding the string in the
+        # block stripped 22 of 80 Gemini answers (2026-10-05). The source id still has to exist,
+        # and every article or case number in the answer text is checked separately.
+        return True

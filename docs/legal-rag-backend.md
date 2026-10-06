@@ -125,8 +125,9 @@ Frequently changed keys:
 | `api.warmup` | `false` | Run one search in the background at startup; `/health` reports `warm`. `local.yaml` sets it: first search after warm-up 2.3 s instead of ~18 s cold |
 | `llm.backend` / `llm.model` | `ollama` / `qwen3:4b` | `transformers` arrives with V0.4 |
 | `llm.num_ctx` | unset (Ollama's 4096) | `local.yaml` sets 8192: answer prompts measure 5,900–6,300 tokens |
-| `rag.allow_clarification` | `true` | Ask for facts instead of answering when the analyzer flags them |
+| `rag.allow_clarification` | `true` | Ask for facts instead of answering, only when the analyzer finds no legal area to search. Otherwise the turn is answered and the open questions ride in the answer (2026-10-05) |
 | `rag.llm_rewrite` | `false` | Add LLM-generated search phrasings; no measurable retrieval gain (below) |
+| `rag.analyzer_terms_in_search` | `false` | Add the analyzer's issues and keywords as a search query. Off since 2026-10-05: they made the same question retrieve different chunks from run to run (identical evidence on 55 of 80 formal and 29 of 60 everyday questions, against 79 of 80 and 60 of 60 without) for no change in gold coverage |
 | `rag.hard_filter` | `false` | Use the analyzer's single needed document kind as a hard filter; harmful (below) |
 | `rag.max_regenerations` | `1` | Regeneration attempts after a failed verification |
 | `trace.path` / `trace.include_text` | unset / `false` | JSONL audit log; user text is excluded unless enabled |
@@ -353,7 +354,7 @@ corpus-global. To answer one question from several corpora, name them:
 
 ```yaml
 retrieval:
-  corpora: [criminal-v1, civil-v1, administrative-v1, ip-v1]
+  corpora: [criminal-v1, civil-v1, administrative-v1, ip-v1, statute-api-full-v1]   # local.yaml since 2026-10-06
   corpus_weights: {ip-v1: 0.5}   # absent corpora weigh 1.0
   k_fused: 50                    # raise this when fanning out
 ```

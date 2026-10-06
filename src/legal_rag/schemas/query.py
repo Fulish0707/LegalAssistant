@@ -44,6 +44,10 @@ class RetrievalFilters(_Frozen):
         return self == RetrievalFilters()
 
 
+class StandaloneQuestion(_Frozen):
+    question: str
+
+
 class RewrittenQueries(_Frozen):
     original: str
     search_queries: list[str] = Field(default_factory=list)  # original always first

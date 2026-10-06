@@ -146,3 +146,23 @@ def test_strip_cleans_the_model_written_uncertainty():
     model_text, note = stripped.uncertainty.split(STRIP_NOTE)
     assert "제11조" not in model_text and "계약 만료일이 필요합니다." in model_text
     assert "헌법 제11조" in note
+
+
+def test_descriptive_label_without_article_or_case_number_is_accepted_when_the_source_exists():
+    # Gemini names a block that has no case number by its court ("서울고등법원 판결"); 28 of 29 flagged
+    # first drafts in the 2026-10-05 serving check were exactly this.
+    for label in ("서울고등법원 판결", "대법원 판결 (사건번호 미기재)", "LEGAL SOURCE S2"):
+        ans = _answer(citations=[Citation(source_id="S2", kind=CitationKind.case, reference=label)])
+        assert Verifier().verify(ans, _bundle()).ok, label
+
+
+def test_descriptive_label_still_needs_a_source_that_exists():
+    ans = _answer(citations=[Citation(source_id="S9", kind=CitationKind.case, reference="서울고등법원 판결")])
+    assert [i.kind for i in Verifier().verify(ans, _bundle()).issues] == ["unknown_source_id"]
+
+
+def test_a_case_number_in_the_label_is_still_checked_against_the_block():
+    ans = _answer(citations=[Citation(source_id="S2", kind=CitationKind.case, reference="대법원 2015다99999 판결")],
+                  analysis="대법원 2015다99999 판결 참조")
+    kinds = {i.kind for i in Verifier().verify(ans, _bundle()).issues}
+    assert "source_id_mismatch" in kinds and "case_not_in_evidence" in kinds

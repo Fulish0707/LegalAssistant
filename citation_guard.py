@@ -36,7 +36,8 @@ def _short_title(squashed):
 
 
 # Words the law-name pattern matches that refer to a law without naming it.
-_GENERIC_LAW_WORDS = {"법", "법령", "법률", "동법", "본법", "이법", "같은법", "관련법", "관련법령", "시행령", "시행규칙", "규정", "규칙"}
+_GENERIC_LAW_WORDS = {"법", "법령", "법률", "동법", "본법", "이법", "같은법", "관련법", "관련법령", "시행령", "시행규칙", "규정", "규칙",
+                      "구법", "신법", "현행법", "개정법", "종전법"}
 
 
 def unsupported_citations(answer, evidence_texts):
