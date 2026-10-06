@@ -56,9 +56,14 @@ class Citation(BaseModel):
 class LegalAnswer(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    summary: str
+    # The model writes the fields in this order, so the summary comes after the analysis and
+    # states the conclusion the analysis reached. Measured 2026-10-07 against summary-first on
+    # 80 frozen questions: conclusion agreement 46 -> 47 (lenient) and 40 -> 39 (strict), answers
+    # with a stripped citation 5 -> 0, regenerations 7 -> 1; on a lease scenario the wrong period
+    # in the summary went from 1 of 9 to 0 of 9 (memory.md).
     legal_issues: list[str] = Field(default_factory=list)
     analysis: str
+    summary: str
     possible_actions: list[str] = Field(default_factory=list)
     additional_information_needed: list[str] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
