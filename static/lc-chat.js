@@ -130,12 +130,6 @@
     LC.pinThread = true;
     LC.render();
 
-    let streamed = '', pending = null;
-    const push = chunk => {
-      if (!pending) { pending = { role:'agent', text:'' }; P.extra.push(pending); }
-      pending.text += chunk;
-    };
-
     fetch('/chat', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -148,13 +142,11 @@
       sse.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === 'token_chunk') { streamed += data.content; push(data.content); LC.pinThread = true; LC.render(); }
-          else if (data.type === 'thought') { LC.S.traceLines.push(data.content); LC.render(); }
+          if (data.type === 'thought') { LC.S.traceLines.push(data.content); LC.render(); }
           else if (data.type === 'final_response') {
-            if (streamed.trim() && pending) pending.text = data.chat_response || streamed;
-            else P.extra.push({ role:'agent', text: data.chat_response });
+            P.extra.push({ role:'agent', text: data.chat_response });
             LC.SOURCES = (data.sources || []).map((h, i) => ({ id: String(i + 1), kind: h.kind || '내 문서', title: h.source, quote: h.quote, score: h.score }));
-            pending = null; streamed = ''; P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
+            P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
           }
           else if (data.type === 'error') {
             P.extra.push({ role:'agent', text:'오류: ' + data.content }); P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
