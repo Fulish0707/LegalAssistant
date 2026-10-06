@@ -12,22 +12,22 @@
 
 ## 2. 주요 기능
 
-- **웹 채팅:** Flask와 LangGraph로 대화를 처리하고, SSE로 답변을 화면에 전달합니다. 대화 기록과 에이전트 체크포인트는 SQLite에 저장합니다.
-- **법률 근거 검색:** Flask 앱은 법률 검색이 필요한 질문에 대해 답변 생성 전에 FastAPI의 POST /v1/search를 호출합니다. 짧은 인사말 등은 검색하지 않습니다.
+- **웹 채팅:** Flask가 메시지를 FastAPI의 POST /v1/chat으로 보내고, 받은 답변과 근거를 SSE로 화면에 전달합니다. 대화 기록은 SQLite에 저장합니다.
+- **하나의 답변 경로:** 웹 채팅, API, CLI가 같은 RAG 백엔드에서 답변을 받습니다. 짧은 인사말은 백엔드를 호출하지 않고 안내 문구로 답합니다. 백엔드를 사용할 수 없으면 웹 채팅은 오류를 표시하며, 다른 모델로 대체하지 않습니다.
 - **하이브리드 검색:** bge-m3 임베딩을 이용한 Qdrant dense 검색과 BM25 검색 결과를 RRF로 결합하고, local 프로필에서는 cross-encoder로 재정렬합니다.
 - **답변 API와 CLI:** POST /v1/chat과 scripts/chat.py는 질의 분석·재작성, 검색, 근거 구성, 답변 생성과 인용 검증을 수행합니다. 검증 결과에 따라 한 번 재생성하거나, 근거가 확인되지 않는 문장을 제거하고, 답변을 거절할 수 있습니다.
-- **인용 확인:** Flask 채팅은 검색 근거에서 찾지 못한 조문이나 사건번호가 답변에 있으면 확인 안내를 표시합니다.
+- **인용 확인:** Flask 채팅은 백엔드의 인용 검증과 별도로, 근거에서 찾지 못한 조문이나 사건번호가 답변에 있으면 확인 안내를 표시합니다.
 
 ## 3. 기술 스택
 
 | 구분 | 사용 기술 |
 | --- | --- |
-| 웹 채팅과 응답 전달 | Flask, LangGraph, Server-Sent Events (SSE) |
+| 웹 채팅과 응답 전달 | Flask, Server-Sent Events (SSE) |
 | 법률 RAG API | FastAPI, Uvicorn |
-| 답변 모델 | Ollama, qwen3:4b |
+| 답변 모델 | LEGAL_RAG__LLM__BACKEND로 선택: Gemini 또는 Ollama qwen3:4b |
 | 임베딩 모델 | Ollama, bge-m3 |
 | 검색과 재정렬 | Qdrant, BM25, RRF, BAAI/bge-reranker-v2-m3 |
-| 대화 상태 | SQLite, LangGraph SQLite 체크포인터 |
+| 대화 상태 | SQLite (Flask 대화 기록, 백엔드 대화 저장소) |
 | 설정 | Flask 환경 변수, configs/default.yaml, configs/local.yaml |
 
 local 프로필은 CUDA와 float16으로 cross-encoder를 실행하고, 모델을 로컬 캐시에서 읽습니다. 이 프로필에는 호환되는 CUDA 환경과 캐시된 재정렬 모델이 필요합니다.
@@ -37,26 +37,23 @@ local 프로필은 CUDA와 float16으로 cross-encoder를 실행하고, 모델�
 ~~~mermaid
 %%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "diagramPadding": 6}}}%%
 flowchart TB
-    User["사용자"] --> Web["Flask 웹 채팅<br/>LangGraph 에이전트"]
-    Caller["API · CLI"] --> ChatAPI["FastAPI<br/>/v1/chat"]
+    User["사용자"] --> Web["Flask 웹 채팅"]
+    Web --> ChatAPI["FastAPI<br/>/v1/chat"]
+    Caller["API · CLI"] --> ChatAPI
 
-    Web -->|필요 시 근거 검색| SearchAPI["FastAPI<br/>/v1/search"]
     ChatAPI --> Orchestrator["RAG 오케스트레이터<br/>분석 · 생성 · 인용 검증"]
-
-    SearchAPI --> Retrieval["하이브리드 검색<br/>Dense: bge-m3 · Qdrant<br/>Sparse: BM25"]
-    Orchestrator --> Retrieval
+    Orchestrator --> Retrieval["하이브리드 검색<br/>Dense: bge-m3 · Qdrant<br/>Sparse: BM25"]
     Retrieval --> Ranking["RRF 결합<br/>Cross-encoder 재정렬"]
     Ranking --> Evidence["검색 근거"]
 
-    Evidence --> Web
     Evidence --> Orchestrator
-    Web --> LLM["Ollama<br/>qwen3:4b"]
-    Orchestrator --> LLM
-    Web --> SQLite["SQLite<br/>대화 기록 · 체크포인트"]
+    Orchestrator --> LLM["답변 모델<br/>Gemini 또는 Ollama qwen3:4b"]
+    Orchestrator -->|검증된 답변 · 근거| Web
+    Web --> SQLite["SQLite<br/>대화 기록"]
     Web -->|SSE 응답| User
 ~~~
 
-웹 채팅과 자체 답변 API는 검색 결과를 공유하지만, 답변을 만드는 흐름은 다릅니다. Flask 채팅은 /v1/search가 반환한 근거를 LangGraph 에이전트에 전달합니다. /v1/chat과 CLI는 RAG 백엔드 안에서 질의 처리부터 인용 검증까지 수행합니다.
+웹 채팅, API, CLI는 답변을 만드는 흐름이 같습니다. RAG 백엔드가 질의 처리부터 인용 검증까지 수행하고, Flask 채팅은 그 결과를 화면에 맞게 정리해 보여 줍니다. 답변 모델은 LEGAL_RAG__LLM__BACKEND와 LEGAL_RAG__LLM__MODEL로 정하며, 바꾼 뒤에는 FastAPI 서버를 다시 시작해야 합니다. /v1/search는 검색 결과만 필요한 호출자를 위해 남아 있습니다.
 
 ## 5. 평가 결과
 
@@ -164,12 +161,10 @@ local 프로필의 재정렬 모델은 CUDA 환경에서 실행되며 로컬 캐
 
 ### 7.2 Flask 웹 채팅
 
-Flask 앱은 Python 3.13과 루트 requirements.txt를 사용하는 별도 환경에서 실행합니다. 프로젝트 루트의 .env에 백엔드 주소와 Ollama 설정을 지정합니다.
+Flask 앱은 Python 3.13과 루트 requirements.txt를 사용하는 별도 환경에서 실행합니다. 프로젝트 루트의 .env에 백엔드 주소를 지정합니다. 웹 채팅의 답변은 이 주소의 /v1/chat이 작성하므로 FastAPI 서버가 먼저 실행 중이어야 합니다. LLM_PROVIDER는 채팅 답변에 영향을 주지 않습니다.
 
 ~~~dotenv
 APP_ENV=local
-LLM_PROVIDER=ollama
-OLLAMA_MODEL=qwen3:4b
 LEGAL_RAG_URL=http://127.0.0.1:8000
 ~~~
 
@@ -196,3 +191,4 @@ API 키는 open.law.go.kr에서 등록한 OC 값이며 .env의 `LAW_GO_KR_OC`에
 
 - [법률 RAG 개발 안내](docs/legal-rag-backend.md): 백엔드 설치, 자료 수집·색인, API와 답변 평가.
 - [검색 진단 문서](docs/retrieval-diagnostics.md): 검색 설정 비교, 측정 방법과 결과 해석.
+- [평가 문서 목차](docs/evaluation-index.md): 검색·답변 평가의 현재 실행 안내와 과거 실험 기록.

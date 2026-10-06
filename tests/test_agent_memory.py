@@ -19,7 +19,7 @@ import sys
 import tempfile
 import unittest
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -138,24 +138,12 @@ class AgentMemoryTests(unittest.TestCase):
                 self.assertEqual(other.values.get("messages", []), [])
 
 
-class RecordingAgent:
-    """Stands in for the compiled graph and records how app.py streams it."""
-
-    def __init__(self):
-        self.calls = []
-
-    def stream(self, payload, config=None, **kwargs):
-        self.calls.append({"payload": payload, "config": config, "kwargs": kwargs})
-        yield "values", {"structured_response": None, "messages": [AIMessage("ack")]}
-
-
 class AppCheckpointerWiringTests(unittest.TestCase):
-    """thread_id must be the browser's own workspace id, and nothing else.
+    """A browser's conversation is keyed on its own workspace id, and nothing else.
 
-    Every visitor owns one opaque session-cookie user_id. That single id is what
-    build_agent receives, what the run config threads on, and what AgentContext
-    carries, so two browsers provably never land in one thread and one browser
-    always returns to its own.
+    Every visitor owns one opaque session-cookie user_id. The conversation id sent
+    to legal_rag is built from it, so two browsers provably never share a
+    conversation and one browser always returns to its own.
     """
 
     MODULE_NAMES = ("app", "langchain_config", "llm_model")
@@ -206,55 +194,50 @@ class AppCheckpointerWiringTests(unittest.TestCase):
             return client, flask_session["user_id"]
 
     def drive_chat(self, client=None):
-        """Stream one turn as a normal browser; return its id and what the app wired."""
+        """Stream one turn as a normal browser; return its id and the conversation id sent to legal_rag."""
         if client is None:
             client, browser_id = self.browser()
         else:
             with client.session_transaction() as flask_session:
                 browser_id = flask_session["user_id"]
-        agent = RecordingAgent()
-        recorded = {}
+        ask = Mock(return_value={"kind": "rejected"})
+        with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
+                patch.object(self.app_module.legal_backend, "ask", ask):
+            client.get("/chat?message=보증금 문의").get_data()
 
-        def fake_build_agent(user_id=None, checkpointer=None):
-            recorded["user_id"] = user_id
-            recorded["checkpointer"] = checkpointer
-            return agent
+        self.assertTrue(ask.called, "the legal backend was never called")
+        return browser_id, ask.call_args.args[2]
 
-        with patch.object(self.app_module, "build_agent", fake_build_agent):
-            client.get("/chat?message=hello").get_data()
-
-        self.assertTrue(agent.calls, "the agent was never invoked")
-        return browser_id, recorded, agent.calls[0]
-
-    def test_every_browser_gets_a_checkpointer_threaded_on_its_own_id(self):
-        browser_id, recorded, call = self.drive_chat()
+    def test_every_browser_converses_under_its_own_id(self):
+        browser_id, conversation_id = self.drive_chat()
 
         self.assertTrue(browser_id)
-        self.assertEqual(recorded["user_id"], browser_id)
-        self.assertIs(recorded["checkpointer"], self.app_module.CHECKPOINTER)
-        self.assertEqual(call["config"]["configurable"]["thread_id"], browser_id)
-        context = call["kwargs"].get("context")
-        self.assertIsNotNone(context, "stream() was called without context=AgentContext(...)")
-        self.assertEqual(context.user_id, browser_id)
+        self.assertTrue(conversation_id.startswith(browser_id))
 
-    def test_two_browsers_never_share_a_thread(self):
-        first_id, _, first_call = self.drive_chat()
-        second_id, _, second_call = self.drive_chat()
+    def test_two_browsers_never_share_a_conversation(self):
+        first_id, first_conversation = self.drive_chat()
+        second_id, second_conversation = self.drive_chat()
 
         self.assertNotEqual(first_id, second_id)
-        self.assertNotEqual(
-            first_call["config"]["configurable"]["thread_id"],
-            second_call["config"]["configurable"]["thread_id"],
-        )
+        self.assertNotEqual(first_conversation, second_conversation)
 
-    def test_the_same_browser_returns_to_the_same_thread(self):
-        client, browser_id = self.browser()
+    def test_the_same_browser_returns_to_the_same_conversation(self):
+        client, _ = self.browser()
 
-        _, _, first_call = self.drive_chat(client)
-        _, _, second_call = self.drive_chat(client)
+        _, first_conversation = self.drive_chat(client)
+        _, second_conversation = self.drive_chat(client)
 
-        self.assertEqual(first_call["config"]["configurable"]["thread_id"], browser_id)
-        self.assertEqual(second_call["config"]["configurable"]["thread_id"], browser_id)
+        self.assertEqual(first_conversation, second_conversation)
+
+    def test_clearing_chat_history_starts_a_new_backend_conversation(self):
+        """legal_rag keeps recent turns per conversation id; a cleared chat must not reuse them."""
+        client, _ = self.browser()
+
+        _, before = self.drive_chat(client)
+        self.assertEqual(client.post("/clear_chat_history_endpoint").status_code, 200)
+        _, after = self.drive_chat(client)
+
+        self.assertNotEqual(before, after)
 
     def test_clearing_chat_history_also_clears_the_agents_thread(self):
         """A user who clears their history and then finds the agent still
