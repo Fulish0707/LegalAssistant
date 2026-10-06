@@ -72,8 +72,8 @@ def _evidence_by_key(run: Path) -> dict[str, list[str]]:
 
 
 def _version(rubric: str) -> str:
-    if rubric not in ("v2", "v3", "legacy"):
-        raise typer.BadParameter("Rubric must be v2, v3 or legacy.")
+    if rubric not in ("core", "v2", "v3", "legacy"):
+        raise typer.BadParameter("Rubric must be core, v2, v3 or legacy.")
     return rubric
 
 
@@ -127,14 +127,31 @@ def pairs(run: Path = typer.Option(..., exists=True, file_okay=False),
 @app.command()
 def judge(run: Path = typer.Option(..., exists=True, file_okay=False),
           model: str = typer.Option("qwen3:8b"), base_url: str = typer.Option("http://localhost:11434"),
-          think: bool | None = typer.Option(None, "--think/--no-think"), num_ctx: int = typer.Option(12288, min=1),
-          rubric: str = typer.Option("v2", help="v3 adds validated checklists; v2 and legacy preserve historical rubrics."),
-          max_tokens: int = typer.Option(4096, min=1)) -> None:
-    """Grade saved pairs; v2 uses separate artifacts and retries unresolved grades."""
+          think: bool | None = typer.Option(None, "--think/--no-think"),
+          num_ctx: int = typer.Option(None, min=1, help="Default 8192 for core, 12288 otherwise."),
+          rubric: str = typer.Option("core", help="core checks the reference's conclusion (default since 2026-10-06); "
+                                                  "v2, v3 and legacy preserve historical rubrics. v2's grounded score mostly "
+                                                  "counts its quote-repair retries; see answer_judge_core.py."),
+          max_tokens: int = typer.Option(4096, min=1),
+          conclusions: Path = typer.Option(ROOT / "data/eval/judge_cache/core_conclusions.json",
+                                           help="core only: shared file of reference conclusions, so every run is measured against the same sentence.")) -> None:
+    """Grade saved pairs. core writes answer_judgments-core.jsonl and resumes; v2 uses separate artifacts and retries unresolved grades."""
     from legal_rag.llm import Message, OllamaChatModel, StructuredOutputError
 
     _version(rubric)
     think = rubric == "legacy" if think is None else think
+    if rubric == "core":
+        from legal_rag.evaluation.answer_judge_core import JudgeStopped, judge_core_answers
+
+        chat = OllamaChatModel(model=model, base_url=base_url, timeout=240.0, think=think, num_ctx=num_ctx or 8192)
+        try:
+            summary = judge_core_answers(run, chat, conclusions, emit=typer.echo)
+        except JudgeStopped as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+        typer.echo(f"conclusion agreement {summary['conclusion_correct']}/{summary['pairs']} (graded {summary['graded']})")
+        return
+    num_ctx = num_ctx or 12288
     if rubric in ("v2", "v3"):
         _judge_versioned(run, model, base_url, think, num_ctx, max_tokens, rubric)
         return
