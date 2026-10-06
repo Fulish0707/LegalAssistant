@@ -124,7 +124,7 @@ Frequently changed keys:
 | `rerank.local_files_only` | `false` | Load the cached model without Hub checks (1.9 s instead of 5.6 s); `local.yaml` sets it |
 | `api.warmup` | `false` | Run one search in the background at startup; `/health` reports `warm`. `local.yaml` sets it: first search after warm-up 2.3 s instead of ~18 s cold |
 | `llm.backend` / `llm.model` | `ollama` / `qwen3:4b` | `transformers` arrives with V0.4 |
-| `llm.num_ctx` | unset (Ollama's 4096) | `local.yaml` sets 8192: answer prompts measure 5,900–6,300 tokens |
+| `llm.num_ctx` | unset (Ollama's 4096) | `local.yaml` sets 12288: answer prompts measure up to 6,600 tokens, and 9,250 with the user's case documents, plus up to 2,048 output tokens (2026-10-06). `LEGAL_RAG__LLM__NUM_CTX` overrides it for both apps |
 | `rag.allow_clarification` | `true` | Ask for facts instead of answering, only when the analyzer finds no legal area to search. Otherwise the turn is answered and the open questions ride in the answer (2026-10-05) |
 | `rag.llm_rewrite` | `false` | Add LLM-generated search phrasings; no measurable retrieval gain (below) |
 | `rag.analyzer_terms_in_search` | `false` | Add the analyzer's issues and keywords as a search query. Off since 2026-10-05: they made the same question retrieve different chunks from run to run (identical evidence on 55 of 80 formal and 29 of 60 everyday questions, against 79 of 80 and 60 of 60 without) for no change in gold coverage |

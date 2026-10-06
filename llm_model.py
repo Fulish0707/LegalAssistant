@@ -26,6 +26,9 @@ def _embedding_provider():
     return os.getenv("EMBEDDING_PROVIDER", DEFAULT_EMBEDDING_PROVIDER).strip().lower()
 
 
+DEFAULT_NUM_CTX = 12288  # configs/local.yaml llm.num_ctx
+
+
 def get_chat_model():
     """Return a chat model, or None when the provider is disabled."""
     provider = _llm_provider()
@@ -45,9 +48,11 @@ def get_chat_model():
             "temperature": float(os.getenv("OLLAMA_TEMPERATURE", "0.7")),
             "top_p": 0.8,
             "top_k": 20,
-            # Ollama's own default is 4096 tokens. System prompt plus legal evidence ran
-            # to ~6,100 and Ollama silently dropped the system prompt (2026-09-27).
-            "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "8192")),
+            # Ollama's own default is 4096 tokens and it drops the start of a longer prompt
+            # silently (2026-09-27). The value must equal legal_rag's llm.num_ctx, or Ollama
+            # reloads the model whenever the other client calls; so LEGAL_RAG__LLM__NUM_CTX
+            # sets both, and OLLAMA_NUM_CTX overrides it for this app alone.
+            "num_ctx": int(os.getenv("OLLAMA_NUM_CTX") or os.getenv("LEGAL_RAG__LLM__NUM_CTX") or DEFAULT_NUM_CTX),
         }
         reasoning = os.getenv("OLLAMA_REASONING")
         if reasoning is not None:
