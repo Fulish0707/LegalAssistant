@@ -11,7 +11,7 @@
     extra: []
   };
 
-  let sse = null, draftTimer = null;
+  let sse = null;
 
   /* ---------- 화면 ---------- */
 
@@ -108,11 +108,6 @@
       tab: P.railTab,
       footer: `
 <div style="flex:none;border-top:1px solid #f0ede7;padding:14px 18px;display:flex;flex-direction:column;gap:8px">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-    <span style="font-size:12px;font-weight:600">작성 중인 문서</span>
-    <span id="savingIndicator" style="font-size:10.5px;color:#9aa0a5">${esc(LC.S.saveState)}</span>
-  </div>
-  <textarea id="personalStatementDraft" placeholder="내용증명 등 서류 초안이 여기에 표시됩니다." style="min-height:96px;padding:11px 13px;border:1px solid #e6e3dd;border-radius:10px;background:#faf9f6;font-size:12.5px;line-height:1.75;color:#14171a;resize:vertical;outline:none">${esc(LC.S.statementDraft)}</textarea>
   <div style="display:flex;align-items:center;gap:6px">
     <button class="lc-outline" data-act="refreshKb" id="refreshKnowledgeButton" style="flex:1;padding:6px;border:1px solid #e6e3dd;border-radius:8px;background:#fff;font-size:11px;color:#767d83;cursor:pointer">지식베이스 새로고침</button>
     <button class="lc-outline" data-act="clearKb" id="clearKnowledgeButton" style="flex:1;padding:6px;border:1px solid #e6e3dd;border-radius:8px;background:#fff;font-size:11px;color:#767d83;cursor:pointer">비우기</button>
@@ -144,10 +139,10 @@
     fetch('/chat', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ message: text, personal_statement_draft: LC.S.statementDraft || '' })
+      body: JSON.stringify({ message: text })
     }).then(() => {
       if (sse) sse.close();
-      const qs = new URLSearchParams({ message: text, personal_statement_draft: LC.S.statementDraft || '' });
+      const qs = new URLSearchParams({ message: text });
       sse = new EventSource('/chat?' + qs.toString());
 
       sse.onmessage = (event) => {
@@ -159,9 +154,6 @@
             if (streamed.trim() && pending) pending.text = data.chat_response || streamed;
             else P.extra.push({ role:'agent', text: data.chat_response });
             LC.SOURCES = (data.sources || []).map((h, i) => ({ id: String(i + 1), kind: h.kind || '내 문서', title: h.source, quote: h.quote, score: h.score }));
-            if (data.statement_suggestion) P.extra.push({ role:'agent', text:'서류 초안 제안:\n' + data.statement_suggestion });
-            if (data.job_statement_suggestion) P.extra.push({ role:'agent', text:'신청서 제안:\n' + data.job_statement_suggestion });
-            if (data.report_suggestion) P.extra.push({ role:'agent', text:'검토 의견 제안:\n' + data.report_suggestion });
             pending = null; streamed = ''; P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
           }
           else if (data.type === 'error') {
@@ -191,7 +183,6 @@
       const r = await fetch('/get_initial_state');
       if (!r.ok) throw new Error(r.statusText);
       const st = await r.json();
-      LC.S.statementDraft = st.personal_statement_draft || '';
       if (Array.isArray(st.chat_history)) {
         P.extra = st.chat_history.map(m => ({ role: m.role === 'user' ? 'user' : 'agent', text: m.content }));
       }
@@ -238,13 +229,6 @@
           P.draft = e.target.value;
           e.target.style.height = 'auto';
           e.target.style.height = e.target.scrollHeight + 'px';
-        }
-        if (e.target.id === 'personalStatementDraft') {
-          LC.S.statementDraft = e.target.value;
-          LC.S.saveState = '저장 중...';
-          document.getElementById('savingIndicator').textContent = LC.S.saveState;
-          clearTimeout(draftTimer);
-          draftTimer = setTimeout(LC.saveDraft, 800);
         }
       });
 

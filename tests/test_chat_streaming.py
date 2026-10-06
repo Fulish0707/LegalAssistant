@@ -109,12 +109,11 @@ class ChatStreamingTests(ChatStreamBase):
         self.assertEqual(events[-2]["type"], "final_response")
         self.assertEqual(events[-1]["type"], "stream_end")
 
-    def test_final_response_carries_the_answer_and_empty_suggestions(self):
+    def test_final_response_carries_the_answer(self):
         final = self.final(self.collect(backend_answer("요약입니다.", "분석입니다.")))
 
         self.assertEqual(final["chat_response"], "요약입니다.\n\n분석입니다.")
-        for field in ("statement_suggestion", "job_statement_suggestion", "report_suggestion"):
-            self.assertEqual(final[field], "")
+        self.assertEqual(set(final), {"type", "chat_response", "sources"})
 
     def test_final_response_carries_the_evidence_the_backend_used(self):
         final = self.final(self.collect(backend_answer("보증금 반환을 청구할 수 있습니다(S1).", items=[STATUTE_ITEM])))

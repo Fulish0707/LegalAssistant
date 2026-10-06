@@ -82,7 +82,6 @@ class BrowserSessionTests(unittest.TestCase):
 
         self.assertNotIn("users", tables)
         self.assertIn("daily_ai_quota", tables)
-        self.assertIn("personal_statement", tables)
         self.assertIn("chat_history", tables)
 
     def test_existing_installs_keep_their_users_table_across_schema_calls(self):

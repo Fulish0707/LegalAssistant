@@ -65,37 +65,38 @@ env APP_STATE_DB=$T/a.db AGENT_CHECKPOINT_DB=$T/c.db RAG_PERSIST_DIR=$T/chroma A
 
 2단계에서 확인한 것: 역할이 다른 절은 이제 합치지 않는다. 그래서 한 줄짜리 "주문" 절이 다시 독립 청크가 된다. 09월의 "한 줄 절은 이웃에 붙인다"는 수정과 반대 방향이다. 문서(`docs/answer-grader-v3-calibration.md`)에 의도로 적혀 있어 테스트를 맞췄다. 기존 색인에는 영향이 없고, 새로 청킹하는 코퍼스에만 적용된다.
 
-## 3단계. 삭제 범위 확정 (결정 필요)
+## 3단계. 삭제 범위 확정 (2026-10-06 결정)
 
-| # | 기능 | 지우는 것 | 화면 영향 | 기본안 |
-|---|---|---|---|---|
-| A | 통계 분석 | `/statistics/analyze`, `statistics_analysis.py` | 없음. 부르는 화면이 없다 | 삭제 |
-| B | 유사 대화 검색 | `/get_similar_chats` | 없음. 부르는 화면이 없다 | 삭제 |
-| C | 문서 분석(OCR) | `/process_document_ocr`, `llm_ocr.py`, `html_sanitizer.py` | 파일 올리기 버튼이 사라진다 | 삭제 |
-| D | 내 문서 검색 | `/knowledge_base/*`, `documents.html`, `lc-docs.js`, Chroma | "사건 자료" 화면이 사라진다 | 삭제 |
-| E | 서류 초안 | `/update_statement`, 초안 패널 | "작성 중 문서" 패널이 사라진다 | 삭제 |
-| F | Flask 에이전트 | `langchain_config.py`의 에이전트·도구, `llm_model.py`, `llm_prompt.py`, 체크포인터, `evals/` | 없음. 챗은 이미 `/v1/chat`을 쓴다 | 삭제 |
-| G | QLoRA 학습·평가 | `training/`, `sft_*.ipynb`, 관련 스크립트 | 없음 | **유지** |
-| H | 과거 채점기 (legacy, v2, v3) | `answer_judge*.py` | 없음 | **유지** |
-| I | "판례 검색" 화면 | `cases.html`, `lc-cases.js` | 서버 호출이 없는 화면이다 | 확인 후 결정 |
+화면은 두 페이지다. 1번은 챗봇, 2번은 판례 검색과 사건 자료 검색이다. 둘 다 남긴다.
 
-- [ ] 3.1 위 표의 기본안을 확인받는다
-- [ ] 3.2 A~F를 지운 뒤 남는 의존성 목록을 만든다 (LangChain, LangGraph, Chroma 등)
+| # | 기능 | 결정 | 이유 |
+|---|---|---|---|
+| A | 통계 분석 (`/statistics/analyze`, `statistics_analysis.py`) | 삭제 | 부르는 화면이 없다 |
+| B | 유사 대화 검색 (`/get_similar_chats`) | 삭제 | 부르는 화면이 없다 |
+| C | 문서 분석 (`/process_document_ocr`, `llm_ocr.py`) | **유지** | 사건 자료의 파일 올리기가 쓴다 |
+| D | 사건 자료 (`/knowledge_base/*`, `documents.html`, Chroma) | **유지** | 2번 페이지 |
+| E | 서류 초안 패널 (`/update_statement`, "작성 중 문서") | 삭제 | 사용자 결정 |
+| F | Flask 에이전트 (에이전트·도구·체크포인터·`evals/`) | 삭제 | 챗이 `/v1/chat`을 쓴 뒤로 닿는 경로가 없다. C·D가 쓰는 부분은 남긴다 |
+| G | QLoRA 학습·평가 | **유지** | |
+| H | 과거 채점기 (legacy, v2, v3) | **유지** | |
+| I | 판례 검색 화면 (`cases.html`) | **유지** | 2번 페이지. 실제 검색 연결은 정리와 별개 작업 |
+
+- [x] 3.1 삭제 범위 확정
+
+정리 뒤에 따로 다룰 일: 사건 자료에 올린 문서는 지금 챗 답변에 쓰이지 않는다. 판례 검색 화면은 예시 데이터로 동작한다.
 
 ## 4단계. 죽은 코드 삭제
 
 순서는 의존이 적은 것부터다. 항목마다: 참조 검색 → 삭제 → 테스트 → 커밋.
 
-- [ ] 4.1 A 통계 분석과 테스트
-- [ ] 4.2 B 유사 대화 검색
-- [ ] 4.3 C 문서 분석: 경로, 모듈, 화면의 올리기 버튼, 테스트
-- [ ] 4.4 D 내 문서 검색: 경로, 화면, `langchain_config.py`의 해당 함수, 테스트
-- [ ] 4.5 E 서류 초안: 경로, 패널, `/get_initial_state`의 초안 필드, 테스트. DB 테이블은 그대로 둔다
-- [ ] 4.6 F 에이전트: 남은 `langchain_config.py`, `llm_model.py`, `llm_prompt.py`, 체크포인터, `evals/`, 테스트, `/health`의 해당 필드
-- [ ] 4.7 의존성 정리: `requirements.txt`, `env.yml`, `.env.example`, README의 실행 안내
-- [ ] 4.8 화면 정리: 지운 기능을 가리키는 메뉴와 문구
-- [ ] 4.9 `src/legal_rag`의 죽은 코드: 정의만 있고 참조가 없는 함수·상수·설정. 이전 세션이 "과거 실험본이 쓴다"며 남긴 후보를 다시 본다
-- [ ] 4.10 `scripts/` 37개 분류: 문서나 현재 절차가 쓰는 것, 한 번 쓰고 끝난 것. 후자의 삭제는 목록을 보고 결정받는다
+- [x] 4.1 A 통계 분석과 테스트
+- [x] 4.2 B 유사 대화 검색
+- [x] 4.3 E 서류 초안: 경로, 패널, `/get_initial_state`와 `/chat`의 초안 필드, 테스트. DB 테이블은 그대로 둔다
+- [ ] 4.4 F 에이전트: `langchain_config.py`의 에이전트·도구·미들웨어, `llm_prompt.py`의 에이전트 프롬프트, 체크포인터, `evals/`, 해당 테스트. 사건 자료와 문서 분석이 쓰는 함수는 남긴다
+- [ ] 4.5 의존성 정리: `requirements.txt`, `env.yml`, `.env.example`, README의 실행 안내
+- [ ] 4.6 화면 정리: 지운 기능을 가리키는 메뉴와 문구. 브라우저로 두 페이지를 확인한다
+- [ ] 4.7 `src/legal_rag`의 죽은 코드: 정의만 있고 참조가 없는 함수·상수·설정
+- [ ] 4.8 `scripts/` 37개 분류: 문서나 현재 절차가 쓰는 것, 한 번 쓰고 끝난 것. 후자의 삭제는 목록을 보고 결정받는다
 - [ ] 확인: 두 묶음 실패 0건, 실제 서버로 웹 챗 한 턴과 `/v1/chat` 한 턴
 
 ## 5단계. 긴 코드 단축
