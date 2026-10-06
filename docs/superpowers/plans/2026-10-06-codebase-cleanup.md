@@ -42,13 +42,13 @@ env APP_STATE_DB=$T/a.db AGENT_CHECKPOINT_DB=$T/c.db RAG_PERSIST_DIR=$T/chroma A
 
 작업 트리에 68개 변경이 있다. 두 세션의 작업이 섞여 있다. 묶음별로 커밋한다.
 
-- [ ] 1.1 이전 세션의 정리 작업 (10-04~05): 죽은 코드 8건, 캐시·빈 폴더, 문서 목차, `answer_replay.py`
-- [ ] 1.2 웹 챗을 `/v1/chat`으로 연결: `legal_backend.py`, `app.py`, 관련 테스트, README
-- [ ] 1.3 백엔드 수정: 검증기, 인용 점검, 프롬프트, 후속 질문 재작성, 답하면서 묻기, 검색 설정
-- [ ] 1.4 평가 도구: 새 채점기, 근거 고정 비교, 채점기 없는 측정값
-- [ ] 1.5 테스트가 `.env` 값에 의존하지 않게 한 수정
-- [ ] 1.6 이 계획 문서
-- [ ] 확인: `git status --short`가 비어 있다
+- [x] 1.1 이전 세션의 정리 작업 (10-04~05): 죽은 코드 8건, 캐시·빈 폴더, 문서 목차, `answer_replay.py`
+- [x] 1.2 웹 챗을 `/v1/chat`으로 연결: `legal_backend.py`, `app.py`, 관련 테스트, README
+- [x] 1.3 백엔드 수정: 검증기, 인용 점검, 프롬프트, 후속 질문 재작성, 답하면서 묻기, 검색 설정
+- [x] 1.4 평가 도구: 새 채점기, 근거 고정 비교, 채점기 없는 측정값
+- [x] 1.5 테스트가 `.env` 값에 의존하지 않게 한 수정
+- [x] 1.6 이 계획 문서
+- [x] 확인: `git status --short`가 비어 있다
 
 `app.py`와 `README.md`에는 두 세션의 변경이 함께 있다. 1.2에 넣고 커밋 메시지에 적는다.
 
@@ -56,12 +56,14 @@ env APP_STATE_DB=$T/a.db AGENT_CHECKPOINT_DB=$T/c.db RAG_PERSIST_DIR=$T/chroma A
 
 `tests/legal_rag`의 실패 9건은 코드가 바뀐 뒤 테스트를 갱신하지 않은 것이다. 코드의 현재 동작이 의도이므로 테스트를 맞춘다.
 
-- [ ] 2.1 `test_imported_chunking.py` 5건: 청크 머리말에 `[역할: …]`이 붙고, 역할 경계를 넘는 병합이 없어졌다
-- [ ] 2.2 `test_rechunk_corpus.py` 1건: 전략 이름이 `structure_rechunk_v2_roles`가 됐다
-- [ ] 2.3 `test_relevance_judge.py` 2건: 채점 결과의 인용 위치 필드가 바뀌었다 (`span_index`)
-- [ ] 2.4 `test_pool_extension.py` 1건: 행에 `question_domain` 필드가 추가됐다
-- [ ] 각 건에서 코드와 테스트 중 어느 쪽이 맞는지 커밋 기록으로 확인한다. 코드가 틀린 경우는 멈추고 보고한다
-- [ ] 확인: 두 묶음 모두 실패 0건. 커밋
+- [x] 2.1 `test_imported_chunking.py` 5건: 청크 머리말에 `[역할: …]`이 붙고, 역할 경계를 넘는 병합이 없어졌다
+- [x] 2.2 `test_rechunk_corpus.py` 1건: 전략 이름이 `structure_rechunk_v2_roles`가 됐다
+- [x] 2.3 `test_relevance_judge.py` 2건: 채점 결과의 인용 위치 필드가 바뀌었다 (`span_index`)
+- [x] 2.4 `test_pool_extension.py` 1건: 행에 `question_domain` 필드가 추가됐다
+- [x] 각 건에서 코드와 테스트 중 어느 쪽이 맞는지 커밋 기록으로 확인한다. 코드가 틀린 경우는 멈추고 보고한다
+- [x] 확인: 두 묶음 모두 실패 0건. 커밋 (`tests/legal_rag` 594 통과, Flask 175 통과)
+
+2단계에서 확인한 것: 역할이 다른 절은 이제 합치지 않는다. 그래서 한 줄짜리 "주문" 절이 다시 독립 청크가 된다. 09월의 "한 줄 절은 이웃에 붙인다"는 수정과 반대 방향이다. 문서(`docs/answer-grader-v3-calibration.md`)에 의도로 적혀 있어 테스트를 맞췄다. 기존 색인에는 영향이 없고, 새로 청킹하는 코퍼스에만 적용된다.
 
 ## 3단계. 삭제 범위 확정 (결정 필요)
 
