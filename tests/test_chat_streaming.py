@@ -16,7 +16,6 @@ from unittest import mock
 
 # Exactly the set static/lc-chat.js branches on (sendMessage, sse.onmessage).
 FRONTEND_EVENT_TYPES = {
-    "token_chunk",
     "thought",
     "final_response",
     "error",
