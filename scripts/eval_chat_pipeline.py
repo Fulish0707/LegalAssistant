@@ -220,8 +220,8 @@ def verify(
                                 "raw_guard": unsupported_citations(answer_text(answer), evidence(bundle) + [log["q"]])})
         return original_backfill(answer, bundle)
 
-    def verify_spy(answer, bundle, *, user_refs=()):
-        report = original_verify(answer, bundle, user_refs=user_refs)
+    def verify_spy(answer, bundle, **exemptions):
+        report = original_verify(answer, bundle, **exemptions)
         log["attempts"][-1].update({"ok": report.ok, "issues": issues(report)})
         return report
 
