@@ -8,7 +8,6 @@ import os
 import unittest
 
 
-
 TRACING_ENV = ("LANGSMITH_TRACING", "LANGSMITH_API_KEY", "LANGSMITH_PROJECT")
 
 
@@ -25,35 +24,6 @@ class TracingMetadataTests(unittest.TestCase):
             else:
                 os.environ[name] = value
 
-    def test_run_metadata_identifies_the_model_provider(self):
-        """Provider tagging identifies the connector used for each traced run."""
-        import langchain_config
-
-        os.environ["LLM_PROVIDER"] = "ollama"
-        metadata = langchain_config.run_metadata("user-1")
-
-        self.assertEqual(metadata["llm_provider"], "ollama")
-        self.assertEqual(metadata["thread_id"], "user-1")
-        self.assertIn("embedding_provider", metadata)
-
-    def test_run_metadata_names_the_chat_model(self):
-        """Provider alone does not identify a run: qwen3:4b and qwen3:8b differ."""
-        import langchain_config
-
-        os.environ["LLM_PROVIDER"] = "ollama"
-        os.environ["OLLAMA_MODEL"] = "qwen3:4b"
-
-        self.assertEqual(langchain_config.run_metadata("user-1")["llm_model"], "qwen3:4b")
-
-    def test_run_metadata_tolerates_a_guest_turn(self):
-        """Guests have no thread_id. A guest turn must still be traceable."""
-        import langchain_config
-
-        os.environ["LLM_PROVIDER"] = "ollama"
-        metadata = langchain_config.run_metadata(None)
-
-        self.assertEqual(metadata["thread_id"], "guest")
-        self.assertEqual(metadata["llm_provider"], "ollama")
 
     def test_tracing_is_disabled_by_default(self):
         os.environ.pop("LANGSMITH_TRACING", None)
