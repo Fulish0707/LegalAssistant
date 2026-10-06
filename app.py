@@ -490,7 +490,7 @@ def process_document_ocr():
         if temp_file_path and os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)
-            except OSError as e_clean:
+            except Exception as e_clean:
                 app.logger.error(f"Error cleaning up temp file {temp_file_path}: {e_clean}")
 
 
