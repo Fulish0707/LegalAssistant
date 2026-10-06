@@ -434,89 +434,63 @@ def allowed_file(filename, allowed_extensions):
            filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
 
-# --- OCR Processing Route (Existing) ---
 @app.route('/process_document_ocr', methods=['POST'])
 def process_document_ocr():
     if llm_ocr is None:
-        return jsonify({
-            "error": "OCR processing requires optional OCR dependencies such as pytesseract."
-        }), 503
+        return jsonify({"error": "OCR processing requires optional OCR dependencies such as pytesseract."}), 503
     llm = get_chat_model()
     if llm is None:
-        return jsonify({
-            "error": "Document analysis requires an LLM provider to be configured."
-        }), 503
+        return jsonify({"error": "Document analysis requires an LLM provider to be configured."}), 503
 
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
     file = request.files['file']
-    user_instructions = request.form.get('user_instructions', '')
     analysis_mode = request.form.get('analysis_mode', 'report')
-    question = request.form.get('question', '')
     add_to_knowledge_base = request.form.get('add_to_knowledge_base', '').lower() in {'1', 'true', 'yes', 'on'}
 
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
-
     if not allowed_file(file.filename, ALLOWED_EXTENSIONS_OCR):
         return jsonify({"error": "File type not allowed for OCR"}), 400
 
     filename = secure_filename(file.filename)
-    temp_file_path = None  # Initialize to ensure it's defined for the finally block
-
+    temp_file_path = None
     try:
-        # Create a temporary file to save the upload
-        # Using 'with' ensures the file handle is closed even if errors occur during creation/saving
-        with tempfile.NamedTemporaryFile(delete=False, dir=app.config['UPLOAD_FOLDER'], 
-                                         suffix=os.path.splitext(filename)[1]) as temp_file_obj:
-            temp_file_path = temp_file_obj.name
-            file.save(temp_file_obj) # Save the uploaded file object to the temp file
-
-        # At this point, temp_file_obj is closed, and the file is saved at temp_file_path
-        file_extension = filename.rsplit('.', 1)[1].lower()
+        with tempfile.NamedTemporaryFile(delete=False, dir=app.config['UPLOAD_FOLDER'],
+                                         suffix=os.path.splitext(filename)[1]) as temp_file:
+            temp_file_path = temp_file.name
+            file.save(temp_file)
 
         result_dict, status_code = llm_ocr.analyze_document(
             file_path=temp_file_path,
-            file_extension=file_extension,
-            user_instructions=user_instructions,
-            llm=llm, # Passed from app.py's imports
-            prompt_template=main_chat_prompt_template, # Passed from app.py's imports
-            logger=app.logger, # Pass Flask app's logger
+            file_extension=filename.rsplit('.', 1)[1].lower(),
+            user_instructions=request.form.get('user_instructions', ''),
+            llm=llm,
+            prompt_template=main_chat_prompt_template,
+            logger=app.logger,
             analysis_mode=analysis_mode,
-            question=question,
+            question=request.form.get('question', ''),
             include_extracted_text=add_to_knowledge_base,
             quota_reserver=reserve_ai_request,
         )
-
         if status_code == 429 and result_dict.get("error") == "daily_ai_quota_exceeded":
             return quota_exceeded_response(result_dict["quota_result"])
-
         if status_code == 200 and add_to_knowledge_base:
-            extracted_text = result_dict.pop("extracted_text", "")
-            ingestion_result = ingest_text_to_vector_store(
-                text=extracted_text,
+            result_dict["knowledge_base"] = ingest_text_to_vector_store(
+                text=result_dict.pop("extracted_text", ""),
                 source_name=filename,
-                metadata={
-                    "analysis_mode": analysis_mode,
-                    "uploaded_via": "document_workspace",
-                }, user_id=session["user_id"]
+                metadata={"analysis_mode": analysis_mode, "uploaded_via": "document_workspace"},
+                user_id=session["user_id"],
             )
-            result_dict["knowledge_base"] = ingestion_result
-        
         return jsonify(result_dict), status_code
-
     except Exception as e:
-        # This catch block is for errors during file handling in app.py itself, 
-        # before calling analyze_document.
-        app.logger.error(f"Unhandled error in process_document_ocr (file handling stage) for {filename if 'filename' in locals() else 'unknown file'}: {str(e)}", exc_info=True)
+        app.logger.error(f"Unhandled error in process_document_ocr for {filename}: {e}", exc_info=True)
         return jsonify({"error": f"An unexpected server error occurred during file preparation: {str(e)}"}), 500
     finally:
-        # Cleanup the temporary file
         if temp_file_path and os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)
-                app.logger.info(f"Cleaned up temp file: {temp_file_path}")
-            except Exception as e_clean:
+            except OSError as e_clean:
                 app.logger.error(f"Error cleaning up temp file {temp_file_path}: {e_clean}")
 
 
