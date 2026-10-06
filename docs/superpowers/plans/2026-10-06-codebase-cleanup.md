@@ -18,7 +18,7 @@
 
 ```
 .venv/bin/python -m pytest tests/legal_rag -q -p no:cacheprovider
-env APP_STATE_DB=$T/a.db AGENT_CHECKPOINT_DB=$T/c.db RAG_PERSIST_DIR=$T/chroma APP_ENV=testing \
+env APP_STATE_DB=$T/a.db RAG_PERSIST_DIR=$T/chroma APP_ENV=testing \
   LLM_PROVIDER=none EMBEDDING_PROVIDER=none LANGSMITH_TRACING=false \
   /home/layke/anaconda3/bin/python -m pytest tests --ignore=tests/legal_rag \
   --ignore=tests/test_ollama_connector_live.py -k 'not Live' -q -p no:cacheprovider
@@ -92,8 +92,8 @@ env APP_STATE_DB=$T/a.db AGENT_CHECKPOINT_DB=$T/c.db RAG_PERSIST_DIR=$T/chroma A
 - [x] 4.1 A 통계 분석과 테스트
 - [x] 4.2 B 유사 대화 검색
 - [x] 4.3 E 서류 초안: 경로, 패널, `/get_initial_state`와 `/chat`의 초안 필드, 테스트. DB 테이블은 그대로 둔다
-- [ ] 4.4 F 에이전트: `langchain_config.py`의 에이전트·도구·미들웨어, `llm_prompt.py`의 에이전트 프롬프트, 체크포인터, `evals/`, 해당 테스트. 사건 자료와 문서 분석이 쓰는 함수는 남긴다
-- [ ] 4.5 의존성 정리: `requirements.txt`, `env.yml`, `.env.example`, README의 실행 안내
+- [x] 4.4 F 에이전트: `langchain_config.py`의 에이전트·도구·미들웨어, `llm_prompt.py`의 에이전트 프롬프트, 체크포인터, `evals/`, 해당 테스트. 사건 자료와 문서 분석이 쓰는 함수는 남긴다
+- [x] 4.5 의존성 정리: `requirements.txt`, `env.yml`, `.env.example`, README의 실행 안내
 - [ ] 4.6 화면 정리: 지운 기능을 가리키는 메뉴와 문구. 브라우저로 두 페이지를 확인한다
 - [ ] 4.7 `src/legal_rag`의 죽은 코드: 정의만 있고 참조가 없는 함수·상수·설정
 - [ ] 4.8 `scripts/` 37개 분류: 문서나 현재 절차가 쓰는 것, 한 번 쓰고 끝난 것. 후자의 삭제는 목록을 보고 결정받는다

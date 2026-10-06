@@ -4,7 +4,7 @@
 
 ## 1. 프로젝트 개요
 
-웹 채팅은 사용자의 법률 질의에 필요한 근거를 검색 API에서 가져와 LangGraph 에이전트에 전달합니다. 별도 RAG 백엔드는 검색 API, 자체 답변 API, CLI를 제공하며 검색·생성·인용 검증을 처리합니다.
+웹 채팅은 사용자의 법률 질의를 별도 RAG 백엔드로 보내 답변과 근거를 받습니다. RAG 백엔드는 검색 API, 자체 답변 API, CLI를 제공하며 검색·생성·인용 검증을 처리합니다.
 
 현재 local 프로필은 형사·민사·행정·지식재산권 네 코퍼스를 조회하도록 설정되어 있습니다. 원문 데이터와 가공 데이터, Qdrant 색인은 저장소에 포함되지 않으므로 실행 전에 별도로 준비해야 합니다.
 
@@ -126,8 +126,9 @@ AIHub의 참조 답변과 저장된 답변 80개를 비교했습니다. qwen3:8b
 
 ## 6. 주요 코드와 설정
 
-- [app.py](app.py): Flask 라우트, 웹 채팅 SSE, 법률 근거 검색, 대화 상태 관리.
-- [langchain_config.py](langchain_config.py): Flask 채팅의 LangGraph 에이전트와 검색 서비스 호출.
+- [app.py](app.py): Flask 라우트, 웹 채팅 SSE, 대화 기록, 사건 자료 올리기.
+- [legal_backend.py](legal_backend.py): `/v1/chat` 호출과 답변·근거 표시 형식.
+- [langchain_config.py](langchain_config.py): 사건 자료의 Chroma 저장과 검색.
 - [src/legal_rag/](src/legal_rag/): 검색, 답변 생성, 인용 검증, FastAPI 구현.
 - [configs/local.yaml](configs/local.yaml): 로컬 모델, Qdrant, 검색 코퍼스, 재정렬 설정.
 - [scripts/serve.py](scripts/serve.py), [scripts/chat.py](scripts/chat.py): RAG API와 CLI 실행.
