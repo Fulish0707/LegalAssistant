@@ -385,6 +385,30 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(captured["metadata"]["analysis_mode"], "summary")
         self.assertEqual(captured["user_id"], self.session_user_id(browser))
 
+    def test_a_file_with_a_korean_name_is_analysed_and_keeps_its_name(self):
+        """secure_filename drops Hangul, which left "txt": no extension, a 500, and a nameless source."""
+        captured = {}
+
+        def fake_analyze_document(**kwargs):
+            captured["extension"] = kwargs["file_extension"]
+            return ({"report_html": "<p>ok</p>", "extracted_text": "본문"}, 200)
+
+        def fake_ingest(text, source_name, metadata=None, user_id=None):
+            captured["source_name"] = source_name
+            return {"ok": True, "chunk_count": 1}
+
+        with patch.object(self.app_module, "get_chat_model", lambda: object()), patch.object(
+            self.app_module.llm_ocr, "analyze_document", fake_analyze_document
+        ), patch.object(self.app_module, "ingest_text_to_vector_store", fake_ingest):
+            response = self.app_module.app.test_client().post(
+                "/process_document_ocr",
+                data={"file": (io.BytesIO("본문".encode()), "../폴더/임대차계약서.TXT"), "add_to_knowledge_base": "true"},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured, {"extension": "txt", "source_name": "임대차계약서.TXT"})
+
 
     # --- knowledge base isolation -----------------------------------------
 

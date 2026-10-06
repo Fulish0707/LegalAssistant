@@ -22,7 +22,6 @@ import json
 import re
 import os
 import secrets
-from werkzeug.utils import secure_filename
 import tempfile
 import requests
 from quota import (
@@ -467,17 +466,20 @@ def process_document_ocr():
     if not allowed_file(file.filename, ALLOWED_EXTENSIONS_OCR):
         return jsonify({"error": "File type not allowed for OCR"}), 400
 
-    filename = secure_filename(file.filename)
+    # The name is only a label and the temp file gets a random one, so it needs no sanitising
+    # beyond dropping any path. secure_filename would drop Hangul and leave "txt".
+    filename = os.path.basename(file.filename.replace("\\", "/"))
+    extension = filename.rsplit('.', 1)[1].lower()
     temp_file_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, dir=app.config['UPLOAD_FOLDER'],
-                                         suffix=os.path.splitext(filename)[1]) as temp_file:
+                                         suffix="." + extension) as temp_file:
             temp_file_path = temp_file.name
             file.save(temp_file)
 
         result_dict, status_code = llm_ocr.analyze_document(
             file_path=temp_file_path,
-            file_extension=filename.rsplit('.', 1)[1].lower(),
+            file_extension=extension,
             user_instructions=request.form.get('user_instructions', ''),
             llm=llm,
             prompt_template=main_chat_prompt_template,
