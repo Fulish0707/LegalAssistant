@@ -78,6 +78,34 @@ class ChatWithCaseDocumentsTests(ChatStreamBase):
         documents = self.ask.call_args.args[3]
         self.assertEqual([(d["name"], d["text"]) for d in documents], [("임대차계약서.pdf", self.stored()["quote"])])
 
+    def turn(self, message):
+        """One turn the way the page sends it: POST stores the message, GET streams the reply."""
+        self.client.post("/chat", json={"message": message})
+        search = mock.Mock(return_value={"ok": True, "results": []})
+        with mock.patch.object(self.app_module, "search_knowledge_base", search):
+            self.collect(query="message=" + message)
+        return search.call_args.args[1]
+
+    def test_a_short_follow_up_is_searched_together_with_the_question_before_it(self):
+        """Alone, "그럼 지연손해금은?" scored 0.17 against the lease it is about (2026-10-06)."""
+        self.as_browser("browser-following-up")
+        first = "계약이 끝났는데 집주인이 보증금을 돌려주지 않습니다."
+
+        self.assertEqual(self.turn(first), first)
+        self.assertEqual(self.turn("그럼 지연손해금은?"), first + "\n그럼 지연손해금은?")
+
+    def test_a_full_question_is_searched_alone_so_a_new_topic_drops_the_documents(self):
+        self.as_browser("browser-changing-topic")
+        self.turn("계약이 끝났는데 집주인이 보증금을 돌려주지 않습니다.")
+        new_topic = "회사에서 해고 통보를 받았습니다. 구제신청은 언제까지 하나요?"
+
+        self.assertEqual(self.turn(new_topic), new_topic)
+
+    def test_a_short_first_message_is_searched_alone(self):
+        self.as_browser("browser-starting-short")
+
+        self.assertEqual(self.turn("보증금 반환은요?"), "보증금 반환은요?")
+
     def test_a_browser_without_documents_calls_the_backend_as_before(self):
         self.collect_with([])
 

@@ -223,11 +223,27 @@ CASE_DOCUMENT_CHARS = int(os.getenv("CASE_DOCUMENT_CHARS", "1000"))
 # One lease against eight questions (bge-m3, 2026-10-06): four about the lease scored 0.52,
 # 0.38, 0.34 and 0.17 (a short follow-up), four about other matters 0.21, 0.21, 0.14, 0.12.
 CASE_DOCUMENT_MIN_SCORE = float(os.getenv("CASE_DOCUMENT_MIN_SCORE", "0.25"))
+# A message this short (characters without spaces) is taken for a follow-up and searched
+# together with the question before it. One lease, 59 pairs (bge-m3, 2026-10-06): follow-ups
+# of 9 to 11 characters reached the floor on 6 of 15 alone and 15 of 15 joined, and after a
+# question on another matter on 8 of 20 alone and 0 of 20 joined. Full questions of 15
+# characters or more are searched alone: joined, a new topic kept the lease on 10 of 12.
+# data/eval/reports/chat_pipeline/context-budget-2026-10-06/followup-scores.json.
+FOLLOW_UP_CHARS = 12
+
+
+def _document_query(user_input):
+    if len("".join(user_input.split())) > FOLLOW_UP_CHARS:
+        return user_input
+    asked = [turn["content"] for turn in get_chat_history_from_db(session["user_id"]) if turn["role"] == "user"]
+    if asked and asked[-1] == user_input:  # POST /chat stored this message before the stream began
+        asked.pop()
+    return f"{asked[-1]}\n{user_input}" if asked else user_input
 
 
 def _case_documents(user_input):
     """Passages of this browser's uploaded files that are closest to the message."""
-    found = search_knowledge_base(session["user_id"], user_input, k=CASE_DOCUMENT_LIMIT)
+    found = search_knowledge_base(session["user_id"], _document_query(user_input), k=CASE_DOCUMENT_LIMIT)
     return [{"name": hit["source"], "text": hit["quote"][:CASE_DOCUMENT_CHARS], "score": hit["score"]}
             for hit in found.get("results", []) if hit.get("quote") and hit["score"] >= CASE_DOCUMENT_MIN_SCORE]
 
