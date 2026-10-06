@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from legal_rag.config import Settings
 from legal_rag.llm import ChatModel
 from legal_rag.retrieval.hybrid import HybridRetriever, Retriever
-from legal_rag.schemas import ChatResponse, EvidenceBundle, LegalAnswer, QueryAnalysis, Turn, VerificationAction, VerificationReport
+from legal_rag.schemas import ChatResponse, EvidenceBundle, LegalAnswer, QueryAnalysis, Turn, UserDocument, VerificationAction, VerificationReport
 from legal_rag.verification import VerificationPolicy, Verifier, backfill_citations
 
 from .analyzer import QueryAnalyzer
@@ -75,7 +76,7 @@ class Orchestrator:
             settings=settings,
         )
 
-    def handle(self, message: str, *, conversation_id: str) -> ChatResponse:
+    def handle(self, message: str, *, conversation_id: str, user_documents: Sequence[UserDocument] = ()) -> ChatResponse:
         recorder = TraceRecorder(
             conversation_id=conversation_id,
             user_text=message,
@@ -122,7 +123,7 @@ class Orchestrator:
             bundle = self.context_builder.build(hits)
         trace.evidence_ids = [item.chunk_id for item in bundle.items]
 
-        answer, report, action = self._generate_verified(question, bundle, analysis, recent, open_questions, recorder)
+        answer, report, action = self._generate_verified(question, bundle, analysis, recent, open_questions, recorder, user_documents)
 
         if answer is None or report is None:
             recorder.finish(policy_action=VerificationAction.reject.value)
@@ -144,25 +145,31 @@ class Orchestrator:
 
     def _generate_verified(
         self, question: str, bundle: EvidenceBundle, analysis: QueryAnalysis, recent: list[Turn],
-        open_questions: list[str], recorder: TraceRecorder,
+        open_questions: list[str], recorder: TraceRecorder, user_documents: Sequence[UserDocument] = (),
     ) -> tuple[LegalAnswer | None, VerificationReport | None, VerificationAction]:
         """Generate, verify, and regenerate with the verifier's feedback while the policy asks for it."""
         answer: LegalAnswer | None = None
         report: VerificationReport | None = None
         action = VerificationAction.accept
         feedback: str | None = None
+        # What the user's documents say counts as the user's own words, and a document is not a
+        # legal source: listing one under citations is dropped, not treated as a fabricated source.
+        document_ids = {f"D{number}" for number in range(1, len(user_documents) + 1)}
+        user_refs = [*analysis.statute_refs, *analysis.case_refs, *(document.text for document in user_documents)]
         for attempt in range(self.settings.rag.max_regenerations + 1):
             try:
                 with recorder.stage(f"generate[{attempt}]"):
-                    draft = self.generator.generate(question, bundle, feedback=feedback, history=recent, open_questions=open_questions)
+                    draft = self.generator.generate(question, bundle, feedback=feedback, history=recent, open_questions=open_questions,
+                                                    user_documents=user_documents)
             except GenerationError:
                 # The model broke the JSON twice, e.g. by looping past max_tokens. Strip the
                 # draft that asked for this regeneration, or refuse; either beats a 500.
                 action = VerificationAction.strip if answer is not None else VerificationAction.reject
                 break
             with recorder.stage(f"verify[{attempt}]"):
+                draft = draft.model_copy(update={"citations": [c for c in draft.citations if c.source_id not in document_ids]})
                 answer = backfill_citations(draft, bundle)
-                report = self.verifier.verify(answer, bundle, user_refs=[*analysis.statute_refs, *analysis.case_refs])
+                report = self.verifier.verify(answer, bundle, user_refs=user_refs)
             action = self.policy.decide(report, attempt)
             if action != VerificationAction.regenerate:
                 break

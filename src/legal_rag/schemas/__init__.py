@@ -17,7 +17,7 @@ from .documents import (
     make_document_id,
 )
 from .evaluation import GenerationExample, RetrievalExample
-from .evidence import Evidence, EvidenceBundle
+from .evidence import Evidence, EvidenceBundle, UserDocument, render_user_documents
 from .query import QueryAnalysis, RetrievalFilters, RewrittenQueries, StandaloneQuestion
 from .response import ChatResponse
 from .trace import StageTiming, Trace
@@ -29,6 +29,7 @@ __all__ = [
     "Evidence", "EvidenceBundle", "GenerationExample", "LegalAnswer", "LegalDocument", "LegalDocumentBase",
     "QueryAnalysis", "RetrievalExample", "RetrievalFilters", "RewrittenQueries", "ScoredChunk", "SourceRef",
     "StageTiming", "StandaloneQuestion", "Statute", "StatuteArticle", "StatuteItem", "StatuteParagraph", "Trace", "Turn",
+    "UserDocument",
     "VerificationAction", "VerificationIssue", "VerificationReport", "citation_kind", "document_types_for",
-    "make_document_id",
+    "make_document_id", "render_user_documents",
 ]
