@@ -28,8 +28,10 @@ _KIND_LABELS = {
 }
 # Header fields that name a source; Type, Section and Section role describe it instead.
 _LABEL_FIELDS = ("Law", "Article", "Paragraph", "Court", "Authority", "Case number", "Reference number", "Decision date")
-# The model writes a source as S1, [S1] or [LEGAL SOURCE S1], alone or as a parenthesised list.
-_SOURCE_ID = re.compile(r"\[?(?:LEGAL SOURCE )?(?<![A-Za-z0-9])S(\d+)(?![A-Za-z0-9])\]?")
+# The model writes a source as S1, [S1] or [LEGAL SOURCE S1], alone or as a parenthesised list;
+# a passage of the user's own file is D1 or [USER DOCUMENT D1].
+_SOURCE_ID = re.compile(r"\[?(?:LEGAL SOURCE |USER DOCUMENT )?(?<![A-Za-z0-9])([SD]\d+)(?![A-Za-z0-9])\]?")
+DOCUMENT_KIND = "내 문서"
 _SOURCE_GROUP = re.compile(r"\(\s*(%s(?:\s*,\s*%s)*)\s*\)" % (_SOURCE_ID.pattern, _SOURCE_ID.pattern))
 
 
@@ -37,10 +39,14 @@ class LegalBackendUnavailable(Exception):
     """The service could not be reached or did not return a chat response."""
 
 
-def ask(base_url, message, conversation_id):
+def ask(base_url, message, conversation_id, documents=()):
+    """One chat turn. `documents` are passages of the user's own files: [{name, text, ...}]."""
     endpoint = base_url.rstrip("/") + "/v1/chat"
+    payload = {"message": message, "conversation_id": conversation_id}
+    if documents:
+        payload["user_documents"] = [{"name": document["name"], "text": document["text"]} for document in documents]
     try:
-        response = httpx.post(endpoint, json={"message": message, "conversation_id": conversation_id}, timeout=TIMEOUT)
+        response = httpx.post(endpoint, json=payload, timeout=TIMEOUT)
         response.raise_for_status()
         return response.json()
     except (httpx.HTTPError, ValueError) as error:
@@ -50,7 +56,7 @@ def ask(base_url, message, conversation_id):
 def _numbered(text, numbers):
     """Replace the model's source ids (S1, S2) with the sources panel's numbers."""
     def one(match):
-        source_id = "S" + match.group(1)
+        source_id = match.group(1)
         return f"[{numbers[source_id]}]" if source_id in numbers else match.group(0)
 
     text = _SOURCE_GROUP.sub(lambda group: "".join(one(match) for match in _SOURCE_ID.finditer(group.group(1))), text)
@@ -78,8 +84,11 @@ def _bullets(heading, items):
     return [heading + "\n" + "\n".join(f"- {item}" for item in items)] if items else []
 
 
-def render(body):
-    """(chat text, [{source, quote, kind, score}]) for a /v1/chat response body."""
+def render(body, documents=()):
+    """(chat text, [{source, quote, kind, score}]) for a /v1/chat response body.
+
+    `documents` are the user's passages sent with the turn, in the order sent (D1, D2, ...).
+    """
     kind = body.get("kind")
     if kind == "clarification":
         return CLARIFY_TEXT + "\n" + "\n".join(f"- {question}" for question in body.get("questions") or []), []
@@ -97,9 +106,11 @@ def render(body):
     # Show only what the answer relies on: a decline or an out-of-scope question still retrieves
     # five chunks, and cards for them would read as support.
     cited = {citation.get("source_id") for citation in answer.get("citations") or []}
-    cited |= {"S" + number for number in _SOURCE_ID.findall(prose)}
+    cited |= set(_SOURCE_ID.findall(prose))
     items = [item for item in (body.get("evidence") or {}).get("items") or [] if item.get("source_id") in cited]
-    numbers = {item["source_id"]: position for position, item in enumerate(items, 1)}
+    used = [(f"D{number}", document) for number, document in enumerate(documents, 1) if f"D{number}" in cited]
+    numbers = {source_id: position for position, source_id in
+               enumerate([*(item["source_id"] for item in items), *(source_id for source_id, _ in used)], 1)}
     text = _numbered(prose, numbers)
 
     sources = [
@@ -110,5 +121,8 @@ def render(body):
             "score": item.get("score"),
         }
         for item in items
+    ] + [
+        {"source": document["name"], "quote": document["text"].strip()[:QUOTE_CHARS], "kind": DOCUMENT_KIND, "score": document.get("score")}
+        for _, document in used
     ]
     return text, sources
