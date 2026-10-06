@@ -273,6 +273,7 @@ def _generate_legal_response_stream(user_input):
                 yield _sse({'type': 'thought', 'content': f'사건 자료 {len(documents)}건 참고'})
             body = legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id(), documents)
             chat_response, sources = legal_backend.render(body, documents)
+            questions = legal_backend.questions(body)
             yield _sse({'type': 'thought', 'content': f'근거 {len(sources)}건 확인'})
             # Second check on the shown text, whatever the service's verifier decided. It reads
             # the full evidence; the source cards carry only an excerpt. Of the user's documents it
@@ -282,13 +283,14 @@ def _generate_legal_response_stream(user_input):
             missing = unsupported_citations(chat_response, evidence_texts, own_clauses=[d["text"] for d in documents])
             chat_response = annotate_unsupported(chat_response, missing)
         else:
-            chat_response, sources = GREETING_REPLY, []
+            chat_response, sources, questions = GREETING_REPLY, [], []
 
         add_chat_message_to_db(session["user_id"], "assistant", chat_response)
         yield _sse({
             "type": "final_response",
             "chat_response": chat_response,
             "sources": sources,
+            "questions": questions,
         })
 
     except legal_backend.LegalBackendUnavailable:

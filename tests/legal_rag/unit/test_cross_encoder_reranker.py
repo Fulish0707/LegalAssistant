@@ -1,6 +1,9 @@
 """Cross-encoder reranking with a fake model loader: no download, no network."""
 from __future__ import annotations
 
+import threading
+import time
+
 from legal_rag.config import Settings
 from legal_rag.factory import build_reranker
 from legal_rag.reranking.cross_encoder import CrossEncoderReranker
@@ -188,3 +191,26 @@ def test_concurrent_first_calls_load_the_model_once():
     for thread in threads:
         thread.join()
     assert len(loader.calls) == 1
+
+
+def test_two_requests_never_score_at_the_same_time():
+    """Two passes at once need twice the activation memory: the startup warm-up and a first
+    request together ran the 8 GB card out of memory and the request got a 500 (2026-10-06)."""
+    running, overlaps = [], []
+
+    class _SlowEncoder:
+        def predict(self, pairs, batch_size):
+            running.append(1)
+            overlaps.append(len(running))
+            time.sleep(0.03)
+            running.pop()
+            return [0.0] * len(pairs)
+
+    reranker = CrossEncoderReranker(model='fake/model', device='cpu', loader=_FakeLoader(_SlowEncoder()))
+    candidates = _candidates()
+    threads = [threading.Thread(target=reranker.rerank, args=('질의', candidates, 2)) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert overlaps == [1, 1, 1, 1]

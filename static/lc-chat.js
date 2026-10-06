@@ -8,7 +8,9 @@
     railTab: '전체',
     draft: '',
     thinking: false,
-    extra: []
+    extra: [],
+    questions: [],   /* 최신 답변이 사용자에게 묻는 질문 — /chat final_response.questions */
+    answering: ''    /* 사용자가 답하려고 고른 질문 */
   };
 
   let sse = null;
@@ -73,6 +75,12 @@
         : `<div style="display:flex;justify-content:flex-start"><div style="max-width:100%;padding:18px 22px;border-radius:5px 16px 16px 16px;border:1px solid #e6e3dd;background:#fff;box-shadow:0 1px 2px rgba(20,23,26,.04),0 10px 26px rgba(20,23,26,.05);font-size:14px;line-height:1.85;white-space:pre-wrap;text-wrap:pretty">${esc(m.text)}</div></div>`
       ).join('')}
 
+      ${!P.thinking && P.questions.length ? `
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <div style="font-size:11.5px;color:#767d83">아래 질문에 답하시면 사건에 맞춰 더 좁혀서 안내합니다</div>
+        ${P.questions.map(q => `<button class="lc-outline" data-act="answer" data-key="${esc(q)}" style="text-align:left;padding:9px 13px;border:1px solid ${P.answering === q ? a : '#e6e3dd'};border-radius:11px;background:#fff;font-size:13px;line-height:1.6;color:#3d4348;cursor:pointer">${esc(q)}</button>`).join('')}
+      </div>` : ''}
+
       ${P.thinking ? `
       <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border:1px solid #e6e3dd;border-radius:14px;background:#fff;font-size:12.5px;color:#767d83">
         <span style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px">${esc(LC.S.traceLines[LC.S.traceLines.length - 1] || LC.TRACE_FALLBACK[0])}</span>
@@ -84,8 +92,13 @@
 
   <div style="flex:none;padding:10px 30px 12px;background:#fff;border-top:1px solid #e6e3dd">
     <div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:8px">
+      ${P.answering ? `
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:10px;background:#f4f1ea;font-size:12px;color:#3d4348">
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">답하는 질문: ${esc(P.answering)}</span>
+        <button class="lc-ghost" data-act="cancelAnswer" title="취소" style="border:0;background:transparent;color:#767d83;cursor:pointer">✕</button>
+      </div>` : ''}
       <div style="display:flex;gap:10px;align-items:flex-end;padding:10px 10px 10px 18px;border:1px solid #ddd9d1;border-radius:18px;background:#fff;box-shadow:0 1px 2px rgba(20,23,26,.04),0 10px 26px rgba(20,23,26,.05)">
-        <textarea id="userInput" rows="3" placeholder="상황을 적어주시면 법령과 판례를 찾아 설명해 드립니다." style="flex:1;min-width:0;padding:6px 0;border:0;background:transparent;font-size:14.5px;line-height:1.7;color:#14171a;resize:none;outline:none;overflow-y:hidden;height:auto">${esc(P.draft)}</textarea>
+        <textarea id="userInput" rows="3" placeholder="${P.answering ? '답을 적어 주세요.' : '상황을 적어주시면 법령과 판례를 찾아 설명해 드립니다.'}" style="flex:1;min-width:0;padding:6px 0;border:0;background:transparent;font-size:14.5px;line-height:1.7;color:#14171a;resize:none;outline:none;overflow-y:hidden;height:auto">${esc(P.draft)}</textarea>
         <div style="display:flex;align-items:center;gap:8px;flex:none">
           <button class="lc-outline" data-act="upload" title="자료 첨부" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;border:1px solid #e6e3dd;border-radius:9px;background:#fff;color:#767d83;cursor:pointer">${LC.icon('plus', 15)}</button>
           <button class="lc-outline" data-act="voice" style="height:34px;display:flex;align-items:center;gap:6px;padding:0 12px;border:1px solid #e6e3dd;border-radius:9px;background:#fff;font-size:12px;color:#3d4348;white-space:nowrap;cursor:pointer">${LC.icon('mic', 14, '#767d83')} 말로 하기</button>
@@ -116,11 +129,15 @@
   /* ---------- 서버 ---------- */
 
   function sendMessage(){
-    const text = (P.draft || '').trim();
-    if (!text || P.thinking) return;
+    const typed = (P.draft || '').trim();
+    if (!typed || P.thinking) return;
+    /* 고른 질문과 답을 한 메시지로 묶는다. 서버는 "두 달이요"가 어느 질문의 답인지 이 문장으로 안다. */
+    const text = P.answering ? `상담의 질문: ${P.answering}\n답변: ${typed}` : typed;
 
     P.extra.push({ role:'user', text });
     P.draft = '';
+    P.questions = [];
+    P.answering = '';
     P.thinking = true;
     LC.S.traceLines = [];
     LC.pinThread = true;
@@ -141,6 +158,7 @@
           if (data.type === 'thought') { LC.S.traceLines.push(data.content); LC.render(); }
           else if (data.type === 'final_response') {
             P.extra.push({ role:'agent', text: data.chat_response });
+            P.questions = data.questions || [];
             LC.SOURCES = (data.sources || []).map((h, i) => ({ id: String(i + 1), kind: h.kind || '내 문서', title: h.source, quote: h.quote, score: h.score }));
             P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
           }
@@ -194,10 +212,12 @@
       tone: k => { P.tone = k; },
       railTab: k => { P.railTab = k; },
       prompt: k => { P.draft = k; setTimeout(() => { const el = document.getElementById('userInput'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 0); },
+      answer: k => { P.answering = k; setTimeout(() => { const el = document.getElementById('userInput'); if (el) el.focus(); }, 0); },
+      cancelAnswer: () => { P.answering = ''; },
       easier: () => { P.tone = '쉬운 말'; P.draft = '위 내용을 더 쉽게 설명해 주세요.'; },
       newCase: () => {
         if (sse) { sse.close(); sse = null; }
-        Object.assign(P, { extra: [], draft: '', thinking: false, railTab: '전체' });
+        Object.assign(P, { extra: [], draft: '', thinking: false, railTab: '전체', questions: [], answering: '' });
         LC.S.traceLines = [];
         LC.SOURCES = [];
         LC.clearChatHistory();

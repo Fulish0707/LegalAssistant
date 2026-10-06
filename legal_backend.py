@@ -80,6 +80,17 @@ def evidence_texts(body):
     return [" ".join([*map(str, (item.get("header") or {}).values()), item.get("text") or ""]) for item in items]
 
 
+def questions(body):
+    """What the turn asks the user: the facts an answer still needs, or a clarification's questions."""
+    if body.get("kind") == "clarification":
+        return list(body.get("questions") or [])
+    if body.get("kind") == "answer":
+        # The model sometimes writes a statement here ("...해야 합니다."); it cannot be answered.
+        needed = (body.get("answer") or {}).get("additional_information_needed") or []
+        return [item for item in needed if not re.search(r"다\.?$", item.strip())]
+    return []
+
+
 def _bullets(heading, items):
     return [heading + "\n" + "\n".join(f"- {item}" for item in items)] if items else []
 
