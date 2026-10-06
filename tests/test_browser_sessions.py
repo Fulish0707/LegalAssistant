@@ -206,8 +206,9 @@ class BrowserSessionTests(unittest.TestCase):
             environment = os.environ.copy()
             environment["APP_STATE_DB"] = os.path.join(temp_dir, "app_state.db")
             environment["AGENT_CHECKPOINT_DB"] = os.path.join(temp_dir, "checkpoints.db")
+            # Empty, not removed: app.py's load_dotenv() fills in variables that are missing.
             for name in ("APP_ENV", "FLASK_ENV", "SECRET_KEY"):
-                environment.pop(name, None)
+                environment[name] = ""
 
             completed = subprocess.run(
                 [sys.executable, "-c", "import app"],
@@ -229,7 +230,7 @@ class BrowserSessionTests(unittest.TestCase):
             environment["AGENT_CHECKPOINT_DB"] = os.path.join(temp_dir, "checkpoints.db")
             environment["SECRET_KEY"] = "production-secret"
             for name in ("APP_ENV", "FLASK_ENV"):
-                environment.pop(name, None)
+                environment[name] = ""
 
             completed = subprocess.run(
                 [sys.executable, "-c", "import app; print(app.app.config['SESSION_COOKIE_SECURE'])"],
