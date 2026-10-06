@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from legal_rag.llm import ChatModel, Message, StructuredOutputError
 from legal_rag.llm.prompts import load_prompt
-from legal_rag.schemas import EvidenceBundle, LegalAnswer, Turn
+from collections.abc import Sequence
+
+from legal_rag.schemas import EvidenceBundle, LegalAnswer, Turn, UserDocument, render_user_documents
 
 from .conversation import render_turns
 
@@ -45,10 +47,11 @@ class Generator:
         self.plain_text = plain_text
 
     def generate(self, message: str, bundle: EvidenceBundle, *, feedback: str | None = None, history: list[Turn] | None = None,
-                 open_questions: list[str] | None = None) -> LegalAnswer:
+                 open_questions: list[str] | None = None, user_documents: Sequence[UserDocument] = ()) -> LegalAnswer:
         if self.plain_text:
             return self._generate_plain(message, bundle, feedback=feedback)
-        return self._generate_structured(message, bundle, feedback=feedback, history=history, open_questions=open_questions)
+        return self._generate_structured(message, bundle, feedback=feedback, history=history, open_questions=open_questions,
+                                         user_documents=user_documents)
 
     # ── plain text mode (for QLoRA adapter) ─────────────────────────────────
 
@@ -85,12 +88,15 @@ class Generator:
     # ── structured JSON mode (for Ollama / large models) ────────────────────
 
     def _generate_structured(self, message: str, bundle: EvidenceBundle, *, feedback: str | None = None, history: list[Turn] | None = None,
-                             open_questions: list[str] | None = None) -> LegalAnswer:
+                             open_questions: list[str] | None = None, user_documents: Sequence[UserDocument] = ()) -> LegalAnswer:
         evidence = bundle.render() if bundle.items else "(검색된 법률 근거가 없습니다. 근거 없이 조문이나 판례를 언급하지 마세요.)"
         messages = [
             Message(role="system", content=load_prompt("answer_system")),
             Message(role="user", content="다음은 검색된 법률 근거입니다.\n\n" + evidence),
         ]
+        if user_documents:
+            # The rules travel with the documents, so a turn without any is prompted exactly as before.
+            messages.append(Message(role="user", content=load_prompt("user_documents") + "\n\n" + render_user_documents(user_documents)))
         if history:
             # Context for what "그것" refers to. It is not evidence: citations are still checked against the sources.
             messages.append(Message(role="user", content="이전 대화(맥락 참고용이며 법적 근거가 아닙니다):\n" + "\n".join(render_turns(history))))

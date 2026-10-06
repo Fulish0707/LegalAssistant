@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from legal_rag.schemas import RetrievalFilters, ScoredChunk
+from legal_rag.schemas import RetrievalFilters, ScoredChunk, UserDocument
 
 
 class ChatRequest(BaseModel):
@@ -13,6 +13,8 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     conversation_id: str | None = Field(default=None, max_length=128)
     include_trace: bool = False
+    # Passages of the caller's own files that bear on this message; the service holds no user files.
+    user_documents: list[UserDocument] = Field(default_factory=list, max_length=3)
 
 
 class SearchRequest(BaseModel):
