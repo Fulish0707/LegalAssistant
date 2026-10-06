@@ -47,11 +47,10 @@ class ChatStreamBase(unittest.TestCase):
         cls.tmpdir = tempfile.TemporaryDirectory()
         cls.saved_env = {
             name: os.environ.get(name)
-            for name in ("APP_STATE_DB", "AGENT_CHECKPOINT_DB", "RAG_PERSIST_DIR", "APP_ENV", "LANGSMITH_TRACING")
+            for name in ("APP_STATE_DB", "RAG_PERSIST_DIR", "APP_ENV", "LANGSMITH_TRACING")
         }
         cls.saved_modules = {name: sys.modules.get(name) for name in cls.MODULE_NAMES}
         os.environ["APP_STATE_DB"] = os.path.join(cls.tmpdir.name, "app_state.db")
-        os.environ["AGENT_CHECKPOINT_DB"] = os.path.join(cls.tmpdir.name, "checkpoints.db")
         os.environ["RAG_PERSIST_DIR"] = os.path.join(cls.tmpdir.name, "chroma")
         os.environ["APP_ENV"] = "testing"
         os.environ["LANGSMITH_TRACING"] = "false"

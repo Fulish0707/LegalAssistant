@@ -65,7 +65,6 @@ class AppContractTests(unittest.TestCase):
     MODULE_NAMES = ("app", "langchain_config", "llm_model", "llm_prompt")
     PINNED_ENV = (
         "APP_STATE_DB",
-        "AGENT_CHECKPOINT_DB",
         "RAG_PERSIST_DIR",
         "APP_ENV",
         "LLM_PROVIDER",
@@ -82,7 +81,6 @@ class AppContractTests(unittest.TestCase):
         # Every store lives in one fresh temporary directory: the tests must never
         # touch the developer's real SQLite files or Chroma collection.
         os.environ["APP_STATE_DB"] = os.path.join(cls.tmpdir.name, "app_state.db")
-        os.environ["AGENT_CHECKPOINT_DB"] = os.path.join(cls.tmpdir.name, "checkpoints.db")
         os.environ["RAG_PERSIST_DIR"] = os.path.join(cls.tmpdir.name, "chroma")
         os.environ["APP_ENV"] = "testing"
         # Pin both connectors to "none". Ollama needs no credential, so with the
@@ -143,7 +141,6 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["status"], "ok")
         self.assertFalse(response.json["llm_configured"])
-        self.assertFalse(response.json["agent_configured"])
         self.assertNotIn("google_oidc_configured", response.json)
 
     def test_clients_receive_distinct_stable_anonymous_identities(self):
