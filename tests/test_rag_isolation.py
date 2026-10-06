@@ -1,26 +1,12 @@
 import importlib
 import os
 import sys
-import tempfile
 import unittest
-
-
-class FakeRetriever:
-    def __init__(self, documents):
-        self.documents = documents
-
-    def invoke(self, query):
-        return self.documents
 
 
 class FakeVectorStore:
     def __init__(self):
-        self.retriever_filters = []
         self.added_documents = []
-
-    def as_retriever(self, search_kwargs):
-        self.retriever_filters.append(search_kwargs["filter"])
-        return FakeRetriever([])
 
     def add_documents(self, documents):
         self.added_documents.extend(documents)
@@ -59,17 +45,6 @@ class RagIsolationTests(unittest.TestCase):
     def tearDown(self):
         self.module.get_vector_store = self.original_get_vector_store
 
-    def test_retrievers_are_created_with_the_callers_user_filter(self):
-        get_user_retriever = getattr(self.module, "get_user_retriever", None)
-        self.assertIsNotNone(get_user_retriever)
-
-        get_user_retriever("account-a").invoke("question one")
-        get_user_retriever("account-b").invoke("question two")
-
-        self.assertEqual(
-            self.store.retriever_filters,
-            [{"user_id": "account-a"}, {"user_id": "account-b"}],
-        )
 
     def test_ingestion_assigns_a_shared_document_owner_and_timestamp_to_every_chunk(self):
         result = self.module.ingest_text_to_vector_store(
@@ -88,29 +63,6 @@ class RagIsolationTests(unittest.TestCase):
         self.assertTrue(all(chunk.metadata["user_id"] == "account-a" for chunk in self.store.added_documents))
         self.assertTrue(all(chunk.metadata["document_id"] == result["document_id"] for chunk in self.store.added_documents))
         self.assertTrue(all(chunk.metadata["ingested_at"] == result["ingested_at"] for chunk in self.store.added_documents))
-
-    def test_folder_ingestion_stamps_the_owner_so_the_chunks_are_retrievable(self):
-        """Every read path filters on user_id. Chunks ingested without one are
-        write-only: stored in Chroma and invisible to search and the retriever."""
-        with tempfile.TemporaryDirectory() as source_dir:
-            with open(os.path.join(source_dir, "note.txt"), "w", encoding="utf-8") as handle:
-                handle.write("PS_Agent drafts personal statements and reports.")
-            original_dir = os.environ.get("RAG_DOCUMENTS_DIR")
-            os.environ["RAG_DOCUMENTS_DIR"] = source_dir
-            try:
-                result = self.module.ingest_source_folder(user_id="account-a")
-            finally:
-                if original_dir is None:
-                    os.environ.pop("RAG_DOCUMENTS_DIR", None)
-                else:
-                    os.environ["RAG_DOCUMENTS_DIR"] = original_dir
-
-        self.assertTrue(result["ok"])
-        self.assertGreater(result["chunk_count"], 0)
-        self.assertTrue(self.store.added_documents)
-        self.assertTrue(
-            all(chunk.metadata.get("user_id") == "account-a" for chunk in self.store.added_documents)
-        )
 
 
 if __name__ == "__main__":

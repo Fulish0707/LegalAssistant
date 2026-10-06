@@ -85,10 +85,11 @@ env APP_STATE_DB=$T/a.db RAG_PERSIST_DIR=$T/chroma APP_ENV=testing \
 
 정리 뒤에 따로 다룰 일: 사건 자료에 올린 문서는 지금 챗 답변에 쓰이지 않는다. 판례 검색 화면은 예시 데이터로 동작한다.
 
-결정을 기다리는 것 (지우지 않았다):
+결정받은 것 (2026-10-06):
 
-- 왼쪽 메뉴의 "내용증명 만들기" 바로가기. 서류 초안 패널은 없어졌고, 이 버튼은 입력창에 "내용증명 초안을 만들어 주세요."를 채운다.
-- `langchain_config.py`의 폴더 적재와 사용자별 검색기 (`ingest_source_folder`, `get_user_retriever`, `retrieve_for_user`, `load_rag_documents`, `get_documents_dir`, `get_document_source_folder`). 테스트는 있고 부르는 경로는 없다. 사건 자료를 챗에 다시 연결할 때 쓸 수 있다.
+- 왼쪽 메뉴의 "내용증명 만들기" 바로가기: 지웠다.
+- `langchain_config.py`의 폴더 적재와 사용자별 검색기 6개 함수와 테스트 2개: 지웠다. `langchain-community`와 `RAG_DOCUMENTS_DIR`도 함께 없앴다.
+- 테스트가 덮지 않는 평가 스크립트의 긴 함수: 그대로 둔다.
 
 ## 4단계. 죽은 코드 삭제
 
@@ -99,7 +100,7 @@ env APP_STATE_DB=$T/a.db RAG_PERSIST_DIR=$T/chroma APP_ENV=testing \
 - [x] 4.3 E 서류 초안: 경로, 패널, `/get_initial_state`와 `/chat`의 초안 필드, 테스트. DB 테이블은 그대로 둔다
 - [x] 4.4 F 에이전트: `langchain_config.py`의 에이전트·도구·미들웨어, `llm_prompt.py`의 에이전트 프롬프트, 체크포인터, `evals/`, 해당 테스트. 사건 자료와 문서 분석이 쓰는 함수는 남긴다
 - [x] 4.5 의존성 정리: `requirements.txt`, `env.yml`, `.env.example`, README의 실행 안내
-- [x] 4.6 화면 정리: 서버가 보내지 않는 `token_chunk` 분기를 지웠다. 세 화면과 한 턴을 브라우저로 확인했다. "내용증명 만들기" 바로가기는 결정을 기다린다
+- [x] 4.6 화면 정리: 서버가 보내지 않는 `token_chunk` 분기를 지웠다. 세 화면과 한 턴을 브라우저로 확인했다. "내용증명 만들기" 바로가기는 뒤에 지웠다
 - [x] 4.7 `src/legal_rag`의 죽은 코드: 지운 것이 없다. 후보는 6개, 합쳐 22줄이다. `boundary_kappa`는 과거 실험 스크립트가 쓰고, `app_for_uvicorn`은 밖에서 부르는 진입점이고, 나머지 4개는 테스트가 쓴다
 - [x] 4.8 `scripts/` 37개 분류: 32개는 문서·테스트·다른 코드가 쓴다. 나머지 5개 중 4개는 QLoRA 어댑터 평가(G, 유지)이고 1개(`run_structural_all.sh`)는 과거 실험 기록이 쓴다. 지울 것이 없다
 - [x] 확인: `tests/legal_rag` 594 통과, Flask 108 통과. 실제 서버(qwen3:4b)로 `/v1/chat` 한 턴과 브라우저 웹 챗 두 턴이 답했다
