@@ -215,14 +215,14 @@ def _legal_conversation_id():
     return f"{session['user_id']}-{session.get('conversation_epoch', 0)}"
 
 
-# Passages of the user's files sent with a turn. They share the answer model's 8,192-token
-# context with the legal evidence, which alone is 7,500 characters on 43 of 274 measured turns
-# (2026-10-06), so the passages are kept to about 1,100 tokens.
-CASE_DOCUMENT_LIMIT = 2
-CASE_DOCUMENT_CHARS = 700
+# Passages of the user's files sent with a turn. Three of 1,000 characters add about 2,700
+# tokens to the answer prompt: up to 9,250 on the longest-evidence questions, which with 2,048
+# output tokens fits the 12,288 context (2026-10-06). /v1/chat accepts at most three.
+CASE_DOCUMENT_LIMIT = min(int(os.getenv("CASE_DOCUMENT_LIMIT", "3")), 3)
+CASE_DOCUMENT_CHARS = int(os.getenv("CASE_DOCUMENT_CHARS", "1000"))
 # One lease against eight questions (bge-m3, 2026-10-06): four about the lease scored 0.52,
 # 0.38, 0.34 and 0.17 (a short follow-up), four about other matters 0.21, 0.21, 0.14, 0.12.
-CASE_DOCUMENT_MIN_SCORE = 0.25
+CASE_DOCUMENT_MIN_SCORE = float(os.getenv("CASE_DOCUMENT_MIN_SCORE", "0.25"))
 
 
 def _case_documents(user_input):
