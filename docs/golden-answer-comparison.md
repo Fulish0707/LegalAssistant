@@ -11,20 +11,21 @@ with the same shared answer prompt, settings and 7500-character evidence ceiling
 The reference answers are withheld from generation. Complete answers are graded
 with the same v2 Qwen3:8B grader, no thinking and a 16384-token context.
 
-## Run or resume
+## Start a new run
 
 From the repository root, with Gemini selected in `.env`, Ollama running and all
 eight original/structural Qdrant indexes available:
 
 ```bash
-PYTHONPATH=src .venv/bin/python scripts/eval_golden_answers.py all
+PYTHONPATH=src .venv/bin/python scripts/eval_golden_answers.py all \
+  --out data/eval/reports/chat_pipeline/structural-golden-new-run
 ```
 
-The phases can also be run independently:
+Use the same `--out` for each phase or to resume that new run. The commands below
+address the completed historical run at the default path; its saved answers can
+still be graded and reported, but its frozen sources differ from the current code:
 
 ```bash
-PYTHONPATH=src .venv/bin/python scripts/eval_golden_answers.py prepare
-PYTHONPATH=src .venv/bin/python scripts/eval_golden_answers.py generate
 PYTHONPATH=src .venv/bin/python scripts/eval_golden_answers.py judge
 PYTHONPATH=src .venv/bin/python scripts/eval_golden_answers.py report
 ```
@@ -89,4 +90,16 @@ The cleanup preserves the completed comparison JSON values, including determinis
 bootstrap intervals and group scores. Changing the runner source still triggers
 its frozen generation-source check: reporting completed runs works, while resuming
 generation with changed sources requires a separate run with fresh provenance.
-The generation replay helper under `data/` remains a separate future refactor.
+
+## Maintained generation code (2026-10-05)
+
+The `generate` phase uses `legal_rag.evaluation.answer_replay.AnswerReplay` with
+explicit settings and a request limiter shared across both arms. It no longer
+loads the historical replay with `runpy` or changes that script's globals. Four
+HTTP attempts, quota/backoff handling, verification and regeneration policy,
+usage records, and full-answer scoring are preserved. The historical `replay.py`
+remains unchanged for provenance.
+
+New selections freeze the maintained helper's hash. Existing selection manifests
+are not rewritten: use a new output directory to generate with the current code.
+The historical output path remains the default for saved-run judging/reporting.

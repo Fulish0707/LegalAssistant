@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +17,7 @@ BASE = ROOT / 'data/eval/reports/chat_pipeline/formal-2026-09-28-articles/answer
 SOURCE_FILES = ('scripts/eval_golden_answers.py', 'src/legal_rag/rag/generator.py',
                 'src/legal_rag/rag/context.py', 'src/legal_rag/llm/prompts/answer_system.md',
                 'src/legal_rag/verification/policy.py',
-                'data/eval/reports/chat_pipeline/gemini-2026-09-30/replay.py')
+                'src/legal_rag/evaluation/answer_replay.py')
 
 
 def rows(path):
@@ -98,6 +97,7 @@ def prepare(out):
 
 
 def generate(out):
+    from legal_rag.evaluation.answer_replay import AnswerReplay
     from legal_rag.schemas import EvidenceBundle
     config = settings()
     if config.llm.backend != 'gemini':
@@ -106,10 +106,7 @@ def generate(out):
     for path, digest in selected['source_hashes'].items():
         if sha(ROOT / path) != digest:
             raise ValueError('Generation source changed: ' + path)
-    module = runpy.run_path(str(ROOT / SOURCE_FILES[-1]))
-    generator = module['generate']
-    generator.__globals__['SETTINGS'] = config
-    generator.__globals__['REQUEST_INTERVAL'] = 15.0
+    replay = AnswerReplay(config, request_interval=15.0)
     contexts, done = {}, {}
     for arm in ARMS:
         d = out / arm
@@ -144,7 +141,7 @@ def generate(out):
             if done[arm].get(ref['key'], {}).get('kind') in ('answer', 'rejected'):
                 continue
             row = contexts[arm][ref['key']]
-            result = generator(row)
+            result = replay.generate(row)
             bundle = EvidenceBundle.model_validate(row['evidence'])
             result['evidence'] = [' '.join(map(str, item.header.values())) + ' ' + item.text for item in bundle.items]
             result['final_text'] = result.get('full_text', '')

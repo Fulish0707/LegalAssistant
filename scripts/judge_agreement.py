@@ -23,7 +23,7 @@ from pathlib import Path
 import typer
 
 from legal_rag.evaluation.calibration import (
-    BOUNDARY_KEYS, PASS_KAPPA, agreement, agreement_paths, boundary_kappa, calibration_fingerprint, disagreement_rows,
+    BOUNDARY_KEYS, PASS_KAPPA, agreement, agreement_paths, calibration_fingerprint, disagreement_rows,
     judge_passes, missing_llm_message, model_grades, quote_downgrades, read_reference_grades, require_reference_grades,
     write_review)
 from legal_rag.evaluation.judgment_store import JudgmentStore

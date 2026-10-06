@@ -1,5 +1,9 @@
 # Prepare the full legal QA corpus
 
+Use the shared [training environment setup](local-qlora.md#separate-training-environment)
+to create `legal-qlora` and register its notebook kernel. The full-corpus data and
+notebook steps below remain separate from the pilot workflow.
+
 For a complete, commented Qwen3-4B training workflow, open
 [`sft_qlora_full.ipynb`](../sft_qlora_full.ipynb). It loads the full preparation
 directly and keeps GPU training disabled until `RUN_TRAINING=True`. The older

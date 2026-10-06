@@ -1,5 +1,8 @@
 # 관련성 Judge 3차 프롬프트
 
+이 문서는 당시 prompt 전문을 보관한 기록이다. 현재 corpus routing과 실행 명령은
+[Corpus relevance prompts](corpus-relevance-prompts.md)를 참고한다.
+
 시스템 지시 1991자, 입력 템플릿 포함 2164자. 실제 질문·답변·조각은 별도 입력이다.
 
 ## 시스템 지시

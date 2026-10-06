@@ -27,7 +27,6 @@ _SENTENCE_BREAK = re.compile(r"(?<=[^\s\d][.!?。])\s+")
 
 _ARTICLE = re.compile(r"^\s*(제\d+조(?:의\d+)?)\s*(?:\(([^)]*)\))?\s*(.*)$")
 _PARAGRAPH = re.compile(r"^\s*([①-⑮])\s*(.*)$")
-_ITEM = re.compile(r"^\s*(\d{1,2}\.)\s+(\S.*)$")
 
 _LEVEL1 = re.compile(r"^\s*(\d{1,2})\.\s*(\S.*)$")
 _LEVEL2 = re.compile(r"^\s*([가-하])\.\s*(\S.*)$")
