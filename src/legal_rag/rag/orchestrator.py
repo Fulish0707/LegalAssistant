@@ -12,6 +12,7 @@ from legal_rag.verification import VerificationPolicy, Verifier, backfill_citati
 
 from .analyzer import QueryAnalyzer
 from .clarify import ClarificationPolicy
+from .condenser import QueryCondenser
 from .context import ContextBuilder
 from .conversation import ConversationStore
 from .generator import GenerationError, Generator
@@ -37,7 +38,9 @@ class Orchestrator:
         policy: VerificationPolicy,
         store: ConversationStore,
         settings: Settings,
+        condenser: QueryCondenser | None = None,
     ) -> None:
+        self.condenser = condenser
         self.analyzer = analyzer
         self.clarifier = clarifier
         self.rewriter = rewriter
@@ -54,7 +57,8 @@ class Orchestrator:
         return cls(
             analyzer=QueryAnalyzer(model, history_turns=settings.rag.history_turns),
             clarifier=ClarificationPolicy(settings.rag.allow_clarification),
-            rewriter=QueryRewriter(model if settings.rag.llm_rewrite else None),
+            condenser=QueryCondenser(model, history_turns=settings.rag.history_turns),
+            rewriter=QueryRewriter(model if settings.rag.llm_rewrite else None, analyzer_terms=settings.rag.analyzer_terms_in_search),
             retriever=retriever,
             context_builder=ContextBuilder(
                 settings.rag.max_evidence_chars,
@@ -92,17 +96,26 @@ class Orchestrator:
             self._remember(conversation_id, "\n".join(analysis.missing_facts), [])
             return ChatResponse(kind="clarification", conversation_id=conversation_id, questions=list(analysis.missing_facts), trace=trace)
 
+        # Retrieval and generation work on a question that stands alone; the user's own words
+        # (and so the verifier's user_refs) stay `message`.
+        recent = history[-self.settings.rag.history_turns :] if self.settings.rag.history_turns > 0 else []
+        with recorder.stage("condense"):
+            question = self.condenser.condense(message, history) if self.condenser else message
+
+        # Facts the analyzer wanted but the turn is answered without; the answer states them.
+        open_questions = list(analysis.missing_facts) if analysis.needs_more_info else []
+
         with recorder.stage("rewrite"):
-            queries = self.rewriter.rewrite(message, analysis)
+            queries = self.rewriter.rewrite(question, analysis)
             filters = self.rewriter.filters(analysis) if self.settings.rag.hard_filter else None
         trace.search_queries = list(queries.search_queries)
 
         k = self.settings.retrieval.k_final
         with recorder.stage("retrieve"):
             if isinstance(self.retriever, HybridRetriever):
-                hits = self.retriever.retrieve_many(queries.search_queries, k, filters, rerank_query=message)
+                hits = self.retriever.retrieve_many(queries.search_queries, k, filters, rerank_query=question)
             else:
-                hits = self.retriever.retrieve(message, k, filters)
+                hits = self.retriever.retrieve(question, k, filters)
         trace.retrieved = dict(getattr(self.retriever, "last_trace", {}) or {})
 
         with recorder.stage("context"):
@@ -116,7 +129,7 @@ class Orchestrator:
         for attempt in range(self.settings.rag.max_regenerations + 1):
             try:
                 with recorder.stage(f"generate[{attempt}]"):
-                    draft = self.generator.generate(message, bundle, feedback=feedback)
+                    draft = self.generator.generate(question, bundle, feedback=feedback, history=recent, open_questions=open_questions)
             except GenerationError:
                 # The model broke the JSON twice, e.g. by looping past max_tokens. Strip the
                 # draft that asked for this regeneration, or refuse; either beats a 500.

@@ -23,6 +23,15 @@ class UnsupportedCitationTests(unittest.TestCase):
     def test_same_article_number_under_another_law_is_flagged(self):
         self.assertEqual(unsupported_citations("민법 제28조를 보면", ["근로기준법 제28조"]), ["민법 제28조"])
 
+    def test_former_law_wording_is_not_a_law_name(self):
+        """"구법 제62조" refers to an older version of the law under discussion; 구법 is no title."""
+        answer = "같은 법 제71조 제11호(또는 구법 제62조)에서 처벌합니다."
+        evidence = ["정보통신망법 제71조 제11호", "구 정보통신망법 제62조 제4호"]
+        self.assertEqual(unsupported_citations(answer, evidence), [])
+
+    def test_former_law_article_missing_from_evidence_is_still_flagged(self):
+        self.assertEqual(unsupported_citations("구법 제62조에 따릅니다.", ["제71조"]), ["제62조"])
+
     def test_bare_article_passes_when_the_number_is_in_evidence(self):
         self.assertEqual(unsupported_citations("제3조의3에 따라", ["주택임대차보호법 제3조의3(임차권등기명령)"]), [])
 
@@ -71,20 +80,12 @@ if __name__ == "__main__":
     unittest.main()
 
 
-import json as _json
-from langchain_core.messages import AIMessage
-from tests.test_chat_streaming import ChatStreamBase, StubAgent
-
-
-def _schema(chat):
-    return _json.dumps({"chat_response": chat, "statement_suggestion": "", "job_statement_suggestion": "",
-                        "report_suggestion": ""}, ensure_ascii=False)
+from tests.test_chat_streaming import ChatStreamBase, backend_answer
 
 
 class CitationGuardStreamTests(ChatStreamBase):
     def final_for(self, chat):
-        agent = StubAgent([("values", {"messages": [AIMessage(content=_schema(chat))]})])
-        return [e for e in self.collect(agent, "message=보증금 문의") if e["type"] == "final_response"][0]
+        return self.final(self.collect(backend_answer(chat)))
 
     def test_unsupported_article_in_the_answer_gets_a_notice(self):
         final = self.final_for("법적 근거: 민법 제543조")
@@ -93,3 +94,11 @@ class CitationGuardStreamTests(ChatStreamBase):
 
     def test_answer_without_citations_is_untouched(self):
         self.assertEqual(self.final_for("보증금은 돌려받을 수 있습니다.")["chat_response"], "보증금은 돌려받을 수 있습니다.")
+
+    def test_an_article_deep_in_the_evidence_is_not_flagged(self):
+        """The source cards show a 400-character excerpt; the guard must read the whole block."""
+        item = {"source_id": "S1", "document_type": "judgment", "score": 0.9, "header": {"Type": "Case"},
+                "text": "가" * 600 + " 민법 제543조에 따라 해지할 수 있다."}
+        final = self.final(self.collect(backend_answer("민법 제543조에 따라 해지할 수 있습니다.", items=[item])))
+
+        self.assertNotIn("확인 필요", final["chat_response"])

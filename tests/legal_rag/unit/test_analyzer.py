@@ -39,3 +39,11 @@ def test_clarification_policy():
     assert p.should_clarify(QueryAnalysis(needs_more_info=True, missing_facts=["x"], statute_refs=["민법 제750조"])) is False
     assert p.should_clarify(QueryAnalysis(needs_more_info=True)) is False
     assert ClarificationPolicy(allow=False).should_clarify(QueryAnalysis(needs_more_info=True, missing_facts=["x"])) is False
+
+
+def test_a_question_with_a_legal_area_is_answered_not_questioned():
+    # Asking instead of answering stalled conversations: 8 of 10 replies to a clarification were
+    # questioned again (2026-10-05). With an area to search, the answer carries the open questions.
+    p = ClarificationPolicy(allow=True)
+    assert p.should_clarify(QueryAnalysis(domain="형사", needs_more_info=True, missing_facts=["혈중알코올농도"])) is False
+    assert p.should_clarify(QueryAnalysis(domain=None, needs_more_info=True, missing_facts=["어떤 일이 있었나요?"])) is True

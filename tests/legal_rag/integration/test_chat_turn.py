@@ -3,7 +3,7 @@ import pytest
 from legal_rag.llm import FakeChatModel
 from legal_rag.rag.conversation import InMemoryConversationStore
 from legal_rag.rag.orchestrator import Orchestrator
-from legal_rag.schemas import Citation, CitationKind, Confidence, LegalAnswer, QueryAnalysis
+from legal_rag.schemas import Citation, CitationKind, Confidence, LegalAnswer, QueryAnalysis, StandaloneQuestion
 from legal_rag.verification import VerificationPolicy, Verifier
 from tests.legal_rag.integration.test_ingest_to_search import indexed  # noqa: F401
 
@@ -69,11 +69,29 @@ def test_missing_facts_returns_clarification_without_retrieval(retriever):
     assert resp.trace.policy_action == "clarify" and resp.trace.search_queries == []
 
 
+def test_missing_facts_with_a_legal_area_are_answered_and_carried_into_the_answer(retriever):
+    settings, r = retriever
+    analysis = QueryAnalysis(domain="민사", issues=["보증금 반환"], needs_more_info=True, missing_facts=["임대차 계약 종료일", "보증금 액수"])
+    model = FakeChatModel({"QueryAnalysis": [analysis], "LegalAnswer": [_answer()]})
+    resp = _orchestrator(settings, r, model).handle("집주인이 보증금을 안 돌려줘요", conversation_id="n1")
+    assert resp.kind == "answer" and resp.evidence.items
+    prompt = _generation_prompts(model)[0]
+    assert "아직 확인되지 않은 사실" in prompt and "임대차 계약 종료일" in prompt and "보증금 액수" in prompt
+    assert prompt.index("아직 확인되지 않은 사실") < prompt.index("질문: 집주인이")
+
+
+def test_no_open_questions_block_when_nothing_is_missing(retriever):
+    settings, r = retriever
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(domain="민사")], "LegalAnswer": [_answer()]})
+    _orchestrator(settings, r, model).handle("임차권등기명령 신청서에 적어야 하는 사항은?", conversation_id="n2")
+    assert "아직 확인되지 않은 사실" not in _generation_prompts(model)[0]
+
+
 def test_history_is_stored_but_evidence_text_is_not(retriever):
     settings, r = retriever
     store = InMemoryConversationStore()
     plain = LegalAnswer(summary="일반적인 안내입니다.", analysis="근거 없이 일반적인 절차만 설명합니다.", confidence=Confidence.low)
-    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(), QueryAnalysis()], "LegalAnswer": [plain, plain]})
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(), QueryAnalysis()], "StandaloneQuestion": [StandaloneQuestion(question="질문에 이어 후속 질문")], "LegalAnswer": [plain, plain]})
     orch = _orchestrator(settings, r, model, store)
     orch.handle("질문", conversation_id="c4")
     orch.handle("후속 질문", conversation_id="c4")
@@ -81,6 +99,69 @@ def test_history_is_stored_but_evidence_text_is_not(retriever):
     assert [t.role for t in turns] == ["user", "assistant", "user", "assistant"]
     assert turns[1].evidence_ids and "LEGAL SOURCE" not in turns[1].content
     assert "질문" in model.calls[2].messages[-1].content and "이전 대화" in model.calls[2].messages[-1].content
+
+
+def _spy_retrieval(monkeypatch, hybrid):
+    seen = []
+    original = hybrid.retrieve_many
+
+    def spy(queries, k, filters=None, **kwargs):
+        seen.append({"queries": list(queries), "rerank_query": kwargs.get("rerank_query")})
+        return original(queries, k, filters, **kwargs)
+
+    monkeypatch.setattr(hybrid, "retrieve_many", spy)
+    return seen
+
+
+def _generation_prompts(model):
+    return [" ".join(m.content for m in c.messages) for c in model.calls if c.response_schema.__name__ == "LegalAnswer"]
+
+
+def test_a_follow_up_is_retrieved_and_answered_as_a_standalone_question(retriever, monkeypatch):
+    settings, r = retriever
+    seen = _spy_retrieval(monkeypatch, r)
+    standalone = "임차권등기명령은 어느 법원에 신청하나요?"
+    model = FakeChatModel({
+        "QueryAnalysis": [QueryAnalysis(), QueryAnalysis()],
+        "StandaloneQuestion": [StandaloneQuestion(question=standalone)],
+        "LegalAnswer": [_answer(), _answer()],
+    })
+    orch = _orchestrator(settings, r, model)
+    orch.handle("임차권등기명령 신청서에 적어야 하는 사항은?", conversation_id="m1")
+    orch.handle("그건 어느 법원에 하나요?", conversation_id="m1")
+
+    assert [c.response_schema.__name__ for c in model.calls].count("StandaloneQuestion") == 1
+    assert seen[1]["queries"][0] == standalone and seen[1]["rerank_query"] == standalone
+    first, second = _generation_prompts(model)
+    block = "이전 대화(맥락 참고용"  # the history message, not the system prompt's mention of earlier turns
+    assert block not in first and "질문: 임차권등기명령 신청서에" in first
+    assert "질문: " + standalone in second
+    assert block in second and "임차권등기명령 신청서에 적어야 하는 사항은?" in second
+
+
+def test_a_reply_to_a_clarification_is_merged_with_the_original_question(retriever, monkeypatch):
+    settings, r = retriever
+    seen = _spy_retrieval(monkeypatch, r)
+    merged = "임대차 종료 후 보증금 2천만 원을 못 받았을 때 임차권등기명령을 신청할 수 있나요?"
+    model = FakeChatModel({
+        "QueryAnalysis": [QueryAnalysis(needs_more_info=True, missing_facts=["보증금 액수"]), QueryAnalysis()],
+        "StandaloneQuestion": [StandaloneQuestion(question=merged)],
+        "LegalAnswer": [_answer()],
+    })
+    orch = _orchestrator(settings, r, model)
+    assert orch.handle("집주인이 돈을 안 줘요", conversation_id="m2").kind == "clarification"
+    assert orch.handle("2천만 원이고 계약은 지난달에 끝났어요", conversation_id="m2").kind == "answer"
+
+    condense_call = next(c for c in model.calls if c.response_schema.__name__ == "StandaloneQuestion")
+    assert "집주인이 돈을 안 줘요" in condense_call.messages[-1].content and "보증금 액수" in condense_call.messages[-1].content
+    assert seen[0]["queries"][0] == merged
+
+
+def test_a_new_conversation_never_calls_the_condenser(retriever):
+    settings, r = retriever
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis()], "LegalAnswer": [_answer()]})
+    _orchestrator(settings, r, model).handle("임차권등기명령 신청서에 적어야 하는 사항은?", conversation_id="m3")
+    assert "StandaloneQuestion" not in [c.response_schema.__name__ for c in model.calls]
 
 
 def _capture_filters(monkeypatch, hybrid):

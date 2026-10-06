@@ -18,7 +18,15 @@ qdrant:
   url: http://localhost:6333
 
 retrieval:
-  corpora: [criminal-v1, civil-v1, administrative-v1, ip-v1]
+  # statute-api-full-v1: every current law from law.go.kr as one chunk per article (315k chunks). The four
+  # *-v1 corpora hold statutes as ~3,450-character windows of several articles, and the reranker reads
+  # about the first 470 tokens, so the cited article was usually past the cut. On 319 held-out questions
+  # (2026-10-06, served path, five evidence chunks): statute questions with the cited article in the
+  # evidence 42 -> 81 of 82 formal and 36 -> 59 of 73 everyday; other questions 24 of 87 and 19 of 77
+  # either way; retrieval 2.15 s -> 2.18 s; evidence text 14,000 -> 5,600 characters.
+  # Not adopted: the *-struct800-v1 corpora (other questions +7 and +3, the everyday gain not
+  # demonstrated, everyday statute 59 -> 55). data/eval/reports/chat_pipeline/retrieval-arms-2026-10-06.
+  corpora: [criminal-v1, civil-v1, administrative-v1, ip-v1, statute-api-full-v1]
   # All three depths must match: the reranker sees the fused top-k_fused, built from legs of
   # the same depth. Raising k_fused alone leaves the legs at their default 20.
   # 50 vs 100 candidates was indistinguishable on the ip-v1 200-case graded pool (Precision@10
