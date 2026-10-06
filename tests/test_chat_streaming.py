@@ -122,7 +122,7 @@ class ChatStreamingTests(ChatStreamBase):
     def test_the_backend_gets_the_message_and_a_conversation_of_this_browser(self):
         self.collect(query="message=해고당했어요")
 
-        url, message, conversation_id = self.ask.call_args.args
+        url, message, conversation_id = self.ask.call_args.args[:3]
         with self.client.session_transaction() as flask_session:
             browser_id = flask_session["user_id"]
         self.assertEqual((url, message), ("http://legal:8000", "해고당했어요"))

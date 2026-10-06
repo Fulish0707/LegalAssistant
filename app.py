@@ -216,6 +216,17 @@ def _legal_conversation_id():
     return f"{session['user_id']}-{session.get('conversation_epoch', 0)}"
 
 
+CASE_DOCUMENT_LIMIT = 3      # passages per turn; /v1/chat accepts no more
+CASE_DOCUMENT_CHARS = 1500   # what one legal evidence block carries (rag.max_evidence_chars)
+
+
+def _case_documents(user_input):
+    """Passages of this browser's uploaded files that are closest to the message."""
+    found = search_knowledge_base(session["user_id"], user_input, k=CASE_DOCUMENT_LIMIT)
+    return [{"name": hit["source"], "text": hit["quote"][:CASE_DOCUMENT_CHARS], "score": hit["score"]}
+            for hit in found.get("results", []) if hit.get("quote")]
+
+
 def _generate_legal_response_stream(user_input):
     """Stream a chat turn as SSE events; legal_rag's /v1/chat writes the answer.
 
@@ -236,12 +247,15 @@ def _generate_legal_response_stream(user_input):
 
         if _needs_legal_search(user_input):
             yield _sse({'type': 'thought', 'content': '법령·판례 검색 및 답변 작성 중'})
-            body = legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id())
-            chat_response, sources = legal_backend.render(body)
+            documents = _case_documents(user_input)
+            if documents:
+                yield _sse({'type': 'thought', 'content': f'사건 자료 {len(documents)}건 참고'})
+            body = legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id(), documents)
+            chat_response, sources = legal_backend.render(body, documents)
             yield _sse({'type': 'thought', 'content': f'근거 {len(sources)}건 확인'})
             # Second check on the shown text, whatever the service's verifier decided. It reads
             # the full evidence; the source cards carry only an excerpt.
-            evidence_texts = [user_input] + legal_backend.evidence_texts(body)
+            evidence_texts = [user_input, *(d["text"] for d in documents)] + legal_backend.evidence_texts(body)
             chat_response = annotate_unsupported(chat_response, unsupported_citations(chat_response, evidence_texts))
         else:
             chat_response, sources = GREETING_REPLY, []
