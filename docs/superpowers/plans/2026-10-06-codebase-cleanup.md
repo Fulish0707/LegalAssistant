@@ -1,0 +1,127 @@
+# 코드베이스 정리 계획 (2026-10-06)
+
+**목표:** 쓰지 않는 코드를 지우고, 남는 코드를 짧고 명확하게 만든다. 동작은 바꾸지 않는다.
+
+**방법:** 기준점을 커밋한다. 테스트를 전부 녹색으로 만든다. 기능 단위로 하나씩 지운다. 그다음에 긴 코드를 줄인다. 단계마다 테스트를 돌리고 커밋한다.
+
+## 규칙
+
+- 한 커밋은 한 가지 일만 한다. 삭제와 단축을 한 커밋에 섞지 않는다.
+- 모든 커밋 뒤에 두 테스트 묶음이 실패 0건이어야 한다. 아니면 그 커밋을 되돌린다.
+- "쓰지 않는다"는 근거 없이 지우지 않는다. 근거는 참조 검색 결과다: `src`, `scripts`, `tests`, 루트 `*.py`, `static`, `templates`, `docs`.
+- 단축은 테스트가 덮는 코드에서만 한다. 덮지 않는 코드는 먼저 테스트를 쓰거나 건드리지 않는다.
+- 줄이면서 동작이 달라질 수 있으면 멈추고 묻는다.
+- `data/eval/reports/` 아래의 과거 실험 스크립트는 기록이다. 고치지 않는다.
+- 원격 저장소로 push하지 않는다. 요청이 있을 때만 한다.
+
+테스트 명령:
+
+```
+.venv/bin/python -m pytest tests/legal_rag -q -p no:cacheprovider
+env APP_STATE_DB=$T/a.db AGENT_CHECKPOINT_DB=$T/c.db RAG_PERSIST_DIR=$T/chroma APP_ENV=testing \
+  LLM_PROVIDER=none EMBEDDING_PROVIDER=none LANGSMITH_TRACING=false \
+  /home/layke/anaconda3/bin/python -m pytest tests --ignore=tests/legal_rag \
+  --ignore=tests/test_ollama_connector_live.py -k 'not Live' -q -p no:cacheprovider
+```
+
+## 현재 크기 (정리 전)
+
+| 영역 | Python 줄 수 |
+|---|---|
+| `src/legal_rag` | 10,705 |
+| `tests` | 9,911 |
+| `scripts` | 3,495 |
+| 루트의 Flask 파일 10개 | 2,397 |
+| `evals` | 491 |
+
+60줄 이상 함수는 27개다. 가장 긴 것은 `judge_saved_answers` 159줄이다.
+
+---
+
+## 1단계. 기준점 커밋
+
+작업 트리에 68개 변경이 있다. 두 세션의 작업이 섞여 있다. 묶음별로 커밋한다.
+
+- [ ] 1.1 이전 세션의 정리 작업 (10-04~05): 죽은 코드 8건, 캐시·빈 폴더, 문서 목차, `answer_replay.py`
+- [ ] 1.2 웹 챗을 `/v1/chat`으로 연결: `legal_backend.py`, `app.py`, 관련 테스트, README
+- [ ] 1.3 백엔드 수정: 검증기, 인용 점검, 프롬프트, 후속 질문 재작성, 답하면서 묻기, 검색 설정
+- [ ] 1.4 평가 도구: 새 채점기, 근거 고정 비교, 채점기 없는 측정값
+- [ ] 1.5 테스트가 `.env` 값에 의존하지 않게 한 수정
+- [ ] 1.6 이 계획 문서
+- [ ] 확인: `git status --short`가 비어 있다
+
+`app.py`와 `README.md`에는 두 세션의 변경이 함께 있다. 1.2에 넣고 커밋 메시지에 적는다.
+
+## 2단계. 테스트를 전부 녹색으로
+
+`tests/legal_rag`의 실패 9건은 코드가 바뀐 뒤 테스트를 갱신하지 않은 것이다. 코드의 현재 동작이 의도이므로 테스트를 맞춘다.
+
+- [ ] 2.1 `test_imported_chunking.py` 5건: 청크 머리말에 `[역할: …]`이 붙고, 역할 경계를 넘는 병합이 없어졌다
+- [ ] 2.2 `test_rechunk_corpus.py` 1건: 전략 이름이 `structure_rechunk_v2_roles`가 됐다
+- [ ] 2.3 `test_relevance_judge.py` 2건: 채점 결과의 인용 위치 필드가 바뀌었다 (`span_index`)
+- [ ] 2.4 `test_pool_extension.py` 1건: 행에 `question_domain` 필드가 추가됐다
+- [ ] 각 건에서 코드와 테스트 중 어느 쪽이 맞는지 커밋 기록으로 확인한다. 코드가 틀린 경우는 멈추고 보고한다
+- [ ] 확인: 두 묶음 모두 실패 0건. 커밋
+
+## 3단계. 삭제 범위 확정 (결정 필요)
+
+| # | 기능 | 지우는 것 | 화면 영향 | 기본안 |
+|---|---|---|---|---|
+| A | 통계 분석 | `/statistics/analyze`, `statistics_analysis.py` | 없음. 부르는 화면이 없다 | 삭제 |
+| B | 유사 대화 검색 | `/get_similar_chats` | 없음. 부르는 화면이 없다 | 삭제 |
+| C | 문서 분석(OCR) | `/process_document_ocr`, `llm_ocr.py`, `html_sanitizer.py` | 파일 올리기 버튼이 사라진다 | 삭제 |
+| D | 내 문서 검색 | `/knowledge_base/*`, `documents.html`, `lc-docs.js`, Chroma | "사건 자료" 화면이 사라진다 | 삭제 |
+| E | 서류 초안 | `/update_statement`, 초안 패널 | "작성 중 문서" 패널이 사라진다 | 삭제 |
+| F | Flask 에이전트 | `langchain_config.py`의 에이전트·도구, `llm_model.py`, `llm_prompt.py`, 체크포인터, `evals/` | 없음. 챗은 이미 `/v1/chat`을 쓴다 | 삭제 |
+| G | QLoRA 학습·평가 | `training/`, `sft_*.ipynb`, 관련 스크립트 | 없음 | **유지** |
+| H | 과거 채점기 (legacy, v2, v3) | `answer_judge*.py` | 없음 | **유지** |
+| I | "판례 검색" 화면 | `cases.html`, `lc-cases.js` | 서버 호출이 없는 화면이다 | 확인 후 결정 |
+
+- [ ] 3.1 위 표의 기본안을 확인받는다
+- [ ] 3.2 A~F를 지운 뒤 남는 의존성 목록을 만든다 (LangChain, LangGraph, Chroma 등)
+
+## 4단계. 죽은 코드 삭제
+
+순서는 의존이 적은 것부터다. 항목마다: 참조 검색 → 삭제 → 테스트 → 커밋.
+
+- [ ] 4.1 A 통계 분석과 테스트
+- [ ] 4.2 B 유사 대화 검색
+- [ ] 4.3 C 문서 분석: 경로, 모듈, 화면의 올리기 버튼, 테스트
+- [ ] 4.4 D 내 문서 검색: 경로, 화면, `langchain_config.py`의 해당 함수, 테스트
+- [ ] 4.5 E 서류 초안: 경로, 패널, `/get_initial_state`의 초안 필드, 테스트. DB 테이블은 그대로 둔다
+- [ ] 4.6 F 에이전트: 남은 `langchain_config.py`, `llm_model.py`, `llm_prompt.py`, 체크포인터, `evals/`, 테스트, `/health`의 해당 필드
+- [ ] 4.7 의존성 정리: `requirements.txt`, `env.yml`, `.env.example`, README의 실행 안내
+- [ ] 4.8 화면 정리: 지운 기능을 가리키는 메뉴와 문구
+- [ ] 4.9 `src/legal_rag`의 죽은 코드: 정의만 있고 참조가 없는 함수·상수·설정. 이전 세션이 "과거 실험본이 쓴다"며 남긴 후보를 다시 본다
+- [ ] 4.10 `scripts/` 37개 분류: 문서나 현재 절차가 쓰는 것, 한 번 쓰고 끝난 것. 후자의 삭제는 목록을 보고 결정받는다
+- [ ] 확인: 두 묶음 실패 0건, 실제 서버로 웹 챗 한 턴과 `/v1/chat` 한 턴
+
+## 5단계. 긴 코드 단축
+
+대상은 60줄 이상 함수 27개와 중복이다. 동작은 바꾸지 않는다.
+
+- [ ] 5.1 대상 목록 확정: 4단계에서 지워진 것을 뺀다
+- [ ] 5.2 함수마다 테스트가 덮는지 확인한다. 덮지 않으면 건너뛰고 목록에 적는다
+- [ ] 5.3 서비스 경로 먼저: `orchestrator.handle` (86줄), `app.py`의 남은 경로
+- [ ] 5.4 평가 경로: `judge_saved_answers` (159줄), `eval_chat_pipeline.verify` (104줄), `_report_versioned` (78줄)
+- [ ] 5.5 적재 경로: `rechunk_corpus` (112줄), `import_processed` (102줄), `_parse_numbered` (71줄)
+- [ ] 5.6 중복 제거: 스크립트마다 따로 있는 JSONL 읽기, 부트스트랩, McNemar 계산
+- [ ] 5.7 주석 정리: 코드가 이미 말하는 주석을 지운다. 측정 근거가 적힌 주석은 남긴다
+- [ ] 각 커밋에 전후 줄 수를 적는다
+- [ ] 확인: 두 묶음 실패 0건
+
+학습 코드(`training/`의 143줄, 133줄 함수)는 G를 유지하는 동안 건드리지 않는다. 다시 학습해 볼 수단이 없으면 검증할 수 없기 때문이다.
+
+## 6단계. 마무리
+
+- [ ] 6.1 실제 서버 확인: 백엔드와 Flask를 띄우고 브라우저 스크립트로 2턴 대화
+- [ ] 6.2 평가 명령이 그대로 도는지 확인: `freeze` 5문항, `verify --frozen` 5문항, `judge` 5문항
+- [ ] 6.3 문서 갱신: README, `docs/legal-rag-backend.md`
+- [ ] 6.4 결과 보고: 영역별 전후 줄 수, 지운 기능, 건너뛴 항목과 이유
+
+## 멈추고 묻는 경우
+
+- 지우려는 것을 과거 실험 스크립트 외의 무언가가 참조한다
+- 테스트를 고쳐야만 통과하는 단축
+- 3단계 표에 없는 기능을 지워야 할 때
+- 메모리 부족으로 실제 서버 확인을 못 할 때
