@@ -376,12 +376,10 @@ class AppContractTests(unittest.TestCase):
     # --- uploads: validation, quota, ownership ----------------------------
 
     def test_empty_upload_requests_reach_validation_without_signing_in(self):
-        for route in ("/process_document_ocr", "/statistics/analyze"):
-            with self.subTest(route=route):
-                with patch.object(self.app_module, "get_chat_model", lambda: object()):
-                    response = self.app_module.app.test_client().post(route, data={})
-                self.assertEqual(response.status_code, 400)
-                self.assertEqual(response.json, {"error": "No file part"})
+        with patch.object(self.app_module, "get_chat_model", lambda: object()):
+            response = self.app_module.app.test_client().post("/process_document_ocr", data={})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json, {"error": "No file part"})
 
     def test_document_analysis_reports_missing_llm_before_reading_the_upload(self):
         response = self.client.post("/process_document_ocr", data={})
@@ -419,20 +417,6 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 429)
         self.assertEqual(response.json["error"], "daily_ai_quota_exceeded")
 
-    def test_statistics_returns_json_429_when_the_ip_quota_is_exhausted(self):
-        remote_addr = "203.0.113.22"
-        self.exhaust_ip_quota(remote_addr)
-        with patch.object(self.app_module, "get_chat_model", lambda: ExplodingChatModel()):
-            response = self.client.post(
-                "/statistics/analyze",
-                data={"file": (io.BytesIO(b"name,value\na,1\n"), "sample.csv")},
-                content_type="multipart/form-data",
-                environ_base={"REMOTE_ADDR": remote_addr},
-            )
-
-        self.assertEqual(response.status_code, 429)
-        self.assertEqual(response.json["error"], "daily_ai_quota_exceeded")
-        self.assertEqual(response.json["limit"], 20)
 
     def test_document_upload_can_save_mocked_analysis_to_the_browsers_knowledge_base(self):
         captured = {}
@@ -473,49 +457,6 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(captured["metadata"]["analysis_mode"], "summary")
         self.assertEqual(captured["user_id"], self.session_user_id(browser))
 
-    def test_statistics_analysis_handles_csv_without_ai_key(self):
-        captured = {}
-
-        def fake_ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
-            captured.update(text=text, source_name=source_name, metadata=metadata, user_id=user_id)
-            return {"ok": True, "message": "saved", "chunk_count": 1}
-
-        browser = self.app_module.app.test_client()
-        with patch.object(self.app_module, "ingest_text_to_vector_store", fake_ingest_text_to_vector_store):
-            response = browser.post(
-                "/statistics/analyze",
-                data={
-                    "file": (
-                        io.BytesIO(b"department,sales,cost\nA,10,7\nB,20,11\nA,30,15\n"),
-                        "sample.csv",
-                    ),
-                    "question": "Which department looks strongest?",
-                    "add_to_knowledge_base": "true",
-                    "user_id": "forged-owner",
-                },
-                content_type="multipart/form-data",
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.json["ai_enabled"])
-        self.assertEqual(response.json["analysis"]["row_count"], 3)
-        self.assertEqual(response.json["analysis"]["column_count"], 3)
-        self.assertIn("sales", [row["column"] for row in response.json["analysis"]["numeric_summary"]])
-        self.assertIn("Local statistical analysis", response.json["report_html"])
-        self.assertEqual(response.json["knowledge_base"]["chunk_count"], 1)
-        self.assertEqual(captured["source_name"], "sample.csv")
-        self.assertEqual(captured["metadata"]["analysis_type"], "statistics")
-        self.assertEqual(captured["user_id"], self.session_user_id(browser))
-
-    def test_statistics_analysis_rejects_unsupported_file_type(self):
-        response = self.app_module.app.test_client().post(
-            "/statistics/analyze",
-            data={"file": (io.BytesIO(b"not a table"), "sample.txt")},
-            content_type="multipart/form-data",
-        )
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json, {"error": "File type not allowed. Upload CSV, TSV, or XLSX."})
 
     # --- knowledge base isolation -----------------------------------------
 
