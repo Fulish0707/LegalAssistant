@@ -40,7 +40,9 @@ class GenerationError(RuntimeError):
 
 
 class Generator:
-    def __init__(self, model: ChatModel, *, temperature: float = 0.2, max_tokens: int = 1024, plain_text: bool = False) -> None:
+    def __init__(self, model: ChatModel, *, temperature: float = 0.2, max_tokens: int = 1024, plain_text: bool = False,
+                 mask_case_figures: bool = False) -> None:
+        self.mask_case_figures = mask_case_figures
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -89,7 +91,7 @@ class Generator:
 
     def _generate_structured(self, message: str, bundle: EvidenceBundle, *, feedback: str | None = None, history: list[Turn] | None = None,
                              open_questions: list[str] | None = None, user_documents: Sequence[UserDocument] = ()) -> LegalAnswer:
-        evidence = bundle.render() if bundle.items else "(검색된 법률 근거가 없습니다. 근거 없이 조문이나 판례를 언급하지 마세요.)"
+        evidence = bundle.render(mask_case_figures=self.mask_case_figures) if bundle.items else "(검색된 법률 근거가 없습니다. 근거 없이 조문이나 판례를 언급하지 마세요.)"
         messages = [
             Message(role="system", content=load_prompt("answer_system")),
             Message(role="user", content="다음은 검색된 법률 근거입니다.\n\n" + evidence),

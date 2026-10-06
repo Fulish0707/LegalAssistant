@@ -70,7 +70,7 @@ class Orchestrator:
                 neighbor_lookup=getattr(retriever, "neighbor_chunks", None),
             ),
             generator=Generator(model, temperature=settings.llm.temperature, max_tokens=settings.llm.max_tokens,
-                                plain_text=settings.llm.backend == "transformers"),
+                                plain_text=settings.llm.backend == "transformers", mask_case_figures=settings.rag.mask_case_figures),
             verifier=verifier,
             policy=policy,
             store=store,
