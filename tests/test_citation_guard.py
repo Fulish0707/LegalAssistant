@@ -102,3 +102,10 @@ class CitationGuardStreamTests(ChatStreamBase):
         final = self.final(self.collect(backend_answer("민법 제543조에 따라 해지할 수 있습니다.", items=[item])))
 
         self.assertNotIn("확인 필요", final["chat_response"])
+
+    def test_what_the_last_answer_cited_is_not_flagged_when_repeated(self):
+        """The service lets a follow-up repeat the last answer's statute; the page must agree with it."""
+        body = backend_answer("근로기준법 제36조에 따라 14일 이내에 지급해야 합니다.")
+        self.assertIn("확인 필요: 근로기준법 제36조", self.final(self.collect(body))["chat_response"])
+        body["prior_refs"] = ["근로기준법 제36조"]
+        self.assertNotIn("확인 필요", self.final(self.collect(body))["chat_response"])

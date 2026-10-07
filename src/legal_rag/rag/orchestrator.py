@@ -124,7 +124,12 @@ class Orchestrator:
             bundle = self.context_builder.build(hits)
         trace.evidence_ids = [item.chunk_id for item in bundle.items]
 
-        answer, report, action = self._generate_verified(question, bundle, analysis, recent, open_questions, recorder, user_documents)
+        # A stored answer has passed verification and stripping, so what it still cites was grounded
+        # in its own turn. A refusal or a clarification is stored as fixed text and cites nothing.
+        said = " ".join(turn.content for turn in recent if turn.role == "assistant")
+        prior_refs = [*(ref.render() for ref in extract_statute_refs(said) if ref.law_name), *extract_case_refs(said)]
+
+        answer, report, action = self._generate_verified(question, bundle, analysis, recent, open_questions, recorder, user_documents, prior_refs)
 
         if answer is None or report is None:
             recorder.finish(policy_action=VerificationAction.reject.value)
@@ -142,11 +147,13 @@ class Orchestrator:
             return ChatResponse(kind="rejected", conversation_id=conversation_id, reason="unsupported citations", evidence=bundle, verification=report, trace=trace)
 
         self._remember(conversation_id, f"{answer.summary}\n{answer.analysis}".strip(), trace.evidence_ids)
-        return ChatResponse(kind="answer", conversation_id=conversation_id, answer=answer, evidence=bundle, verification=report, trace=trace)
+        return ChatResponse(kind="answer", conversation_id=conversation_id, answer=answer, evidence=bundle, verification=report,
+                            prior_refs=prior_refs, trace=trace)
 
     def _generate_verified(
         self, question: str, bundle: EvidenceBundle, analysis: QueryAnalysis, recent: list[Turn],
         open_questions: list[str], recorder: TraceRecorder, user_documents: Sequence[UserDocument] = (),
+        prior_refs: Sequence[str] = (),
     ) -> tuple[LegalAnswer | None, VerificationReport | None, VerificationAction]:
         """Generate, verify, and regenerate with the verifier's feedback while the policy asks for it."""
         answer: LegalAnswer | None = None
@@ -175,7 +182,7 @@ class Orchestrator:
             with recorder.stage(f"verify[{attempt}]"):
                 draft = draft.model_copy(update={"citations": [c for c in draft.citations if c.source_id not in document_ids]})
                 answer = backfill_citations(draft, bundle)
-                report = self.verifier.verify(answer, bundle, user_refs=user_refs, own_clauses=own_clauses)
+                report = self.verifier.verify(answer, bundle, user_refs=user_refs, own_clauses=own_clauses, prior_refs=prior_refs)
             action = self.policy.decide(report, attempt)
             if action != VerificationAction.regenerate:
                 break

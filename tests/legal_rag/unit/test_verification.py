@@ -166,3 +166,16 @@ def test_a_case_number_in_the_label_is_still_checked_against_the_block():
                   analysis="대법원 2015다99999 판결 참조")
     kinds = {i.kind for i in Verifier().verify(ans, _bundle()).issues}
     assert "source_id_mismatch" in kinds and "case_not_in_evidence" in kinds
+
+
+def test_a_reference_from_an_earlier_answer_may_be_repeated_and_excuses_nothing_else():
+    """A follow-up repeats 근로기준법 제36조 from the last answer; that must not let 민법 제36조 through."""
+    def ok(text):
+        return Verifier().verify(_answer(citations=[], analysis=text), _bundle(), prior_refs=["근로기준법 제36조", "2020다11111"]).ok
+
+    assert ok("근로기준법 제36조에 따라 14일 이내에 지급해야 합니다. 2020다11111 판결도 같습니다.")
+    assert ok("근로기준법 제36조가 적용됩니다. 제36조의 기한은 14일입니다.")
+    assert not ok("민법 제36조에 따라 청구할 수 있습니다.")
+    assert not ok("제36조에 따라 청구할 수 있습니다.")
+    assert not ok("근로기준법 제36조가 적용됩니다. 제37조의 지연이자도 붙습니다.")
+    assert not ok("2021다22222 판결도 같습니다.")

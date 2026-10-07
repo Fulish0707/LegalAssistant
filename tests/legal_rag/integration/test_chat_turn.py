@@ -1,9 +1,11 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from legal_rag.llm import FakeChatModel
 from legal_rag.rag.conversation import InMemoryConversationStore
 from legal_rag.rag.orchestrator import Orchestrator
-from legal_rag.schemas import Citation, CitationKind, Confidence, LegalAnswer, QueryAnalysis, StandaloneQuestion
+from legal_rag.schemas import Citation, CitationKind, Confidence, LegalAnswer, QueryAnalysis, StandaloneQuestion, Turn
 from legal_rag.verification import VerificationPolicy, Verifier
 from tests.legal_rag.integration.test_ingest_to_search import indexed  # noqa: F401
 
@@ -218,3 +220,35 @@ def test_failed_regeneration_strips_the_previous_draft(retriever):
     resp = _orchestrator(settings, r, model).handle("보증금을 못 받았어요", conversation_id="c7")
     assert resp.kind == "answer" and resp.trace.policy_action == "strip" and resp.trace.regenerations == 1
     assert "제839조의2" not in resp.answer.analysis and "보증금은 반환되어야 합니다." in resp.answer.analysis
+
+
+REPAIRS = "민법 제623조에 따라 임대인은 집을 쓸 수 있는 상태로 유지해야 합니다."
+REPEATS = REPAIRS + " 주택임대차보호법 제3조의3도 참고하세요."
+
+
+def _lease_model(*answers):
+    return FakeChatModel({"QueryAnalysis": [QueryAnalysis(), QueryAnalysis()], "LegalAnswer": list(answers),
+                          "StandaloneQuestion": [StandaloneQuestion(question="임차권등기명령은 어느 법원에 신청하나요?")] * 2})
+
+
+def test_a_follow_up_may_repeat_what_the_last_answer_cited(retriever):
+    """The model reads the last answer in its history; this turn's search need not return that statute again."""
+    settings, r = retriever
+    store = InMemoryConversationStore()
+    for role, content in (("user", "집주인이 보일러를 안 고쳐 줘요"), ("assistant", REPAIRS)):
+        store.append("p1", Turn(role=role, content=content, created_at=datetime.now(timezone.utc)))
+    other_law = _answer(analysis="상법 제623조에 따라 고쳐야 합니다. 주택임대차보호법 제3조의3도 참고하세요.")
+    orch = _orchestrator(settings, r, _lease_model(_answer(analysis=REPEATS), other_law, other_law), store)
+    repeated = orch.handle("보증금도 못 받았어요", conversation_id="p1")
+    assert repeated.trace.policy_action == "accept" and repeated.prior_refs == ["민법 제623조"]
+    assert orch.handle("어느 법원인가요?", conversation_id="p1").trace.policy_action == "strip"
+
+
+def test_a_turn_that_lost_its_citation_passes_nothing_on(retriever):
+    settings, r = retriever
+    unsupported = LegalAnswer(summary="수선을 요구할 수 있습니다.", analysis=REPAIRS, confidence=Confidence.medium)
+    orch = _orchestrator(settings, r, _lease_model(unsupported, unsupported, _answer(analysis=REPEATS), _answer(analysis=REPEATS)))
+    first = orch.handle("집주인이 보일러를 안 고쳐 줘요", conversation_id="p2")
+    second = orch.handle("보증금도 못 받았어요", conversation_id="p2")
+    assert first.prior_refs == [] and first.trace.policy_action != "accept"
+    assert second.prior_refs == [] and second.trace.policy_action == "strip"
