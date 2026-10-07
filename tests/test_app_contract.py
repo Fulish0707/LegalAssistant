@@ -17,7 +17,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from quota import guest_ip_identity, reserve_daily_quota
 
@@ -65,12 +65,12 @@ class AppContractTests(unittest.TestCase):
     MODULE_NAMES = ("app", "langchain_config", "llm_model", "llm_prompt")
     PINNED_ENV = (
         "APP_STATE_DB",
-        "AGENT_CHECKPOINT_DB",
         "RAG_PERSIST_DIR",
         "APP_ENV",
         "LLM_PROVIDER",
         "EMBEDDING_PROVIDER",
         "LANGSMITH_TRACING",
+        "DAILY_AI_REQUEST_LIMIT",
     )
 
     @classmethod
@@ -81,7 +81,6 @@ class AppContractTests(unittest.TestCase):
         # Every store lives in one fresh temporary directory: the tests must never
         # touch the developer's real SQLite files or Chroma collection.
         os.environ["APP_STATE_DB"] = os.path.join(cls.tmpdir.name, "app_state.db")
-        os.environ["AGENT_CHECKPOINT_DB"] = os.path.join(cls.tmpdir.name, "checkpoints.db")
         os.environ["RAG_PERSIST_DIR"] = os.path.join(cls.tmpdir.name, "chroma")
         os.environ["APP_ENV"] = "testing"
         # Pin both connectors to "none". Ollama needs no credential, so with the
@@ -91,6 +90,8 @@ class AppContractTests(unittest.TestCase):
         os.environ["LLM_PROVIDER"] = "none"
         os.environ["EMBEDDING_PROVIDER"] = "none"
         os.environ["LANGSMITH_TRACING"] = "false"
+        # The quota tests exhaust 20 requests; .env may set another limit.
+        os.environ["DAILY_AI_REQUEST_LIMIT"] = "20"
 
         for module_name in cls.MODULE_NAMES:
             sys.modules.pop(module_name, None)
@@ -140,7 +141,6 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["status"], "ok")
         self.assertFalse(response.json["llm_configured"])
-        self.assertFalse(response.json["agent_configured"])
         self.assertNotIn("google_oidc_configured", response.json)
 
     def test_clients_receive_distinct_stable_anonymous_identities(self):
@@ -157,71 +157,21 @@ class AppContractTests(unittest.TestCase):
         self.assertNotEqual(first_id, second_id)
         self.assertGreaterEqual(len(first_id), 32)
 
-    # --- drafts and chat history -----------------------------------------
-
-    def test_browser_drafts_are_private_and_server_side(self):
-        first = self.app_module.app.test_client()
-        second = self.app_module.app.test_client()
-        for client, draft in ((first, "first private draft"), (second, "second private draft")):
-            response = client.post("/update_statement", json={"personal_statement_draft": draft})
-            self.assertEqual(response.status_code, 200)
-        self.assertEqual(first.get("/get_initial_state").json["personal_statement_draft"], "first private draft")
-        self.assertEqual(second.get("/get_initial_state").json["personal_statement_draft"], "second private draft")
-        with first.session_transaction() as cookie:
-            owner = cookie["user_id"]
-            self.assertNotIn("guest_draft", cookie)
-        with self.app_module.app.app_context():
-            self.assertEqual(self.app_module.get_personal_statement_from_db(owner), "first private draft")
-
-    def test_update_statement_still_validates_its_payload(self):
-        response = self.app_module.app.test_client().post("/update_statement", json={})
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json, {"error": "No personal_statement_draft provided"})
-
-    def test_legacy_cookie_draft_migrates_once_and_never_overwrites_a_saved_draft(self):
-        # A browser that still carries the old cookie-only draft, but no row yet.
-        migrating = self.app_module.app.test_client()
-        with migrating.session_transaction() as flask_session:
-            flask_session["user_id"] = "legacy-cookie-owner"
-            flask_session["guest_draft"] = "draft from the old cookie"
-
-        state = migrating.get("/get_initial_state")
-
-        self.assertEqual(state.json["personal_statement_draft"], "draft from the old cookie")
-        with migrating.session_transaction() as flask_session:
-            self.assertNotIn("guest_draft", flask_session)
-            self.assertEqual(flask_session["user_id"], "legacy-cookie-owner")
-
-        # A browser whose workspace already has a SQLite draft: the row wins.
-        with self.app_module.app.app_context():
-            self.app_module.set_personal_statement_in_db("saved-row-owner", "saved in sqlite")
-        saved = self.app_module.app.test_client()
-        with saved.session_transaction() as flask_session:
-            flask_session["user_id"] = "saved-row-owner"
-            flask_session["guest_draft"] = "stale cookie draft"
-
-        state = saved.get("/get_initial_state")
-
-        self.assertEqual(state.json["personal_statement_draft"], "saved in sqlite")
-        with saved.session_transaction() as flask_session:
-            self.assertNotIn("guest_draft", flask_session)
+    # --- chat history ----------------------------------------------------
 
     def test_a_cleared_cookie_starts_a_fresh_empty_workspace(self):
         original = self.app_module.app.test_client()
-        original.post("/update_statement", json={"personal_statement_draft": "kept on the server"})
         original.post("/chat", json={"message": "remembered"})
         original_id = self.session_user_id(original)
 
         fresh = self.app_module.app.test_client()
         state = fresh.get("/get_initial_state")
 
-        self.assertEqual(state.json["personal_statement_draft"], "")
         self.assertEqual(state.json["chat_history"], [])
         self.assertNotEqual(self.session_user_id(fresh), original_id)
         # Losing the cookie does not delete the server-side workspace.
         with self.app_module.app.app_context():
-            self.assertEqual(self.app_module.get_personal_statement_from_db(original_id), "kept on the server")
+            self.assertEqual(self.app_module.get_chat_history_from_db(original_id), [{"role": "user", "content": "remembered"}])
 
     def test_chat_histories_are_private_per_browser(self):
         first = self.app_module.app.test_client()
@@ -233,22 +183,6 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(first.get("/get_initial_state").json["chat_history"], [{"role": "user", "content": "First chat"}])
         self.assertEqual(second.get("/get_initial_state").json["chat_history"], [{"role": "user", "content": "Second chat"}])
 
-    def test_similar_chats_only_search_the_callers_history(self):
-        first = self.app_module.app.test_client()
-        second = self.app_module.app.test_client()
-        first.post("/chat", json={"message": "needle in the first workspace"})
-        second.post("/chat", json={"message": "needle in the second workspace"})
-        # The route excludes rows younger than five seconds; backdate both.
-        with self.app_module.app.app_context():
-            connection = self.app_module.get_db()
-            connection.execute("UPDATE chat_history SET timestamp=datetime('now', '-1 hour') WHERE content LIKE 'needle%'")
-            connection.commit()
-
-        response = first.post("/get_similar_chats", json={"query": "needle"})
-
-        self.assertEqual(response.status_code, 200)
-        contents = [row["content"] for row in response.json["similar_chats"]]
-        self.assertEqual(contents, ["needle in the first workspace"])
 
     def test_clearing_one_history_leaves_the_other_untouched(self):
         first = self.app_module.app.test_client()
@@ -265,7 +199,6 @@ class AppContractTests(unittest.TestCase):
     def test_legacy_account_cookies_do_not_recover_account_data(self):
         legacy_id = "legacy-google-account"
         with self.app_module.app.app_context():
-            self.app_module.set_personal_statement_in_db(legacy_id, "legacy account draft")
             self.app_module.add_chat_message_to_db(legacy_id, "user", "legacy account chat")
 
         browser = self.app_module.app.test_client()
@@ -277,14 +210,12 @@ class AppContractTests(unittest.TestCase):
 
         state = browser.get("/get_initial_state")
 
-        self.assertEqual(state.json["personal_statement_draft"], "")
         self.assertEqual(state.json["chat_history"], [])
         with browser.session_transaction() as flask_session:
             self.assertNotEqual(flask_session["user_id"], legacy_id)
             for key in ("authenticated_user_id", "account_email", "auth_next", "oidc_nonce"):
                 self.assertNotIn(key, flask_session)
         with self.app_module.app.app_context():
-            self.assertEqual(self.app_module.get_personal_statement_from_db(legacy_id), "legacy account draft")
             self.assertEqual(
                 self.app_module.get_chat_history_from_db(legacy_id),
                 [{"role": "user", "content": "legacy account chat"}],
@@ -292,19 +223,28 @@ class AppContractTests(unittest.TestCase):
 
     # --- chat streaming and quota -----------------------------------------
 
-    def test_chat_sse_reports_missing_ai_configuration(self):
-        response = self.client.get("/chat?message=hello")
-        body = response.data.decode("utf-8")
+    def backend(self, ask):
+        """/chat with legal_rag configured and its call replaced by `ask`."""
+        return patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
+            patch.object(self.app_module.legal_backend, "ask", ask)
+
+    def test_chat_sse_reports_a_missing_legal_backend(self):
+        with patch.dict(os.environ, {"LEGAL_RAG_URL": ""}):
+            response = self.client.get("/chat?message=hello")
+        body = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("AI chat is not configured", body)
+        self.assertIn("LEGAL_RAG_URL", body)
         self.assertIn("stream_end", body)
 
-    def test_chat_sse_reports_quota_exhaustion_without_invoking_the_agent(self):
+    def test_chat_sse_reports_quota_exhaustion_without_calling_the_backend(self):
         self.exhaust_ip_quota("127.0.0.1")
-        with patch.object(self.app_module, "build_agent", lambda user_id, checkpointer=None: object()):
+        ask = Mock(return_value={"kind": "rejected"})
+        env, stub = self.backend(ask)
+        with env, stub:
             response = self.app_module.app.test_client().get("/chat?message=hello")
 
+        ask.assert_not_called()
         self.assertEqual(response.status_code, 200)
         self.assertIn("daily_ai_quota_exceeded", response.get_data(as_text=True))
         self.assertIn("stream_end", response.get_data(as_text=True))
@@ -312,31 +252,27 @@ class AppContractTests(unittest.TestCase):
     def test_quota_is_shared_per_ip_and_survives_a_cleared_cookie(self):
         shared_ip, other_ip = "203.0.113.10", "203.0.113.11"
         self.exhaust_ip_quota(shared_ip, count=19)
-        agent_calls = []
-
-        class CountingAgent:
-            def stream(self, payload, config=None, **kwargs):
-                agent_calls.append(config["configurable"]["thread_id"])
-                yield "values", {"messages": []}
-
-            def get_state(self, config):
-                raise ValueError("no state")
+        ask = Mock(return_value={"kind": "rejected"})
 
         first = self.app_module.app.test_client()
         second = self.app_module.app.test_client()
         third = self.app_module.app.test_client()
-        with patch.object(self.app_module, "build_agent", lambda user_id, checkpointer=None: CountingAgent()):
-            first_body = first.get("/chat?message=hello", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
-            second_body = second.get("/chat?message=hello", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
-            third_body = third.get("/chat?message=hello", environ_base={"REMOTE_ADDR": other_ip}).get_data(as_text=True)
+        env, stub = self.backend(ask)
+        with env, stub:
+            first_body = first.get("/chat?message=보증금 문의", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
+            second_body = second.get("/chat?message=보증금 문의", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
+            third_body = third.get("/chat?message=보증금 문의", environ_base={"REMOTE_ADDR": other_ip}).get_data(as_text=True)
             cleared = self.app_module.app.test_client()
-            cleared_body = cleared.get("/chat?message=hello", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
+            cleared_body = cleared.get("/chat?message=보증금 문의", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
 
         self.assertNotIn("daily_ai_quota_exceeded", first_body)
         self.assertIn("daily_ai_quota_exceeded", second_body)
         self.assertNotIn("daily_ai_quota_exceeded", third_body)
         self.assertIn("daily_ai_quota_exceeded", cleared_body)
-        self.assertEqual(agent_calls, [self.session_user_id(first), self.session_user_id(third)])
+        conversations = [call.args[2] for call in ask.call_args_list]
+        self.assertEqual(len(conversations), 2)
+        self.assertTrue(conversations[0].startswith(self.session_user_id(first)))
+        self.assertTrue(conversations[1].startswith(self.session_user_id(third)))
         self.assertNotEqual(self.session_user_id(cleared), self.session_user_id(first))
 
     def test_guest_quota_identity_ignores_forwarded_for_headers(self):
@@ -368,12 +304,10 @@ class AppContractTests(unittest.TestCase):
     # --- uploads: validation, quota, ownership ----------------------------
 
     def test_empty_upload_requests_reach_validation_without_signing_in(self):
-        for route in ("/process_document_ocr", "/statistics/analyze"):
-            with self.subTest(route=route):
-                with patch.object(self.app_module, "get_chat_model", lambda: object()):
-                    response = self.app_module.app.test_client().post(route, data={})
-                self.assertEqual(response.status_code, 400)
-                self.assertEqual(response.json, {"error": "No file part"})
+        with patch.object(self.app_module, "get_chat_model", lambda: object()):
+            response = self.app_module.app.test_client().post("/process_document_ocr", data={})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json, {"error": "No file part"})
 
     def test_document_analysis_reports_missing_llm_before_reading_the_upload(self):
         response = self.client.post("/process_document_ocr", data={})
@@ -411,20 +345,6 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 429)
         self.assertEqual(response.json["error"], "daily_ai_quota_exceeded")
 
-    def test_statistics_returns_json_429_when_the_ip_quota_is_exhausted(self):
-        remote_addr = "203.0.113.22"
-        self.exhaust_ip_quota(remote_addr)
-        with patch.object(self.app_module, "get_chat_model", lambda: ExplodingChatModel()):
-            response = self.client.post(
-                "/statistics/analyze",
-                data={"file": (io.BytesIO(b"name,value\na,1\n"), "sample.csv")},
-                content_type="multipart/form-data",
-                environ_base={"REMOTE_ADDR": remote_addr},
-            )
-
-        self.assertEqual(response.status_code, 429)
-        self.assertEqual(response.json["error"], "daily_ai_quota_exceeded")
-        self.assertEqual(response.json["limit"], 20)
 
     def test_document_upload_can_save_mocked_analysis_to_the_browsers_knowledge_base(self):
         captured = {}
@@ -465,49 +385,30 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(captured["metadata"]["analysis_mode"], "summary")
         self.assertEqual(captured["user_id"], self.session_user_id(browser))
 
-    def test_statistics_analysis_handles_csv_without_ai_key(self):
+    def test_a_file_with_a_korean_name_is_analysed_and_keeps_its_name(self):
+        """secure_filename drops Hangul, which left "txt": no extension, a 500, and a nameless source."""
         captured = {}
 
-        def fake_ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
-            captured.update(text=text, source_name=source_name, metadata=metadata, user_id=user_id)
-            return {"ok": True, "message": "saved", "chunk_count": 1}
+        def fake_analyze_document(**kwargs):
+            captured["extension"] = kwargs["file_extension"]
+            return ({"report_html": "<p>ok</p>", "extracted_text": "본문"}, 200)
 
-        browser = self.app_module.app.test_client()
-        with patch.object(self.app_module, "ingest_text_to_vector_store", fake_ingest_text_to_vector_store):
-            response = browser.post(
-                "/statistics/analyze",
-                data={
-                    "file": (
-                        io.BytesIO(b"department,sales,cost\nA,10,7\nB,20,11\nA,30,15\n"),
-                        "sample.csv",
-                    ),
-                    "question": "Which department looks strongest?",
-                    "add_to_knowledge_base": "true",
-                    "user_id": "forged-owner",
-                },
+        def fake_ingest(text, source_name, metadata=None, user_id=None):
+            captured["source_name"] = source_name
+            return {"ok": True, "chunk_count": 1}
+
+        with patch.object(self.app_module, "get_chat_model", lambda: object()), patch.object(
+            self.app_module.llm_ocr, "analyze_document", fake_analyze_document
+        ), patch.object(self.app_module, "ingest_text_to_vector_store", fake_ingest):
+            response = self.app_module.app.test_client().post(
+                "/process_document_ocr",
+                data={"file": (io.BytesIO("본문".encode()), "../폴더/임대차계약서.TXT"), "add_to_knowledge_base": "true"},
                 content_type="multipart/form-data",
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.json["ai_enabled"])
-        self.assertEqual(response.json["analysis"]["row_count"], 3)
-        self.assertEqual(response.json["analysis"]["column_count"], 3)
-        self.assertIn("sales", [row["column"] for row in response.json["analysis"]["numeric_summary"]])
-        self.assertIn("Local statistical analysis", response.json["report_html"])
-        self.assertEqual(response.json["knowledge_base"]["chunk_count"], 1)
-        self.assertEqual(captured["source_name"], "sample.csv")
-        self.assertEqual(captured["metadata"]["analysis_type"], "statistics")
-        self.assertEqual(captured["user_id"], self.session_user_id(browser))
+        self.assertEqual(captured, {"extension": "txt", "source_name": "임대차계약서.TXT"})
 
-    def test_statistics_analysis_rejects_unsupported_file_type(self):
-        response = self.app_module.app.test_client().post(
-            "/statistics/analyze",
-            data={"file": (io.BytesIO(b"not a table"), "sample.txt")},
-            content_type="multipart/form-data",
-        )
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json, {"error": "File type not allowed. Upload CSV, TSV, or XLSX."})
 
     # --- knowledge base isolation -----------------------------------------
 

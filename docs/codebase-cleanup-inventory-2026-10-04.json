@@ -1,0 +1,1405 @@
+{
+  "logs": [
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01/res_full_existing.log",
+      "bytes": 4612,
+      "mtime": 1790886214.9959924,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01/res_full_full.log",
+      "bytes": 4612,
+      "mtime": 1790888003.7181988,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/gen-model-ab-2026-10-04/run.out",
+      "bytes": 133,
+      "mtime": 1791102490.2203805,
+      "action": "hold_until_completion_confirmed"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/gen-model-ab-2026-10-04/q4b/run.log",
+      "bytes": 2014,
+      "mtime": 1791102509.372259,
+      "action": "hold_until_completion_confirmed"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs/gemini-B.log",
+      "bytes": 4966,
+      "mtime": 1790938420.2888532,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs/gemini-A.log",
+      "bytes": 4973,
+      "mtime": 1790937195.571068,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs/judge-local-B.log",
+      "bytes": 4013,
+      "mtime": 1790941862.3135507,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs/judge-gemini-B.log",
+      "bytes": 4019,
+      "mtime": 1790944921.283569,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs/local-A.log",
+      "bytes": 4970,
+      "mtime": 1790933240.9805052,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs/judge-local-A.log",
+      "bytes": 3961,
+      "mtime": 1790940013.2696936,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs/local-B.log",
+      "bytes": 4966,
+      "mtime": 1790934764.8582122,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs/judge-gemini-A.log",
+      "bytes": 3987,
+      "mtime": 1790943506.9993277,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs-probes/gemini-B.log",
+      "bytes": 2157,
+      "mtime": 1791022136.662539,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs-probes/gemini-A.log",
+      "bytes": 4106,
+      "mtime": 1791022133.4045513,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs-probes/judge-local-B.log",
+      "bytes": 559,
+      "mtime": 1791024343.4447927,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs-probes/judge-gemini-B.log",
+      "bytes": 569,
+      "mtime": 1791025211.5893235,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs-probes/local-A.log",
+      "bytes": 7338,
+      "mtime": 1791022251.7211246,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs-probes/judge-local-A.log",
+      "bytes": 553,
+      "mtime": 1791023617.7910378,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs-probes/local-B.log",
+      "bytes": 11066,
+      "mtime": 1791022749.4798138,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/runs-probes/judge-gemini-A.log",
+      "bytes": 567,
+      "mtime": 1791024707.8676958,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/other_retrieve.log",
+      "bytes": 2359,
+      "mtime": 1790689428.2419622,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/harness-article-coverage.log",
+      "bytes": 302,
+      "mtime": 1790690999.8311083,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/article_rerank.log",
+      "bytes": 6611,
+      "mtime": 1790689128.8132367,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/score_segments_other.log",
+      "bytes": 5012,
+      "mtime": 1790689584.120897,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/queries.log",
+      "bytes": 4699,
+      "mtime": 1790688841.5250406,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/score_segments.log",
+      "bytes": 3856,
+      "mtime": 1790689547.9955983,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/retrieve.log",
+      "bytes": 1915,
+      "mtime": 1790688972.7138083,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/other_queries.log",
+      "bytes": 6236,
+      "mtime": 1790689293.6567073,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/structural-golden-80-2026-10-03/completion.log",
+      "bytes": 474,
+      "mtime": 1791036326.436905,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/reranker-length-2026-10-03/stage1_B.log",
+      "bytes": 16752,
+      "mtime": 1791077743.92112,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/reranker-length-2026-10-03/stage1.log",
+      "bytes": 16752,
+      "mtime": 1791026374.2930105,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/reranker-length-2026-10-03/stage2_B.log",
+      "bytes": 1700,
+      "mtime": 1791081057.7682927,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/reranker-length-2026-10-03/stage2.log",
+      "bytes": 1720,
+      "mtime": 1791075895.3804276,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/criminal-index.log",
+      "bytes": 219285,
+      "mtime": 1791007773.2261193,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/civil-evaluation.log",
+      "bytes": 1338,
+      "mtime": 1791009100.6701586,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/administrative-evaluation.log",
+      "bytes": 1347,
+      "mtime": 1791009579.432212,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/criminal-evaluation.log",
+      "bytes": 1341,
+      "mtime": 1791008616.1182942,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/ip-index.log",
+      "bytes": 305642,
+      "mtime": 1791008089.1498811,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/administrative-index.log",
+      "bytes": 258261,
+      "mtime": 1791007894.1268725,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/ip-evaluation.log",
+      "bytes": 1335,
+      "mtime": 1791010026.3479016,
+      "action": "archive_candidate_after_run_completion_check"
+    },
+    {
+      "path": "data/api_laws/resume_index_full.log",
+      "bytes": 74253,
+      "mtime": 1790850926.044748,
+      "action": "hold_until_completion_confirmed"
+    },
+    {
+      "path": "data/api_laws/build_index_full.log",
+      "bytes": 51297,
+      "mtime": 1790840206.39665,
+      "action": "hold_until_completion_confirmed"
+    },
+    {
+      "path": "data/api_laws/resume_index_full2.log",
+      "bytes": 18631,
+      "mtime": 1790853654.615235,
+      "action": "hold_until_completion_confirmed"
+    },
+    {
+      "path": "data/api_laws/bulk_fetch.log",
+      "bytes": 2410,
+      "mtime": 1790836151.5957646,
+      "action": "hold_until_completion_confirmed"
+    }
+  ],
+  "caches": [
+    {
+      "path": ".ruff_cache",
+      "files": 7,
+      "bytes": 127930,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "__pycache__",
+      "files": 48,
+      "bytes": 539533,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "scripts/__pycache__",
+      "files": 12,
+      "bytes": 170654,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "evals/__pycache__",
+      "files": 2,
+      "bytes": 4045,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": ".pytest_cache",
+      "files": 5,
+      "bytes": 5536,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/ingestion/__pycache__",
+      "files": 13,
+      "bytes": 76003,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/ingestion/normalize/__pycache__",
+      "files": 5,
+      "bytes": 20784,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/__pycache__",
+      "files": 4,
+      "bytes": 18904,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/config/__pycache__",
+      "files": 3,
+      "bytes": 15785,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/verification/__pycache__",
+      "files": 5,
+      "bytes": 20433,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/api/__pycache__",
+      "files": 4,
+      "bytes": 12170,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/textutil/__pycache__",
+      "files": 4,
+      "bytes": 8704,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/rag/__pycache__",
+      "files": 9,
+      "bytes": 44288,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/training/__pycache__",
+      "files": 8,
+      "bytes": 83123,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/reranking/__pycache__",
+      "files": 4,
+      "bytes": 8281,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/evaluation/__pycache__",
+      "files": 30,
+      "bytes": 353297,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/embeddings/__pycache__",
+      "files": 4,
+      "bytes": 8452,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/schemas/__pycache__",
+      "files": 11,
+      "bytes": 31209,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/chunking/__pycache__",
+      "files": 10,
+      "bytes": 60156,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/llm/__pycache__",
+      "files": 6,
+      "bytes": 22040,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/llm/prompts/__pycache__",
+      "files": 1,
+      "bytes": 746,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "src/legal_rag/retrieval/__pycache__",
+      "files": 11,
+      "bytes": 64005,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01/scripts/__pycache__",
+      "files": 2,
+      "bytes": 5773,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/reranker-length-2026-10-03/__pycache__",
+      "files": 1,
+      "bytes": 2566,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/judge-repair/__pycache__",
+      "files": 1,
+      "bytes": 14501,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "data/eval/reports/domain-prompt-pilot-2026-10-03/__pycache__",
+      "files": 1,
+      "bytes": 19541,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "tests/__pycache__",
+      "files": 30,
+      "bytes": 340907,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "tests/legal_rag/live/__pycache__",
+      "files": 2,
+      "bytes": 7911,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "tests/legal_rag/__pycache__",
+      "files": 5,
+      "bytes": 104157,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "tests/legal_rag/unit/__pycache__",
+      "files": 38,
+      "bytes": 821642,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "tests/legal_rag/training/__pycache__",
+      "files": 4,
+      "bytes": 107184,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "tests/legal_rag/evaluation/__pycache__",
+      "files": 18,
+      "bytes": 745397,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "tests/legal_rag/integration/__pycache__",
+      "files": 6,
+      "bytes": 89470,
+      "action": "regenerable_delete_candidate"
+    },
+    {
+      "path": "tests/legal_rag/llm/__pycache__",
+      "files": 2,
+      "bytes": 17203,
+      "action": "regenerable_delete_candidate"
+    }
+  ],
+  "data_directory_scripts": [
+    {
+      "path": "data/eval/relevance/ip-v1-pilot-200/experiments/think-comparison/run_comparison.py",
+      "bytes": 3045,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/relevance/ip-v1-pilot-200/experiments/think-comparison/summarize.py",
+      "bytes": 2468,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/gemini-2026-09-30/replay.py",
+      "bytes": 8489,
+      "functions": [
+        "generate",
+        "main"
+      ],
+      "action": "keep_active_dependency_until_generator_extraction"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/gemini-2026-09-30/report_bounds.py",
+      "bytes": 8685,
+      "functions": [
+        "read",
+        "correct"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/gemini-2026-09-30/retry_judge_pair.py",
+      "bytes": 2492,
+      "functions": [
+        "read",
+        "answer_hash"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/gemini-2026-09-30/judge.py",
+      "bytes": 4197,
+      "functions": [
+        "fingerprint"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/gemini-2026-09-30/prepare.py",
+      "bytes": 3514,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/gemini-2026-09-30/report.py",
+      "bytes": 11072,
+      "functions": [
+        "read",
+        "correct",
+        "wilson"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/quick-review-2026-10-01/prepare.py",
+      "bytes": 7613,
+      "functions": [
+        "read",
+        "saved_run"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/quick-review-2026-10-01/export_completed.py",
+      "bytes": 2361,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01/scripts/run_full.py",
+      "bytes": 2376,
+      "functions": [
+        "row"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01/scripts/score_full.py",
+      "bytes": 3197,
+      "functions": [
+        "covered"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01/scripts/resume_index.py",
+      "bytes": 2977,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01/scripts/bulk_fetch.py",
+      "bytes": 2413,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01/scripts/gold_titles.py",
+      "bytes": 611,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01/scripts/run_probe.py",
+      "bytes": 3402,
+      "functions": [
+        "row"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01/scripts/diag_miss.py",
+      "bytes": 2105,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01/scripts/probes_raw.py",
+      "bytes": 2851,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01/scripts/fetch_laws.py",
+      "bytes": 5219,
+      "functions": [
+        "get",
+        "find",
+        "strip_head",
+        "convert"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01/scripts/run_control.py",
+      "bytes": 2959,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/gen-model-ab-2026-10-04/run.sh",
+      "bytes": 1953,
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/structural-answer-pair-2026-10-03/run.py",
+      "bytes": 5972,
+      "functions": [
+        "rows",
+        "digest",
+        "immutable",
+        "prepare",
+        "generate",
+        "judge"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/structural-answer-pair-2026-10-03/summarize.py",
+      "bytes": 7875,
+      "functions": [
+        "rows",
+        "sha"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/rubric.py",
+      "bytes": 1497,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/build_sample.py",
+      "bytes": 3847,
+      "functions": [
+        "covered"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/extras.py",
+      "bytes": 2141,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/judge_probes.py",
+      "bytes": 3638,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/analyze.py",
+      "bytes": 5173,
+      "functions": [
+        "load",
+        "m2",
+        "m1",
+        "mcnemar",
+        "boot",
+        "compare"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/verify_ab.py",
+      "bytes": 9657,
+      "functions": [
+        "analyze_cached",
+        "backfill_spy",
+        "verify_spy",
+        "decide_spy"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/judge_ab.py",
+      "bytes": 3512,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02/probes/analyze_probes.py",
+      "bytes": 3337,
+      "functions": [
+        "load",
+        "has_article",
+        "p1",
+        "p2",
+        "mcnemar",
+        "boot"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/compare_runs.py",
+      "bytes": 2137,
+      "functions": [
+        "load",
+        "summary"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/refuse_candidates.py",
+      "bytes": 2669,
+      "functions": [
+        "fuse"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/statute_targets.py",
+      "bytes": 4739,
+      "functions": [
+        "heading_re",
+        "grams",
+        "best"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/replay_retrieval.py",
+      "bytes": 4043,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/article_rerank.py",
+      "bytes": 7834,
+      "functions": [
+        "order_of",
+        "last_heading",
+        "split_articles",
+        "carry_label",
+        "rate"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/select_variants.py",
+      "bytes": 6083,
+      "functions": [
+        "grams",
+        "support",
+        "load",
+        "select",
+        "evaluate"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/stage_ranks.py",
+      "bytes": 5048,
+      "functions": [
+        "rank_of",
+        "bucket"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/statute-replay/score_segments.py",
+      "bytes": 4890,
+      "functions": [
+        "order_of",
+        "last_heading",
+        "split_articles",
+        "carry_label"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/failure-breakdown/article_coverage.py",
+      "bytes": 2079,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/failure-breakdown/where_is_key.py",
+      "bytes": 3111,
+      "functions": [
+        "correct",
+        "grams",
+        "best"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/failure-breakdown/k8_flip_check.py",
+      "bytes": 3511,
+      "functions": [
+        "shown_orders"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles/failure-breakdown/show_failures.py",
+      "bytes": 2620,
+      "functions": [
+        "rows",
+        "correct",
+        "squash",
+        "grams",
+        "windows"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/structural-golden-80-2026-10-03/finish.py",
+      "bytes": 1345,
+      "functions": [
+        "record"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/reranker-length-2026-10-03/score_len.py",
+      "bytes": 2603,
+      "functions": [
+        "covered",
+        "mcnemar",
+        "boot"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/reranker-length-2026-10-03/stage2_rerank.py",
+      "bytes": 3102,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/reranker-length-2026-10-03/stage1_candidates.py",
+      "bytes": 2771,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/reranker-length-2026-10-03/score_len2.py",
+      "bytes": 2940,
+      "functions": [
+        "covered",
+        "mcnemar",
+        "boot"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/reranker-length-2026-10-03/guard.py",
+      "bytes": 1415,
+      "functions": [
+        "mem_available_mb",
+        "wait_for_memory",
+        "yield_if_critical"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/reranker-length-2026-10-03/diag/rerank_cover.py",
+      "bytes": 1470,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/reranker-length-2026-10-03/diag/embed_trunc.py",
+      "bytes": 2195,
+      "functions": [
+        "emb"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/chunk-size-review-2026-10-01/analyze.py",
+      "bytes": 8607,
+      "functions": [
+        "load",
+        "stats"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/report_ip_calibration.py",
+      "bytes": 8026,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/diagnose_ip.py",
+      "bytes": 4850,
+      "functions": [
+        "hit_record",
+        "stage"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/score_ip_gold.py",
+      "bytes": 4906,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/prepare_ip_calibration.py",
+      "bytes": 4276,
+      "functions": [
+        "category"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/run_original_baseline.py",
+      "bytes": 5474,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/compare.py",
+      "bytes": 7858,
+      "functions": [
+        "bootstrap",
+        "summarize"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/label_ip_calibration.py",
+      "bytes": 14123,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/summarize_ip.py",
+      "bytes": 4458,
+      "functions": [
+        "metrics",
+        "success",
+        "add"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/judge-repair/run_frozen_relevance.py",
+      "bytes": 717,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/judge-repair/prepare_fresh_calibration.py",
+      "bytes": 5090,
+      "functions": [
+        "category"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/judge-repair/compare_fresh.py",
+      "bytes": 7259,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/judge-repair/label_fresh_calibration.py",
+      "bytes": 10622,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/judge-repair/frozen_judge_cli.py",
+      "bytes": 4028,
+      "functions": [
+        "main"
+      ],
+      "action": "preserve_frozen_evaluation_snapshot"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/judge-repair/relevance_judge_before.py",
+      "bytes": 9767,
+      "functions": [
+        "generation_settings",
+        "prompt_sha256",
+        "judge_key",
+        "describe_key",
+        "_normalize",
+        "_strip_quote_edges",
+        "verify_quote",
+        "_messages",
+        "judge_pool",
+        "ollama_model_digest",
+        "judge_run_record",
+        "append_judge_run"
+      ],
+      "action": "preserve_frozen_evaluation_snapshot"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/judge-repair/frozen_agreement_cli.py",
+      "bytes": 4954,
+      "functions": [
+        "main"
+      ],
+      "action": "preserve_frozen_evaluation_snapshot"
+    },
+    {
+      "path": "data/eval/reports/domain-prompt-pilot-2026-10-03/shared_judge.py",
+      "bytes": 13640,
+      "functions": [
+        "generation_settings",
+        "prompt_sha256",
+        "judge_key",
+        "describe_key",
+        "_normalize",
+        "_strip_quote_edges",
+        "verify_quote",
+        "_messages",
+        "_repair_quote",
+        "judge_pool",
+        "ollama_model_digest",
+        "judge_run_record",
+        "append_judge_run"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/domain-prompt-pilot-2026-10-03/run.py",
+      "bytes": 2536,
+      "functions": [
+        "system"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/domain-prompt-pilot-2026-10-03/prepare.py",
+      "bytes": 4741,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/domain-prompt-pilot-2026-10-03/report.py",
+      "bytes": 7788,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/criminal-prompt-revision-2026-10-03/report.py",
+      "bytes": 4631,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-civil-test-2026-10-02/run_sparse.py",
+      "bytes": 2138,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-civil-test-2026-10-02/summarize.py",
+      "bytes": 4388,
+      "functions": [
+        "load",
+        "gold_rank"
+      ],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    },
+    {
+      "path": "data/eval/reports/structural-civil-test-2026-10-02/run_hybrid.py",
+      "bytes": 5153,
+      "functions": [],
+      "action": "extract_reusable_logic_then_archive_historical_script"
+    }
+  ],
+  "exact_source_duplicates": [
+    [
+      "data/eval/reports/retrieval_diagnostics/ip-v1/intellectual_property/dense-seed42/README.md",
+      "data/eval/reports/retrieval_diagnostics/ip-v1/intellectual_property/sparse-seed42-final/README.md",
+      "data/eval/reports/retrieval_diagnostics/ip-v1/intellectual_property/hybrid-seed42-final/README.md",
+      "data/eval/reports/retrieval_diagnostics/ip-v1/intellectual_property/hybrid-seed42/README.md",
+      "data/eval/reports/retrieval_diagnostics/ip-v1/intellectual_property/sparse-seed42/README.md",
+      "data/eval/reports/retrieval_diagnostics/ip-v1/intellectual_property/dense-seed42-final/README.md"
+    ]
+  ],
+  "date": "2026-10-04",
+  "scope": "Main workspace; excluded git, virtualenvs, worktrees, models, databases and large corpora from source/cache scan. Storage sizes sampled separately. No secret values or log bodies stored.",
+  "storage": {
+    "data/qdrant": 29170909184,
+    "data/processed": 15518220288,
+    "data/training": 2403479552,
+    "data/eval": 1375539200,
+    "data/indexes": 312672256,
+    "data/api_laws": 244613120,
+    "models": 314908672
+  },
+  "experiments": [
+    {
+      "path": "data/eval/reports/chat_pipeline/article-coverage",
+      "disk_bytes": 32768,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/article-heldout",
+      "disk_bytes": 417792,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/civil-failure-review-2026-10-01",
+      "disk_bytes": 1589248,
+      "report_files": [
+        "README.md",
+        "civil-failures.md",
+        "original-documents.md"
+      ],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/coverage-everyday",
+      "disk_bytes": 163840,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/coverage-formal",
+      "disk_bytes": 229376,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/everyday-2026-09-28",
+      "disk_bytes": 327680,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-27",
+      "disk_bytes": 610304,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28",
+      "disk_bytes": 180224,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-articles",
+      "disk_bytes": 112988160,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/formal-2026-09-28-k8",
+      "disk_bytes": 2580480,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/full-corpus-answer-ab-2026-10-02",
+      "disk_bytes": 8937472,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/gemini-2026-09-30",
+      "disk_bytes": 4972544,
+      "report_files": [
+        "README.md"
+      ],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/gen-model-ab-2026-10-04",
+      "disk_bytes": 147456,
+      "report_files": [],
+      "action": "hold_incomplete_experiment",
+      "saved_rows": {
+        "q4b/verify.jsonl": 7
+      }
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/quick-review-2026-10-01",
+      "disk_bytes": 1671168,
+      "report_files": [
+        "review.md",
+        "error-analysis.md",
+        "README.md"
+      ],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/recheck-2026-09-28",
+      "disk_bytes": 81920,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/reranker-length-2026-10-03",
+      "disk_bytes": 416657408,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01",
+      "disk_bytes": 9859072,
+      "report_files": [
+        "README.md"
+      ],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/structural-answer-pair-2026-10-03",
+      "disk_bytes": 4018176,
+      "report_files": [
+        "case-review.md",
+        "judge-calibration.md",
+        "comparison.md"
+      ],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/structural-golden-80-2026-10-03",
+      "disk_bytes": 24911872,
+      "report_files": [
+        "case-review.md",
+        "changed-case-review.md",
+        "runtime-notes.md",
+        "comparison.md"
+      ],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/structural-golden-80-2026-10-03-calibration-v3-ctx16384",
+      "disk_bytes": 34926592,
+      "report_files": [
+        "comparison-v3.md",
+        "error-inspection.md",
+        "v2-v3-summary.md"
+      ],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/chunk-size-review-2026-10-01",
+      "disk_bytes": 61440,
+      "report_files": [
+        "report.md"
+      ],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/criminal-prompt-revision-2026-10-03",
+      "disk_bytes": 454656,
+      "report_files": [
+        "review-findings.md",
+        "report.md"
+      ],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/domain-prompt-pilot-2026-10-03",
+      "disk_bytes": 1060864,
+      "report_files": [
+        "review-findings.md",
+        "commands.md",
+        "report.md"
+      ],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/retrieval_diagnostics",
+      "disk_bytes": 102256640,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03",
+      "disk_bytes": 130891776,
+      "report_files": [
+        "comparison.md"
+      ],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/reports/structural-civil-test-2026-10-02",
+      "disk_bytes": 21155840,
+      "report_files": [
+        "comparison.md"
+      ],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/relevance/crossdomain-60-fanout",
+      "disk_bytes": 18149376,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/relevance/ip-200-fanout",
+      "disk_bytes": 40259584,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/relevance/ip-struct800-calibration-2026-10-03",
+      "disk_bytes": 1089536,
+      "report_files": [
+        "rubric.md",
+        "report.md"
+      ],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/relevance/ip-struct800-calibration-fresh-2026-10-03",
+      "disk_bytes": 667648,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/relevance/ip-v1-pilot-200",
+      "disk_bytes": 66650112,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/relevance/ip-v1-pilot-200-rerank",
+      "disk_bytes": 50974720,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/relevance/ip-v1-pilot-200-rerank-1024",
+      "disk_bytes": 58363904,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/relevance/ip-v1-pilot-200-rerank-k50",
+      "disk_bytes": 59748352,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/relevance/ip-v1-pilot-200-sweep",
+      "disk_bytes": 46821376,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/relevance/ip-v1-pilot-200-top10",
+      "disk_bytes": 40280064,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/relevance/ip-v2-cal50",
+      "disk_bytes": 33411072,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    },
+    {
+      "path": "data/eval/relevance/ip-v2-rerank",
+      "disk_bytes": 13127680,
+      "report_files": [],
+      "action": "preserve_results_archive_completed_intermediates_only"
+    }
+  ],
+  "worktree_cleanup_file_comparison": {
+    ".gitignore": true,
+    "scripts/judge_answers.py": true,
+    "scripts/eval_golden_answers.py": true,
+    "scripts/calibrate_golden_answers.py": true,
+    "docs/golden-answer-comparison.md": true,
+    "docs/answer-grader-v3-calibration.md": true,
+    "docs/superpowers/plans/2026-10-04-answer-reporting-cleanup.md": true,
+    "docs/superpowers/plans/2026-10-04-answer-grader-cleanup.md": true,
+    "src/legal_rag/evaluation/answer_run.py": true,
+    "src/legal_rag/evaluation/answer_reporting.py": true,
+    "src/legal_rag/evaluation/answer_rubrics.py": true,
+    "src/legal_rag/evaluation/answer_judge_runner.py": true
+  },
+  "deletions_performed": []
+}

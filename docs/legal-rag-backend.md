@@ -124,9 +124,10 @@ Frequently changed keys:
 | `rerank.local_files_only` | `false` | Load the cached model without Hub checks (1.9 s instead of 5.6 s); `local.yaml` sets it |
 | `api.warmup` | `false` | Run one search in the background at startup; `/health` reports `warm`. `local.yaml` sets it: first search after warm-up 2.3 s instead of ~18 s cold |
 | `llm.backend` / `llm.model` | `ollama` / `qwen3:4b` | `transformers` arrives with V0.4 |
-| `llm.num_ctx` | unset (Ollama's 4096) | `local.yaml` sets 8192: answer prompts measure 5,900–6,300 tokens |
-| `rag.allow_clarification` | `true` | Ask for facts instead of answering when the analyzer flags them |
+| `llm.num_ctx` | unset (Ollama's 4096) | `local.yaml` sets 12288: answer prompts measure up to 6,600 tokens, and 9,250 with the user's case documents, plus up to 2,048 output tokens (2026-10-06). `LEGAL_RAG__LLM__NUM_CTX` overrides it for both apps |
+| `rag.allow_clarification` | `true` | Ask for facts instead of answering, only when the analyzer finds no legal area to search. Otherwise the turn is answered and the open questions ride in the answer (2026-10-05) |
 | `rag.llm_rewrite` | `false` | Add LLM-generated search phrasings; no measurable retrieval gain (below) |
+| `rag.analyzer_terms_in_search` | `false` | Add the analyzer's issues and keywords as a search query. Off since 2026-10-05: they made the same question retrieve different chunks from run to run (identical evidence on 55 of 80 formal and 29 of 60 everyday questions, against 79 of 80 and 60 of 60 without) for no change in gold coverage |
 | `rag.hard_filter` | `false` | Use the analyzer's single needed document kind as a hard filter; harmful (below) |
 | `rag.max_regenerations` | `1` | Regeneration attempts after a failed verification |
 | `trace.path` / `trace.include_text` | unset / `false` | JSONL audit log; user text is excluded unless enabled |
@@ -252,6 +253,14 @@ To select the local generator, set the backend to `ollama`, model to
 `LEGAL_RAG__LLM__...` environment variables have highest priority. API keys are
 excluded from configuration hashes and are rejected in YAML profiles.
 
+The 2026-09-30 frozen-evidence trial generated all 80 Gemini answers without
+recorded API failures. Reference agreement was 59–60/80 (73.75–75.00%), compared
+with the historical local model's 50/80 (62.5%). One local judge response remained
+unresolved after retries, so the Gemini result is a range. This is an exploratory
+development comparison; the paired uncertainty can include zero improvement.
+Artifacts and limits are recorded in
+`data/eval/reports/chat_pipeline/gemini-2026-09-30/README.md` (local, ignored by Git).
+
 ## Document type and citation kind
 
 `document_type` is the fine-grained retrieval facet. Six values appear across the four
@@ -345,7 +354,7 @@ corpus-global. To answer one question from several corpora, name them:
 
 ```yaml
 retrieval:
-  corpora: [criminal-v1, civil-v1, administrative-v1, ip-v1]
+  corpora: [criminal-v1, civil-v1, administrative-v1, ip-v1, statute-api-full-v1]   # local.yaml since 2026-10-06
   corpus_weights: {ip-v1: 0.5}   # absent corpora weigh 1.0
   k_fused: 50                    # raise this when fanning out
 ```
@@ -502,7 +511,112 @@ within noise.
   the 210 questions from 2026-09-27 returned the same top 10 for all of them, and S@10 was
   0.557 both times.
 
+### Consistent answer grading, 2026-09-30
+
+`scripts/judge_answers.py judge` now defaults to rubric **v2**. It grades three
+dimensions independently for every generator:
+
+- **Conclusion:** full/partial/no coverage and contradiction. A missing or different
+  citation alone does not lower conclusion coverage; a changed substantive rule can.
+- **Legal basis:** matching, different, missing, or not applicable to the reference.
+  An identical conclusion supported by the wrong named law is a basis mismatch.
+- **Evidence support:** supported, partial, unsupported, or evidence not saved.
+  This uses the evidence supplied to the generator, not the reference's gold document.
+
+The report exposes `conclusion_correct`, `reference_agreement` (conclusion plus
+legal basis), and `grounded_correct` (both plus evidence support) separately. None
+establish legal correctness. Missing evidence produces an unknown grounded metric.
+Judge errors, stale grades, and generation errors remain unresolved; completed
+no-answer outcomes count as failed answer outcomes. All-case score bounds show
+how unresolved outcomes affect the denominator.
+
+V2 requires reference and answer quotes to occur in their respective inputs and
+source quotes to occur in the specified evidence passage. Text presence checks do
+not prove entailment. Saved verification evidence takes priority over pair evidence;
+typed `contexts.jsonl` bundles are a fallback. SFT context files are not substituted.
+
+Use the same model, rubric, token budget, and thinking settings for both arms:
+
+```bash
+.venv/bin/python scripts/judge_answers.py judge --run data/eval/reports/chat_pipeline/formal-2026-09-28-articles --rubric v2 --no-think
+.venv/bin/python scripts/judge_answers.py judge --run data/eval/reports/chat_pipeline/gemini-2026-09-30 --rubric v2 --no-think
+.venv/bin/python scripts/judge_answers.py report --run data/eval/reports/chat_pipeline/gemini-2026-09-30 --rubric v2
+```
+
+V2 defaults to thinking disabled, context 12,288 and 4,096 output tokens. Thinking
+can be enabled explicitly, but its decoding settings must match across arms.
+No existing grades are overwritten: new files are `answer_judge-v2.json` and
+`answer_judgments-v2.jsonl`. The immutable manifest includes the schema, prompt,
+quote-rule version, model digest and decoding settings. Each grade fingerprints the
+question, reference, answer, outcome kind and evidence. Failed cases retry up to
+twice per invocation and remain retryable on later invocations. Configuration
+changes require a separate run directory; changed inputs invalidate old grades.
+
+Retry policy `quote-feedback-v1` keeps the initial rubric unchanged. On a schema or
+quote-validation failure, its second attempt receives the rejected draft and all
+validation errors, including field names, rejected quotes and exact matching source
+indexes when a quote belongs to a different passage. Quote checks remain strict.
+New attempts save raw output, parsed grades, validation failures, repair feedback
+and available generation metadata in `answer_judge_attempts-v2.jsonl`, flushed after
+each attempt. Earlier discarded outputs cannot be recovered.
+
+The retry instruction/version is recorded separately in
+`answer_judge_retry-quote-feedback-v1.json`; new grade records include its hash and
+an invocation ID. Existing valid grades keep their original provenance and failed
+cases retry. Reports show the accepted grades' retry-policy counts, so runs spanning
+the repair are visible. An already-running process uses the old code: stop it before
+rerunning the same commands to resume with the repair.
+
+The successor policy `quote-selection-v2` addresses repeated paraphrasing that
+survived feedback-only retries. Known schema/quote failures resume directly with
+passage selection; a new failure switches its next attempt to that path. Reference,
+answer and source text are split into unchanged contiguous passages with IDs. The
+judge chooses schema-constrained IDs and the code copies their original text into
+the same v2 grade fields before applying all existing quote checks. `A_NONE` denotes
+no relevant answer passage and remains invalid for yes/partial coverage. Evidence
+not saved and explicitly empty evidence remain distinct.
+
+Passage-selection attempts record the full catalogue, selected IDs, output schema
+hash, materialized grade and validation feedback in the attempt log. The policy is
+recorded in `answer_judge_retry-quote-selection-v2.json`; successful earlier grades
+remain saved. Preparing requests for observed failures and static review succeeded;
+this policy has not yet been measured in a live grading run. Genuine classification
+or schema failures remain unresolved and do not count as incorrect answers.
+
+Policy `quote-selection-v3` limits evidence selection to eight unique IDs in both
+its JSON schema and Python validation. Duplicate IDs are rejected rather than
+silently removed. Requests time out after 180 seconds; a timeout is saved without
+an immediate retry. Two consecutive timed-out cases stop the invocation with exit
+code 1 after flushing results. Resume retains validated grades and remembers the
+passage-selection path, including earlier attempts recorded before this policy.
+The settings are recorded in `answer_judge_retry-quote-selection-v3.json`.
+
+Ollama metadata endpoints can respond while inference is stalled. Inspect active
+clients and server logs before recovering the worker and resuming. Server logs
+also showed prompts exceeding the 12,288-token context limit: bounded output does
+not resolve input truncation, so larger-context evaluation needs a separate run
+with matching settings for both providers.
+
+For independent manual calibration, export review inputs without AI grades or
+provider metadata and fill the label fields while keeping inputs/fingerprints intact:
+
+```bash
+.venv/bin/python scripts/judge_answers.py review --run data/eval/reports/chat_pipeline/gemini-2026-09-30 --out /tmp/answer-review-v2.jsonl
+.venv/bin/python scripts/judge_answers.py report --run data/eval/reports/chat_pipeline/gemini-2026-09-30 --rubric v2 --manual /tmp/answer-review-v2.jsonl
+```
+
+Use a blinded sample covering both models, including wrong-statute answers, missing
+evidence, and their disagreements. Conclusion labels alone calibrate only the
+conclusion metric; basis/support metrics require their own manual labels. Old
+manual labels without input fingerprints cannot calibrate v2. Human calibration
+and re-scoring have not been performed for v2; the Gemini trial figures above still
+use the historical rubric. Archived replay scripts importing `SYSTEM`/`AnswerGrade`
+also retain that legacy rubric; use the CLI commands above for v2 grading.
+
 ### Answer accuracy against the AIHub references, 2026-09-28
+
+These historical results use the legacy rubric. Read them with
+`scripts/judge_answers.py report --rubric legacy --run <historical-run>`.
 
 `scripts/judge_answers.py` pairs the 80 saved answers from the article-backfill rerun with
 the reference answers in the upstream `qa.jsonl`. The eval sets leave those out, so this is
@@ -575,3 +689,11 @@ qwen3:8b judged them as in the section above.
   used up `max_tokens`.
 
 **Decision.** `k_final` stays at 5.
+
+## Smaller structural civil chunks
+
+The prepared `civil-struct800-v1` corpus uses 800/1000-character structural
+chunks. The optional `structural-civil` profile expands adjacent civil passages
+after reranking under a rendered-context budget, with separate citations.
+See [indexing and comparison instructions](structural-civil.md). Quality gains
+remain unmeasured; the existing civil-v1 index remains the baseline.

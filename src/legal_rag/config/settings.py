@@ -113,9 +113,19 @@ class RagSettings(_Section):
     # 210 eval questions it asked for statutes 201 times, and filtering cut gold Success@10
     # from 0.557 to 0.414 (95% CI of the change [-0.205, -0.086], 2026-09-27).
     hard_filter: bool = False
+    # Search with the analyzer's issues and keywords as an extra query. Off: the terms come from
+    # a model and vary between runs, so the same question got the same five chunks twice on only
+    # 55 of 80 formal and 29 of 60 everyday questions; without them 79 of 80 and 60 of 60, with
+    # gold in the evidence unchanged (46 -> 45.5 of 80, 28 -> 30 of 60; 2026-10-05).
+    analyzer_terms_in_search: bool = False
+    # Hide the dates and amounts inside judgment text from the answer model (not from the response).
+    mask_case_figures: bool = False
     history_turns: int = 4
     max_regenerations: int = 1
-    max_evidence_chars: int = 1500
+    max_evidence_chars: int = Field(default=1500, ge=1)
+    context_neighbor_radius: int = Field(default=0, ge=0, le=2)
+    context_neighbor_corpora: list[str] = Field(default_factory=list)
+    max_context_chars: int | None = Field(default=None, ge=1)
 
 
 class ApiSettings(_Section):

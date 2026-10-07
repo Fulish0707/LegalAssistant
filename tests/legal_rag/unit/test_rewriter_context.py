@@ -80,3 +80,11 @@ def test_context_builder_renders_imported_judgment_as_case():
     assert header["Type"] == "Case"
     assert header["Court"] == "인천지방법원" and header["Case number"] == "2008보5"
     assert "Authority" not in header
+
+
+def test_analyzer_terms_can_be_kept_out_of_the_search():
+    # The analyzer's issues and keywords differ from run to run, and with them the evidence:
+    # two runs of the same 80 questions shared identical evidence on 47 to 50 (2026-10-05).
+    analysis = QueryAnalysis(issues=["보증금 반환"], keywords=["임대차", "보증금"], statute_refs=["주택임대차보호법 제3조의3"])
+    rq = QueryRewriter(model=None, analyzer_terms=False).rewrite("집주인이 보증금을 안 줍니다", analysis)
+    assert rq.search_queries == ["집주인이 보증금을 안 줍니다", "주택임대차보호법 제3조의3"]

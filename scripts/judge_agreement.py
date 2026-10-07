@@ -23,7 +23,7 @@ from pathlib import Path
 import typer
 
 from legal_rag.evaluation.calibration import (
-    BOUNDARY_KEYS, PASS_KAPPA, agreement, agreement_paths, boundary_kappa, calibration_fingerprint, disagreement_rows,
+    BOUNDARY_KEYS, PASS_KAPPA, agreement, agreement_paths, calibration_fingerprint, disagreement_rows,
     judge_passes, missing_llm_message, model_grades, quote_downgrades, read_reference_grades, require_reference_grades,
     write_review)
 from legal_rag.evaluation.judgment_store import JudgmentStore
@@ -45,8 +45,10 @@ def main(pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
          pass_metric: str = typer.Option(
              'kappa', help="Agreement statistic the pass uses: 'kappa', or 'ac1' (Gwet) when the sample's "
                            'prevalence is lopsided. Choose it before reading the numbers.'),
+         prompt_profile: str = typer.Option('corpus', help='Relevance instructions: corpus, shared or corpus-experimental.'),
+         judge_domain: str = typer.Option(None, help='Use the same domain override as the judging command.'),
          ) -> None:
-    key = judge_key(f'ollama:{model}', think=think)
+    key = judge_key(f'ollama:{model}', think=think, prompt_profile=prompt_profile, domain=judge_domain)
     typer.echo(describe_key(key, think=think))
     typer.echo(f'reference labels: {reference_source}')
     csv_path = pool_dir / 'calibration.csv'
@@ -63,6 +65,7 @@ def main(pool_dir: Path = typer.Option(..., exists=True, file_okay=False),
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     report = {'judge_model': key.model, 'prompt_sha256': key.prompt_sha256, 'think': think,
+              'prompt_profile': prompt_profile, 'question_domain_override': judge_domain,
               'generation': generation_settings(think=think), 'quote_rule_version': QUOTE_RULE_VERSION,
               'reference_source': reference_source,
               'computed_at': datetime.now(timezone.utc).isoformat(), 'pass_kappa': PASS_KAPPA,

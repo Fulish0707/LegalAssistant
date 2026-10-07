@@ -10,7 +10,11 @@ from __future__ import annotations
 
 from legal_rag.llm import ChatModel, Message, StructuredOutputError
 from legal_rag.llm.prompts import load_prompt
-from legal_rag.schemas import EvidenceBundle, LegalAnswer
+from collections.abc import Sequence
+
+from legal_rag.schemas import EvidenceBundle, LegalAnswer, Turn, UserDocument, render_user_documents
+
+from .conversation import render_turns
 
 _PLAIN_SYSTEM = (
     "당신은 한국 법률 정보를 안내하는 보조 상담 시스템입니다. "
@@ -36,16 +40,20 @@ class GenerationError(RuntimeError):
 
 
 class Generator:
-    def __init__(self, model: ChatModel, *, temperature: float = 0.2, max_tokens: int = 1024, plain_text: bool = False) -> None:
+    def __init__(self, model: ChatModel, *, temperature: float = 0.2, max_tokens: int = 1024, plain_text: bool = False,
+                 mask_case_figures: bool = False) -> None:
+        self.mask_case_figures = mask_case_figures
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.plain_text = plain_text
 
-    def generate(self, message: str, bundle: EvidenceBundle, *, feedback: str | None = None) -> LegalAnswer:
+    def generate(self, message: str, bundle: EvidenceBundle, *, feedback: str | None = None, history: list[Turn] | None = None,
+                 open_questions: list[str] | None = None, user_documents: Sequence[UserDocument] = ()) -> LegalAnswer:
         if self.plain_text:
             return self._generate_plain(message, bundle, feedback=feedback)
-        return self._generate_structured(message, bundle, feedback=feedback)
+        return self._generate_structured(message, bundle, feedback=feedback, history=history, open_questions=open_questions,
+                                         user_documents=user_documents)
 
     # ── plain text mode (for QLoRA adapter) ─────────────────────────────────
 
@@ -81,13 +89,26 @@ class Generator:
 
     # ── structured JSON mode (for Ollama / large models) ────────────────────
 
-    def _generate_structured(self, message: str, bundle: EvidenceBundle, *, feedback: str | None = None) -> LegalAnswer:
-        evidence = bundle.render() if bundle.items else "(검색된 법률 근거가 없습니다. 근거 없이 조문이나 판례를 언급하지 마세요.)"
+    def _generate_structured(self, message: str, bundle: EvidenceBundle, *, feedback: str | None = None, history: list[Turn] | None = None,
+                             open_questions: list[str] | None = None, user_documents: Sequence[UserDocument] = ()) -> LegalAnswer:
+        evidence = bundle.render(mask_case_figures=self.mask_case_figures) if bundle.items else "(검색된 법률 근거가 없습니다. 근거 없이 조문이나 판례를 언급하지 마세요.)"
         messages = [
             Message(role="system", content=load_prompt("answer_system")),
             Message(role="user", content="다음은 검색된 법률 근거입니다.\n\n" + evidence),
-            Message(role="user", content="질문: " + message),
         ]
+        if user_documents:
+            # The rules travel with the documents, so a turn without any is prompted exactly as before.
+            messages.append(Message(role="user", content=load_prompt("user_documents") + "\n\n" + render_user_documents(user_documents)))
+        if history:
+            # Context for what "그것" refers to. It is not evidence: citations are still checked against the sources.
+            messages.append(Message(role="user", content="이전 대화(맥락 참고용이며 법적 근거가 아닙니다):\n" + "\n".join(render_turns(history))))
+        if open_questions:
+            messages.append(Message(role="user", content=(
+                "아직 확인되지 않은 사실:\n" + "\n".join(f"- {item}" for item in open_questions) + "\n"
+                "답변을 미루지 말고, 이 사실을 모르는 상태에서 근거로 답할 수 있는 범위까지 답하세요. "
+                "어떤 경우를 전제로 한 설명인지 밝히고, 사실에 따라 결론이 달라지는 부분은 경우를 나누어 설명하세요. "
+                "위 사실은 additional_information_needed에 사용자에게 물을 질문으로 담으세요.")))
+        messages.append(Message(role="user", content="질문: " + message))
         if feedback:
             messages.append(Message(role="user", content=feedback))
         last_error: StructuredOutputError | None = None

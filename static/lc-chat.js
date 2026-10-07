@@ -8,10 +8,12 @@
     railTab: '전체',
     draft: '',
     thinking: false,
-    extra: []
+    extra: [],
+    questions: [],   /* 최신 답변이 사용자에게 묻는 질문 — /chat final_response.questions */
+    answering: ''    /* 사용자가 답하려고 고른 질문 */
   };
 
-  let sse = null, draftTimer = null;
+  let sse = null;
 
   /* ---------- 화면 ---------- */
 
@@ -23,11 +25,7 @@
   ${LC.matterList()}
   <div style="display:flex;flex-direction:column;gap:3px">
     <div style="padding:0 8px 7px;font-size:10px;letter-spacing:.16em;color:#9aa0a5">도구</div>
-    ${[{l:'내용증명 만들기', ic:'doc', act:'draftDoc'},{l:'계약서 검토', ic:'search', href:'documents.html'}].map(t =>
-      t.href
-        ? `<a class="lc-ghost" href="${t.href}" style="display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border-radius:10px;font-size:12.5px;color:#3d4348;text-decoration:none">${LC.icon(t.ic, 15, '#9aa0a5')}${esc(t.l)}</a>`
-        : `<button class="lc-ghost" data-act="${t.act}" style="display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:9px 10px;border:0;border-radius:10px;background:transparent;font-size:12.5px;color:#3d4348;cursor:pointer">${LC.icon(t.ic, 15, '#9aa0a5')}${esc(t.l)}</button>`
-    ).join('')}
+    <a class="lc-ghost" href="documents.html" style="display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border-radius:10px;font-size:12.5px;color:#3d4348;text-decoration:none">${LC.icon('search', 15, '#9aa0a5')}계약서 검토</a>
   </div>
   ${LC.helpCard()}
 </div>`;
@@ -77,6 +75,12 @@
         : `<div style="display:flex;justify-content:flex-start"><div style="max-width:100%;padding:18px 22px;border-radius:5px 16px 16px 16px;border:1px solid #e6e3dd;background:#fff;box-shadow:0 1px 2px rgba(20,23,26,.04),0 10px 26px rgba(20,23,26,.05);font-size:14px;line-height:1.85;white-space:pre-wrap;text-wrap:pretty">${esc(m.text)}</div></div>`
       ).join('')}
 
+      ${!P.thinking && P.questions.length ? `
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <div style="font-size:11.5px;color:#767d83">아래 질문에 답하시면 사건에 맞춰 더 좁혀서 안내합니다</div>
+        ${P.questions.map(q => `<button class="lc-outline" data-act="answer" data-key="${esc(q)}" style="text-align:left;padding:9px 13px;border:1px solid ${P.answering === q ? a : '#e6e3dd'};border-radius:11px;background:#fff;font-size:13px;line-height:1.6;color:#3d4348;cursor:pointer">${esc(q)}</button>`).join('')}
+      </div>` : ''}
+
       ${P.thinking ? `
       <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border:1px solid #e6e3dd;border-radius:14px;background:#fff;font-size:12.5px;color:#767d83">
         <span style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px">${esc(LC.S.traceLines[LC.S.traceLines.length - 1] || LC.TRACE_FALLBACK[0])}</span>
@@ -88,8 +92,13 @@
 
   <div style="flex:none;padding:10px 30px 12px;background:#fff;border-top:1px solid #e6e3dd">
     <div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:8px">
+      ${P.answering ? `
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:10px;background:#f4f1ea;font-size:12px;color:#3d4348">
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">답하는 질문: ${esc(P.answering)}</span>
+        <button class="lc-ghost" data-act="cancelAnswer" title="취소" style="border:0;background:transparent;color:#767d83;cursor:pointer">✕</button>
+      </div>` : ''}
       <div style="display:flex;gap:10px;align-items:flex-end;padding:10px 10px 10px 18px;border:1px solid #ddd9d1;border-radius:18px;background:#fff;box-shadow:0 1px 2px rgba(20,23,26,.04),0 10px 26px rgba(20,23,26,.05)">
-        <textarea id="userInput" rows="3" placeholder="상황을 적어주시면 법령과 판례를 찾아 설명해 드립니다." style="flex:1;min-width:0;padding:6px 0;border:0;background:transparent;font-size:14.5px;line-height:1.7;color:#14171a;resize:none;outline:none;overflow-y:hidden;height:auto">${esc(P.draft)}</textarea>
+        <textarea id="userInput" rows="3" placeholder="${P.answering ? '답을 적어 주세요.' : '상황을 적어주시면 법령과 판례를 찾아 설명해 드립니다.'}" style="flex:1;min-width:0;padding:6px 0;border:0;background:transparent;font-size:14.5px;line-height:1.7;color:#14171a;resize:none;outline:none;overflow-y:hidden;height:auto">${esc(P.draft)}</textarea>
         <div style="display:flex;align-items:center;gap:8px;flex:none">
           <button class="lc-outline" data-act="upload" title="자료 첨부" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;border:1px solid #e6e3dd;border-radius:9px;background:#fff;color:#767d83;cursor:pointer">${LC.icon('plus', 15)}</button>
           <button class="lc-outline" data-act="voice" style="height:34px;display:flex;align-items:center;gap:6px;padding:0 12px;border:1px solid #e6e3dd;border-radius:9px;background:#fff;font-size:12px;color:#3d4348;white-space:nowrap;cursor:pointer">${LC.icon('mic', 14, '#767d83')} 말로 하기</button>
@@ -108,11 +117,6 @@
       tab: P.railTab,
       footer: `
 <div style="flex:none;border-top:1px solid #f0ede7;padding:14px 18px;display:flex;flex-direction:column;gap:8px">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-    <span style="font-size:12px;font-weight:600">작성 중인 문서</span>
-    <span id="savingIndicator" style="font-size:10.5px;color:#9aa0a5">${esc(LC.S.saveState)}</span>
-  </div>
-  <textarea id="personalStatementDraft" placeholder="내용증명 등 서류 초안이 여기에 표시됩니다." style="min-height:96px;padding:11px 13px;border:1px solid #e6e3dd;border-radius:10px;background:#faf9f6;font-size:12.5px;line-height:1.75;color:#14171a;resize:vertical;outline:none">${esc(LC.S.statementDraft)}</textarea>
   <div style="display:flex;align-items:center;gap:6px">
     <button class="lc-outline" data-act="refreshKb" id="refreshKnowledgeButton" style="flex:1;padding:6px;border:1px solid #e6e3dd;border-radius:8px;background:#fff;font-size:11px;color:#767d83;cursor:pointer">지식베이스 새로고침</button>
     <button class="lc-outline" data-act="clearKb" id="clearKnowledgeButton" style="flex:1;padding:6px;border:1px solid #e6e3dd;border-radius:8px;background:#fff;font-size:11px;color:#767d83;cursor:pointer">비우기</button>
@@ -125,44 +129,38 @@
   /* ---------- 서버 ---------- */
 
   function sendMessage(){
-    const text = (P.draft || '').trim();
-    if (!text || P.thinking) return;
+    const typed = (P.draft || '').trim();
+    if (!typed || P.thinking) return;
+    /* 고른 질문과 답을 한 메시지로 묶는다. 서버는 "두 달이요"가 어느 질문의 답인지 이 문장으로 안다. */
+    const text = P.answering ? `상담의 질문: ${P.answering}\n답변: ${typed}` : typed;
 
     P.extra.push({ role:'user', text });
     P.draft = '';
+    P.questions = [];
+    P.answering = '';
     P.thinking = true;
     LC.S.traceLines = [];
     LC.pinThread = true;
     LC.render();
 
-    let streamed = '', pending = null;
-    const push = chunk => {
-      if (!pending) { pending = { role:'agent', text:'' }; P.extra.push(pending); }
-      pending.text += chunk;
-    };
-
     fetch('/chat', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ message: text, personal_statement_draft: LC.S.statementDraft || '' })
+      body: JSON.stringify({ message: text })
     }).then(() => {
       if (sse) sse.close();
-      const qs = new URLSearchParams({ message: text, personal_statement_draft: LC.S.statementDraft || '' });
+      const qs = new URLSearchParams({ message: text });
       sse = new EventSource('/chat?' + qs.toString());
 
       sse.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === 'token_chunk') { streamed += data.content; push(data.content); LC.pinThread = true; LC.render(); }
-          else if (data.type === 'thought') { LC.S.traceLines.push(data.content); LC.render(); }
+          if (data.type === 'thought') { LC.S.traceLines.push(data.content); LC.render(); }
           else if (data.type === 'final_response') {
-            if (streamed.trim() && pending) pending.text = data.chat_response || streamed;
-            else P.extra.push({ role:'agent', text: data.chat_response });
+            P.extra.push({ role:'agent', text: data.chat_response });
+            P.questions = data.questions || [];
             LC.SOURCES = (data.sources || []).map((h, i) => ({ id: String(i + 1), kind: h.kind || '내 문서', title: h.source, quote: h.quote, score: h.score }));
-            if (data.statement_suggestion) P.extra.push({ role:'agent', text:'서류 초안 제안:\n' + data.statement_suggestion });
-            if (data.job_statement_suggestion) P.extra.push({ role:'agent', text:'신청서 제안:\n' + data.job_statement_suggestion });
-            if (data.report_suggestion) P.extra.push({ role:'agent', text:'검토 의견 제안:\n' + data.report_suggestion });
-            pending = null; streamed = ''; P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
+            P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
           }
           else if (data.type === 'error') {
             P.extra.push({ role:'agent', text:'오류: ' + data.content }); P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
@@ -191,7 +189,6 @@
       const r = await fetch('/get_initial_state');
       if (!r.ok) throw new Error(r.statusText);
       const st = await r.json();
-      LC.S.statementDraft = st.personal_statement_draft || '';
       if (Array.isArray(st.chat_history)) {
         P.extra = st.chat_history.map(m => ({ role: m.role === 'user' ? 'user' : 'agent', text: m.content }));
       }
@@ -215,11 +212,12 @@
       tone: k => { P.tone = k; },
       railTab: k => { P.railTab = k; },
       prompt: k => { P.draft = k; setTimeout(() => { const el = document.getElementById('userInput'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 0); },
-      draftDoc: () => { P.draft = '내용증명 초안을 만들어 주세요.'; },
+      answer: k => { P.answering = k; setTimeout(() => { const el = document.getElementById('userInput'); if (el) el.focus(); }, 0); },
+      cancelAnswer: () => { P.answering = ''; },
       easier: () => { P.tone = '쉬운 말'; P.draft = '위 내용을 더 쉽게 설명해 주세요.'; },
       newCase: () => {
         if (sse) { sse.close(); sse = null; }
-        Object.assign(P, { extra: [], draft: '', thinking: false, railTab: '전체' });
+        Object.assign(P, { extra: [], draft: '', thinking: false, railTab: '전체', questions: [], answering: '' });
         LC.S.traceLines = [];
         LC.SOURCES = [];
         LC.clearChatHistory();
@@ -238,13 +236,6 @@
           P.draft = e.target.value;
           e.target.style.height = 'auto';
           e.target.style.height = e.target.scrollHeight + 'px';
-        }
-        if (e.target.id === 'personalStatementDraft') {
-          LC.S.statementDraft = e.target.value;
-          LC.S.saveState = '저장 중...';
-          document.getElementById('savingIndicator').textContent = LC.S.saveState;
-          clearTimeout(draftTimer);
-          draftTimer = setTimeout(LC.saveDraft, 800);
         }
       });
 

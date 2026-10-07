@@ -27,11 +27,11 @@ _SENTENCE_BREAK = re.compile(r"(?<=[^\s\d][.!?。])\s+")
 
 _ARTICLE = re.compile(r"^\s*(제\d+조(?:의\d+)?)\s*(?:\(([^)]*)\))?\s*(.*)$")
 _PARAGRAPH = re.compile(r"^\s*([①-⑮])\s*(.*)$")
-_ITEM = re.compile(r"^\s*(\d{1,2}\.)\s+(\S.*)$")
 
 _LEVEL1 = re.compile(r"^\s*(\d{1,2})\.\s*(\S.*)$")
 _LEVEL2 = re.compile(r"^\s*([가-하])\.\s*(\S.*)$")
 _LEVEL3 = re.compile(r"^\s*\((\d{1,2})\)\s*(\S.*)$")
+_LEVEL3_ALT = re.compile(r"^\s*(\d{1,2})\)\s*(\S.*)$")
 
 # Standalone section labels courts use instead of a number. Matched on the whole line,
 # after stripping the brackets judgments wrap them in.
@@ -53,6 +53,20 @@ _NAMED = (
     "판단",
     "결론",
     "기초사실",
+    "인정사실",
+    "진정요지",
+    "진정 요지",
+    "진정인의 주장",
+    "피진정인의 주장",
+    "피진정인들의 주장",
+    "피진정인의 주장요지",
+    "피진정인들의 주장요지",
+    "진정인의 주장요지",
+    "원고의 주장",
+    "피고의 주장",
+    "당사자들의 주장",
+    "관련 법리",
+    "관계 법령",
     "피고인 및 변호인의 주장에 대한 판단",
     "피고인과 변호인의 주장에 대한 판단",
 )
@@ -126,7 +140,8 @@ def _body(lines: list[str]) -> str:
 
 def _named_heading(line: str) -> str | None:
     stripped = line.strip().strip("[]【】()「」 ").strip()
-    return stripped if stripped in _NAMED else None
+    compact = re.sub(r"\s+", "", stripped)
+    return stripped if compact in {re.sub(r"\s+", "", name) for name in _NAMED} else None
 
 
 def _parse_statute(text: str) -> ParsedStructure | None:
@@ -218,9 +233,15 @@ def _parse_numbered(text: str, *, document_type: str) -> ParsedStructure | None:
             attach(1, f"{level2.group(1)}. {level2.group(2).strip()}", level2.group(1), "")
             matched += 1
             continue
-        level3 = _LEVEL3.match(line)
+        level3 = _LEVEL3.match(line) or _LEVEL3_ALT.match(line)
         if level3 and len(stack) >= 2:
-            attach(2, f"({level3.group(1)})", f"({level3.group(1)})", level3.group(2).strip())
+            label = f"({level3.group(1)})" if line.lstrip().startswith("(") else f"{level3.group(1)})"
+            title = level3.group(2).strip()
+            # A short role heading must stay in the path rather than become unlabeled body.
+            if _is_heading_title(title):
+                attach(2, f"{label} {title}", label, "")
+            else:
+                attach(2, label, label, title)
             matched += 1
             continue
         pending.append(line)

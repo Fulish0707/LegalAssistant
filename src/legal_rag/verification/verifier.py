@@ -10,14 +10,24 @@ from .citations import answer_text, extract_case_refs, extract_statute_refs
 
 
 class Verifier:
-    def verify(self, answer: LegalAnswer, bundle: EvidenceBundle, *, user_refs: Iterable[str] = ()) -> VerificationReport:
+    def verify(self, answer: LegalAnswer, bundle: EvidenceBundle, *, user_refs: Iterable[str] = (),
+               own_clauses: Iterable[str] = (), prior_refs: Iterable[str] = ()) -> VerificationReport:
         """Check every authority the answer asserts against the evidence bundle.
 
         ``user_refs`` are statute or case references the user wrote in their own question.
         Repeating one of those (for example to say it could not be confirmed) is not
         fabrication, so they are exempt from the not-in-evidence checks. Citing one with a
         source id is still verified against that block.
+
+        ``own_clauses`` are clause numbers of the user's own documents ("제5조" of a lease). They
+        excuse an article the answer names without a law, and never one named with a law.
+
+        ``prior_refs`` are what recent answers of this conversation cited: "근로기준법 제36조", a
+        case number. The model reads those answers and repeats them when this turn's search does
+        not return the statute again. Only the same law and article is excused; the article
+        alone is excused when the answer names that law with an excused reference.
         """
+        own_clauses, prior = set(own_clauses), set(prior_refs)
         by_id = bundle.by_id()
         exempt: set[str] = set()
         for user_ref in user_refs:
@@ -49,14 +59,17 @@ class Verifier:
 
         text = answer_text(answer)
         statute_refs = extract_statute_refs(text)
+        repeated_laws = {ref.law_name for ref in statute_refs if ref.law_name and ref.render() in prior}
         for ref in statute_refs:
-            if ref.render() in exempt or ref.article in exempt:
+            if ref.render() in exempt or ref.article in exempt or (ref.law_name is None and ref.article in own_clauses):
+                continue
+            if any(f"{law} {ref.article}" in prior for law in ([ref.law_name] if ref.law_name else repeated_laws)):
                 continue
             if ref.render() not in evidence_statutes and ref.article not in evidence_statutes:
                 issues.append(VerificationIssue(kind="statute_not_in_evidence", detail=ref.render()))
         case_refs = extract_case_refs(text)
         for case in case_refs:
-            if case in exempt:
+            if case in exempt or case in prior:
                 continue
             if case not in evidence_cases:
                 issues.append(VerificationIssue(kind="case_not_in_evidence", detail=case))
@@ -82,4 +95,8 @@ class Verifier:
         cases = extract_case_refs(reference)
         if cases:
             return cases[0] in extract_case_refs(haystack) or evidence.header.get("Case number") == cases[0]
-        return reference.strip() in haystack
+        # A label naming no article or case number ("서울고등법원 판결") asserts no authority. The
+        # model writes one when the block has no case number, and demanding the string in the
+        # block stripped 22 of 80 Gemini answers (2026-10-05). The source id still has to exist,
+        # and every article or case number in the answer text is checked separately.
+        return True

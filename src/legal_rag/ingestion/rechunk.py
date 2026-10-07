@@ -18,7 +18,7 @@ import tempfile
 from legal_rag.chunking.imported import ChunkingOptions, chunk_imported_document
 from legal_rag.schemas.documents import ImportedDocument
 
-PIPELINE_VERSION = "structure_rechunk_v1"
+PIPELINE_VERSION = "structure_rechunk_v2_roles"
 
 
 def _percentiles(values: list[int]) -> dict[str, int]:
@@ -63,6 +63,7 @@ def rechunk_corpus(
     fallback: Counter = Counter()
     kinds: Counter = Counter()
     per_type_chunks: Counter = Counter()
+    role_counts: Counter = Counter()
     per_type_lengths: dict[str, list[int]] = {}
     samples: dict[str, list[str]] = {}
     lengths: list[int] = []
@@ -104,6 +105,7 @@ def rechunk_corpus(
                     lengths.append(len(chunk.text))
                     per_type_lengths.setdefault(kind, []).append(len(chunk.text))
                     per_type_chunks[kind] += 1
+                    role_counts[chunk.metadata.section_role] += 1
                     total_chunks += 1
                     if report.parsed:
                         structural += 1
@@ -125,6 +127,7 @@ def rechunk_corpus(
             "fallback": dict(fallback),
             "parser_kinds": dict(kinds),
             "chunks_by_type": dict(per_type_chunks),
+            "chunks_by_role": dict(role_counts),
             "chunk_chars": _percentiles(lengths),
             "chunk_chars_by_type": {kind: _percentiles(values) for kind, values in per_type_lengths.items()},
             # Every chunk opens with a header line by construction; the second share is the

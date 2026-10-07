@@ -80,7 +80,7 @@ class TestOutputs:
         report = rechunk_corpus(corpus, out, corpus_version="ip-v2")
         manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         assert manifest["corpus_version"] == "ip-v2"
-        assert manifest["pipeline_version"] == "structure_rechunk_v1"
+        assert manifest["pipeline_version"] == "structure_rechunk_v2_roles"
         assert manifest["counts"]["documents"] == 3
         assert manifest["counts"]["chunks"] == report["chunks"]
 

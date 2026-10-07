@@ -26,7 +26,17 @@ class QueryAnalyzer:
             base = response.parsed if isinstance(response.parsed, QueryAnalysis) else QueryAnalysis()
         except Exception:  # the deterministic pass is always available
             base = QueryAnalysis()
-        return base.model_copy(update={"statute_refs": statute_refs or base.statute_refs, "case_refs": case_refs or base.case_refs})
+        # The model sees earlier answers and copies their articles and case numbers. A reference
+        # counts as the user's (a search query, and exempt from the citation check) only when
+        # the user's own messages contain it.
+        written = "\n".join([message, *(turn.content for turn in recent if turn.role == "user")])
+        articles = {ref.article for ref in extract_statute_refs(written)}
+        cases = set(extract_case_refs(written))
+        squashed = "".join(written.split())
+        verbatim = lambda ref: "".join(ref.split()) in squashed  # a law named without an article
+        model_statutes = [ref for ref in base.statute_refs if verbatim(ref) or any(found.article in articles for found in extract_statute_refs(ref))]
+        model_cases = [ref for ref in base.case_refs if verbatim(ref) or any(found in cases for found in extract_case_refs(ref))]
+        return base.model_copy(update={"statute_refs": statute_refs or model_statutes, "case_refs": case_refs or model_cases})
 
     @staticmethod
     def _render(message: str, history: list[Turn]) -> str:

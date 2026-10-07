@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
@@ -28,6 +29,7 @@ class ChunkMetadata(_Frozen):
     legal_domain: str | None = None
     effective_date: date | None = None
     section: str | None = None
+    section_role: Literal["party_claim", "finding", "legal_rule", "facts", "order", "mixed", "unknown"] = "unknown"
 
 
 class Chunk(_Frozen):
