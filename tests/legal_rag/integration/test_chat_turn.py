@@ -236,7 +236,7 @@ def test_a_follow_up_may_repeat_what_the_last_answer_cited(retriever):
     settings, r = retriever
     store = InMemoryConversationStore()
     for role, content in (("user", "집주인이 보일러를 안 고쳐 줘요"), ("assistant", REPAIRS)):
-        store.append("p1", Turn(role=role, content=content, created_at=datetime.now(timezone.utc)))
+        store.append("p1", Turn(role=role, content=content, created_at=datetime.now(timezone.utc), evidence_ids=["c1"] * (role == "assistant")))
     other_law = _answer(analysis="상법 제623조에 따라 고쳐야 합니다. 주택임대차보호법 제3조의3도 참고하세요.")
     orch = _orchestrator(settings, r, _lease_model(_answer(analysis=REPEATS), other_law, other_law), store)
     repeated = orch.handle("보증금도 못 받았어요", conversation_id="p1")
@@ -252,3 +252,15 @@ def test_a_turn_that_lost_its_citation_passes_nothing_on(retriever):
     second = orch.handle("보증금도 못 받았어요", conversation_id="p2")
     assert first.prior_refs == [] and first.trace.policy_action != "accept"
     assert second.prior_refs == [] and second.trace.policy_action == "strip"
+
+
+def test_a_clarifying_question_passes_nothing_on(retriever):
+    """The analyzer writes the question; a statute it names there was never checked against evidence."""
+    settings, r = retriever
+    asks = QueryAnalysis(needs_more_info=True, missing_facts=["민법 제623조의 수선을 집주인에게 요구했나요?"])
+    model = FakeChatModel({"QueryAnalysis": [asks, QueryAnalysis()], "LegalAnswer": [_answer(analysis=REPEATS)] * 2,
+                           "StandaloneQuestion": [StandaloneQuestion(question="임차권등기명령은 어느 법원에 신청하나요?")]})
+    orch = _orchestrator(settings, r, model)
+    assert orch.handle("집 문제예요", conversation_id="p3").kind == "clarification"
+    answered = orch.handle("보증금도 못 받았어요", conversation_id="p3")
+    assert answered.prior_refs == [] and answered.trace.policy_action == "strip"

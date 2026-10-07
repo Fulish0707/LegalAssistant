@@ -125,8 +125,8 @@ class Orchestrator:
         trace.evidence_ids = [item.chunk_id for item in bundle.items]
 
         # A stored answer has passed verification and stripping, so what it still cites was grounded
-        # in its own turn. A refusal or a clarification is stored as fixed text and cites nothing.
-        said = " ".join(turn.content for turn in recent if turn.role == "assistant")
+        # in its own turn. A clarification is the analyzer's unchecked text; it has no evidence ids.
+        said = " ".join(turn.content for turn in recent if turn.role == "assistant" and turn.evidence_ids)
         prior_refs = [*(ref.render() for ref in extract_statute_refs(said) if ref.law_name), *extract_case_refs(said)]
 
         answer, report, action = self._generate_verified(question, bundle, analysis, recent, open_questions, recorder, user_documents, prior_refs)
