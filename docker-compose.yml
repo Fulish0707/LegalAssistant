@@ -13,8 +13,11 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.12.1-unprivileged
     ports:
-      - "6333:6333"   # REST
-      - "6334:6334"   # gRPC
+      - "127.0.0.1:6333:6333"   # REST: local clients only
+      - "127.0.0.1:6334:6334"   # gRPC
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_ADMIN_API_KEY:?Set a random Qdrant admin key}
+      QDRANT__SERVICE__READ_ONLY_API_KEY: ${QDRANT_READ_API_KEY:?Set a separate random Qdrant read key}
     volumes:
       - ./data/qdrant:/qdrant/storage
     restart: unless-stopped

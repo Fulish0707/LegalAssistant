@@ -10,6 +10,7 @@ import os
 import tempfile
 from unittest.mock import Mock, patch
 
+from tests.support import chat
 from tests.test_chat_streaming import STATUTE_ITEM, ChatStreamBase, backend_answer, turn
 
 
@@ -18,7 +19,7 @@ class ConversationIdTests(ChatStreamBase):
         ask = Mock(return_value=turn({"kind": "rejected"}))
         with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
                 patch.object(self.app_module.legal_backend, "ask", ask):
-            client.get("/chat?message=보증금 문의").get_data()
+            chat(client, "보증금 문의")
         with client.session_transaction() as flask_session:
             return flask_session["user_id"], ask.call_args.args[2]
 
@@ -37,19 +38,32 @@ class ConversationIdTests(ChatStreamBase):
 
     def test_clearing_chat_history_starts_a_new_conversation(self):
         client = self.app_module.app.test_client()
-        _, before = self.conversation_of(client)
-        self.assertEqual(client.post("/clear_chat_history_endpoint").status_code, 200)
+        browser, before = self.conversation_of(client)
+        forget = Mock()
+        with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
+                patch.object(self.app_module.legal_backend, "forget", forget):
+            self.assertEqual(client.post("/clear_chat_history_endpoint").status_code, 200)
+        forget.assert_called_once_with("http://legal:8000", browser)
         self.assertNotEqual(before, self.conversation_of(client)[1])
+
+    def test_history_is_kept_when_the_service_cannot_forget_it(self):
+        """Clearing promises the turns are gone from legal_rag too; if they are not, nothing is cleared."""
+        client = self.app_module.app.test_client()
+        self.conversation_of(client)
+        down = Mock(side_effect=self.app_module.legal_backend.LegalBackendUnavailable("history_delete_failed"))
+        with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
+                patch.object(self.app_module.legal_backend, "forget", down):
+            self.assertEqual(client.post("/clear_chat_history_endpoint").status_code, 500)
+        self.assertEqual(len(client.get("/get_initial_state").json["chat_history"]), 2)
 
 
 class ConsultationListTests(ChatStreamBase):
     """새 상담 keeps the consultations before it; each can be reopened with its own messages."""
 
     def ask(self, client, message, body=None):
-        client.post("/chat", json={"message": message})
         with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
                 patch.object(self.app_module.legal_backend, "ask", Mock(return_value=turn(body or {"kind": "rejected"}))) as backend:
-            client.get("/chat", query_string={"message": message}).get_data()
+            chat(client, message)
         return backend.call_args.args[2]
 
     def test_a_new_consultation_is_empty_and_the_earlier_one_stays_listed(self):
@@ -95,10 +109,9 @@ class ConsultationListTests(ChatStreamBase):
         self.ask(client, "보증금을 돌려받을 수 있나요", backend_answer("청구할 수 있습니다(S1).", items=[STATUTE_ITEM]))
         cited = client.get("/get_initial_state").json["sources"]
 
-        client.post("/chat", json={"message": "언제까지 기다려야 하나요"})
         with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
                 patch.object(self.app_module.legal_backend, "ask", Mock(side_effect=self.app_module.legal_backend.LegalBackendUnavailable("down"))):
-            client.get("/chat", query_string={"message": "언제까지 기다려야 하나요"}).get_data()
+            chat(client, "언제까지 기다려야 하나요")
 
         self.assertEqual(client.get("/get_initial_state").json["sources"], cited)
 
@@ -123,10 +136,9 @@ class ConsultationListTests(ChatStreamBase):
     CASE = {"chunk_id": "서울중앙지방법원-2023가단5103393_chunk_0001", "title": "서울중앙지방법원 2023가단5103393"}
 
     def pinned(self, client, message="이 판례가 제 사건에도 적용될 수 있나요?"):
-        client.post("/chat", json={"message": message})
         with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
                 patch.object(self.app_module.legal_backend, "ask", Mock(return_value=turn({"kind": "rejected"}))) as backend:
-            client.get("/chat", query_string={"message": message}).get_data()
+            chat(client, message)
         return list(backend.call_args.kwargs["pinned"])
 
     def test_an_attached_case_goes_with_every_turn_of_its_consultation_only(self):
@@ -174,6 +186,28 @@ class ConsultationListTests(ChatStreamBase):
         self.assertNotIn(self.ask(client, "새로 묻습니다"), {first_id, first_id[:-1] + "1"})
         self.assertEqual(len(client.get("/get_initial_state").json["conversations"]), 2)
 
+    def test_deleting_a_consultation_first_deletes_its_turns_in_the_service(self):
+        client = self.app_module.app.test_client()
+        conversation = self.ask(client, "전세 보증금을 못 받았어요")
+        with client.session_transaction() as flask_session:
+            browser = flask_session["user_id"]
+        forget = Mock()
+        with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
+                patch.object(self.app_module.legal_backend, "forget", forget):
+            self.assertEqual(client.post("/conversations/delete").status_code, 200)
+        forget.assert_called_once_with("http://legal:8000", browser, conversation)
+
+    def test_a_consultation_the_service_cannot_forget_is_not_deleted(self):
+        client = self.app_module.app.test_client()
+        self.ask(client, "전세 보증금을 못 받았어요")
+        down = Mock(side_effect=self.app_module.legal_backend.LegalBackendUnavailable("history_delete_failed"))
+        with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
+                patch.object(self.app_module.legal_backend, "forget", down):
+            refused = client.post("/conversations/delete")
+        self.assertEqual(refused.status_code, 502)
+        self.assertIn("삭제하지 않았습니다", refused.json["error"])
+        self.assertEqual(len(client.get("/get_initial_state").json["chat_history"]), 2)
+
     def test_a_new_consultation_after_reopening_an_older_one_never_reuses_a_deleted_number(self):
         client = self.app_module.app.test_client()
         used = {self.ask(client, "첫 상담")}
@@ -197,9 +231,12 @@ class ConsultationListTests(ChatStreamBase):
         first = client.get("/get_initial_state").json["conversations"][-1]["id"]
         client.post("/conversations/select", json={"id": first})
 
-        client.post("/clear_chat_history_endpoint")
+        with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
+                patch.object(self.app_module.legal_backend, "forget", Mock()):
+            self.assertEqual(client.post("/clear_chat_history_endpoint").status_code, 200)
 
         self.assertNotIn(self.ask(client, "새로 묻습니다"), used)
+
     def test_the_most_recently_attached_cases_are_the_ones_kept(self):
         """The session cookie sorts its keys, so "-10" came before "-2" and a recent case was dropped first."""
         client = self.app_module.app.test_client()

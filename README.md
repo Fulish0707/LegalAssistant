@@ -326,6 +326,18 @@ uv run python scripts/serve.py --profile local --port 8000
 | POST /v1/cases | 판례 검색 결과와 각 판례가 인용한 조문 |
 | GET /v1/law | 법령 하나의 조문 목록과 본문 |
 | POST /v1/chat | 검색 근거를 사용한 답변 |
+| POST /v1/chat/stream | `/v1/chat`과 같은 답변. 단계와 검증 전 초안을 NDJSON으로 먼저 보냄 |
+| DELETE /v1/workspace/conversations | 호출한 작업 공간의 대화 기록 삭제. `conversation_id`를 주면 그 대화만 삭제 |
+
+`/health`를 뺀 모든 경로는 서비스 토큰이 필요합니다. 호출자는 `Authorization: Bearer <토큰>`과 `X-Workspace-ID` 헤더를 보내야 합니다. 백엔드는 대화 기록을 작업 공간별로 나눠 저장합니다. 그래서 다른 작업 공간의 대화 id로는 기록을 읽을 수 없습니다. 토큰은 32자 이상의 임의 문자열이어야 하고, Flask 앱에도 같은 값을 넣어야 합니다. 토큰이 없으면 백엔드는 503을 반환하고, Flask 앱은 백엔드에 요청을 보내지 않습니다.
+
+~~~dotenv
+LEGAL_RAG__API__SERVICE_TOKEN=<32자 이상 임의 문자열>
+~~~
+
+`docker compose`를 실행하려면 Qdrant 키 두 개가 필요합니다. 쓰기 키는 `QDRANT_ADMIN_API_KEY`, 읽기 전용 키는 `QDRANT_READ_API_KEY`입니다. 서빙 API의 `LEGAL_RAG__QDRANT__API_KEY`에는 읽기 키를 넣습니다. 색인을 만드는 명령에는 쓰기 키를 넣습니다. Qdrant 포트는 127.0.0.1에만 열립니다.
+
+원격 답변 모델이나 원격 임베딩은 기본적으로 쓰지 않습니다. 쓰려면 `LEGAL_RAG__API__ALLOW_EXTERNAL_MODELS=true`를 설정해야 하고, 주소는 HTTPS여야 합니다. 사건 자료를 원격 답변 모델로 보내려면 `LEGAL_RAG__API__ALLOW_USER_DOCUMENT_EGRESS=true`도 설정해야 합니다. 응답에 trace를 포함하려면 `LEGAL_RAG__API__ALLOW_TRACE=true`가 필요합니다. 자세한 설명은 [보안 강화 안내](docs/security-hardening.md)에 있습니다.
 
 답변 모델은 `.env`에서 고릅니다.
 
@@ -341,14 +353,16 @@ LEGAL_RAG__LLM__MODEL=qwen3:4b
 ~~~dotenv
 APP_ENV=local
 LEGAL_RAG_URL=http://127.0.0.1:8000
+LEGAL_RAG__API__SERVICE_TOKEN=<백엔드와 같은 값>
 ~~~
 
 ~~~bash
 pip install -r webapp/requirements.txt
+sudo apt install bubblewrap   # 업로드 문서를 격리된 프로세스에서 읽는 데 필요
 python webapp/app.py
 ~~~
 
-화면은 <http://localhost:5005>에서 열립니다. 배포 환경에서는 `SECRET_KEY`도 설정해야 합니다. `LLM_PROVIDER`는 상담 답변에 영향을 주지 않습니다. 이 값은 사건 자료의 문서 분석에만 쓰입니다.
+화면은 <http://localhost:5005>에서 열립니다. 앱은 127.0.0.1에서만 받고 디버거는 켜지 않습니다. 배포 환경에서는 32자 이상의 임의 문자열로 `SECRET_KEY`를 설정해야 합니다. 짧은 값이나 `replace-`로 시작하는 값을 쓰면 앱이 시작되지 않습니다. 화면의 모든 쓰기 요청에는 세션의 CSRF 토큰이 붙습니다. 상담 한 턴은 POST 한 번으로 보내며, 그 응답이 답변을 SSE로 흘려 보냅니다. 업로드 문서는 bubblewrap 샌드박스에서 읽습니다. 샌드박스는 시간, 메모리, 파일 크기를 제한합니다. bubblewrap이 없으면 문서 분석은 503을 반환합니다. `LLM_PROVIDER`는 상담 답변에 영향을 주지 않습니다. 이 값은 사건 자료의 문서 분석에만 쓰입니다.
 
 ### 8.3 전체 법령 코퍼스 만들기
 

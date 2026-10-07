@@ -30,11 +30,16 @@ def test_trace_recorder_times_stages_and_writes_json_line(tmp_path):
     with rec.stage("analyze"):
         pass
     rec.trace.search_queries = ["q"]
-    rec.finish(policy_action="accept")
+    returned = rec.finish(policy_action="accept")
     line = json.loads((tmp_path / "trace.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert line["timings"][0]["stage"] == "analyze" and line["user_text"] is None and line["policy_action"] == "accept"
-    assert line["model"] == "fake" and line["search_queries"] == ["q"]
-    assert TraceRecorder(conversation_id="c", user_text="보임", include_text=True).trace.user_text == "보임"
+    # Search queries restate the user's text: the file keeps them only with include_text; the caller still gets them.
+    assert line["model"] == "fake" and line["search_queries"] == [] and returned.search_queries == ["q"]
+    shown = TraceRecorder(conversation_id="c", user_text="보임", include_text=True, path=tmp_path / "shown.jsonl")
+    shown.trace.search_queries = ["q"]
+    assert shown.trace.user_text == "보임"
+    shown.finish(policy_action="accept")
+    assert json.loads((tmp_path / "shown.jsonl").read_text(encoding="utf-8"))["search_queries"] == ["q"]
 
 
 def test_sqlite_store_keeps_every_turn_of_concurrent_appends(tmp_path):

@@ -14,6 +14,8 @@ import sys
 import tempfile
 import unittest
 
+from tests.support import use_browser_clients
+
 
 class BrowserSessionTests(unittest.TestCase):
     MODULE_NAMES = ("app", "langchain_config", "llm_model", "llm_prompt")
@@ -53,6 +55,7 @@ class BrowserSessionTests(unittest.TestCase):
             sys.modules.pop(module_name, None)
 
         cls.app_module = importlib.import_module("app")
+        use_browser_clients(cls.app_module.app)
         cls.client = cls.app_module.app.test_client()
 
     @classmethod
@@ -223,7 +226,7 @@ class BrowserSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             environment = os.environ.copy()
             environment["APP_STATE_DB"] = os.path.join(temp_dir, "app_state.db")
-            environment["SECRET_KEY"] = "production-secret"
+            environment["SECRET_KEY"] = "production-secret-of-at-least-32-characters"
             for name in ("APP_ENV", "FLASK_ENV"):
                 environment[name] = ""
 
@@ -239,6 +242,21 @@ class BrowserSessionTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("True", completed.stdout)
+
+    def test_a_short_or_placeholder_secret_key_refuses_to_start(self):
+        for secret in ("production-secret", "replace-" + "x" * 40):
+            with self.subTest(secret=secret), tempfile.TemporaryDirectory() as temp_dir:
+                environment = os.environ.copy()
+                environment["APP_STATE_DB"] = os.path.join(temp_dir, "app_state.db")
+                environment["SECRET_KEY"] = secret
+                environment["APP_ENV"] = "production"
+                completed = subprocess.run(
+                    [sys.executable, "-c", "import app"],
+                    cwd=os.path.dirname(os.path.dirname(__file__)),
+                    env=environment, capture_output=True, text=True, timeout=15, check=False,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("SECRET_KEY must be a random secret", completed.stderr)
 
     def test_explicit_development_and_testing_allow_non_secure_test_sessions(self):
         for environment_name in ("development", "testing"):

@@ -12,13 +12,13 @@ test can reach Ollama or Chroma.
 
 import importlib
 import io
-import json
 import os
 import sys
 import tempfile
 import unittest
+
+from tests.support import chat, use_browser_clients
 from unittest.mock import Mock, patch
-from urllib.parse import quote
 
 from quota import guest_ip_identity, reserve_daily_quota
 from tests.test_chat_streaming import turn
@@ -99,6 +99,7 @@ class AppContractTests(unittest.TestCase):
             sys.modules.pop(module_name, None)
 
         cls.app_module = importlib.import_module("app")
+        use_browser_clients(cls.app_module.app)
         cls.client = cls.app_module.app.test_client()
 
     @classmethod
@@ -161,9 +162,14 @@ class AppContractTests(unittest.TestCase):
 
     # --- chat history ----------------------------------------------------
 
+    def store_message(self, client, message):
+        """A turn with no legal service configured: the message is stored and no answer is."""
+        with patch.dict(os.environ, {"LEGAL_RAG_URL": ""}):
+            return chat(client, message)
+
     def test_a_cleared_cookie_starts_a_fresh_empty_workspace(self):
         original = self.app_module.app.test_client()
-        original.post("/chat", json={"message": "remembered"})
+        self.store_message(original, "remembered")
         original_id = self.session_user_id(original)
 
         fresh = self.app_module.app.test_client()
@@ -179,8 +185,8 @@ class AppContractTests(unittest.TestCase):
         first = self.app_module.app.test_client()
         second = self.app_module.app.test_client()
 
-        first.post("/chat", json={"message": "First chat"})
-        second.post("/chat", json={"message": "Second chat"})
+        self.store_message(first, "First chat")
+        self.store_message(second, "Second chat")
 
         self.assertEqual(first.get("/get_initial_state").json["chat_history"], [{"role": "user", "content": "First chat"}])
         self.assertEqual(second.get("/get_initial_state").json["chat_history"], [{"role": "user", "content": "Second chat"}])
@@ -189,10 +195,12 @@ class AppContractTests(unittest.TestCase):
     def test_clearing_one_history_leaves_the_other_untouched(self):
         first = self.app_module.app.test_client()
         second = self.app_module.app.test_client()
-        first.post("/chat", json={"message": "first keeps"})
-        second.post("/chat", json={"message": "second keeps"})
+        self.store_message(first, "first keeps")
+        self.store_message(second, "second keeps")
 
-        response = first.post("/clear_chat_history_endpoint")
+        with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
+                patch.object(self.app_module.legal_backend, "forget", Mock()):
+            response = first.post("/clear_chat_history_endpoint")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(first.get("/get_initial_state").json["chat_history"], [])
@@ -232,7 +240,7 @@ class AppContractTests(unittest.TestCase):
 
     def test_chat_sse_reports_a_missing_legal_backend(self):
         with patch.dict(os.environ, {"LEGAL_RAG_URL": ""}):
-            response = self.client.get("/chat?message=hello")
+            response = chat(self.client, "hello")
         body = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
@@ -244,7 +252,7 @@ class AppContractTests(unittest.TestCase):
         ask = Mock(return_value=turn({"kind": "rejected"}))
         env, stub = self.backend(ask)
         with env, stub:
-            response = self.app_module.app.test_client().get("/chat?message=" + quote("전세 보증금을 못 받았어요"))
+            response = chat(self.app_module.app.test_client(), "전세 보증금을 못 받았어요")
 
         ask.assert_not_called()
         self.assertEqual(response.status_code, 200)
@@ -258,7 +266,7 @@ class AppContractTests(unittest.TestCase):
         ask = Mock(return_value=turn({"kind": "rejected"}))
         env, stub = self.backend(ask)
         with env, stub:
-            body = self.app_module.app.test_client().get("/chat?message=" + quote("안녕하세요")).get_data(as_text=True)
+            body = chat(self.app_module.app.test_client(), "안녕하세요").get_data(as_text=True)
 
         ask.assert_not_called()
         self.assertIn("final_response", body)
@@ -272,17 +280,14 @@ class AppContractTests(unittest.TestCase):
         identity = guest_ip_identity("127.0.0.1", self.app_module.app.config["QUOTA_IP_SALT"])
         used = (self.quota_row(identity) or [0])[0]
         client = self.app_module.app.test_client()
-        posted = client.post("/chat", json={"message": long_message})
         ask = Mock(return_value=turn({"kind": "rejected"}))
         env, stub = self.backend(ask)
         with env, stub:
-            body = client.get("/chat?message=" + quote(long_message)).get_data(as_text=True)
+            posted = chat(client, long_message)
 
-        events = [json.loads(line[len("data: "):]) for line in body.splitlines() if line.startswith("data: ")]
-
-        self.assertEqual(posted.status_code, 400)
+        self.assertEqual((posted.status_code, posted.json), (400, {"error": self.app_module.MESSAGE_TOO_LONG}))
         ask.assert_not_called()
-        self.assertEqual(events, [{"type": "error", "content": self.app_module.MESSAGE_TOO_LONG}, {"type": "stream_end"}])
+        self.assertEqual(client.get("/get_initial_state").json["chat_history"], [])
         self.assertEqual((self.quota_row(identity) or [0])[0], used)
 
     def test_quota_is_shared_per_ip_and_survives_a_cleared_cookie(self):
@@ -295,11 +300,11 @@ class AppContractTests(unittest.TestCase):
         third = self.app_module.app.test_client()
         env, stub = self.backend(ask)
         with env, stub:
-            first_body = first.get("/chat?message=보증금 문의", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
-            second_body = second.get("/chat?message=보증금 문의", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
-            third_body = third.get("/chat?message=보증금 문의", environ_base={"REMOTE_ADDR": other_ip}).get_data(as_text=True)
+            first_body = chat(first, "보증금 문의", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
+            second_body = chat(second, "보증금 문의", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
+            third_body = chat(third, "보증금 문의", environ_base={"REMOTE_ADDR": other_ip}).get_data(as_text=True)
             cleared = self.app_module.app.test_client()
-            cleared_body = cleared.get("/chat?message=보증금 문의", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
+            cleared_body = chat(cleared, "보증금 문의", environ_base={"REMOTE_ADDR": shared_ip}).get_data(as_text=True)
 
         self.assertNotIn("daily_ai_quota_exceeded", first_body)
         self.assertIn("daily_ai_quota_exceeded", second_body)
@@ -318,14 +323,17 @@ class AppContractTests(unittest.TestCase):
             environ_base={"REMOTE_ADDR": "10.0.0.8"},
         ):
             result = self.app_module.reserve_ai_request()
-        expected = guest_ip_identity("10.0.0.8", self.app_module.app.config["QUOTA_IP_SALT"])
+        salt = self.app_module.app.config["QUOTA_IP_SALT"]
+        expected, forwarded = guest_ip_identity("10.0.0.8", salt), guest_ip_identity("198.51.100.14", salt)
         with self.app_module.app.app_context():
-            row = self.app_module.get_db().execute(
+            reserved = {row["identity_value"] for row in self.app_module.get_db().execute(
                 "SELECT identity_value FROM daily_ai_quota WHERE identity_kind='guest_ip' AND quota_day=?",
                 (result.quota_day,),
-            ).fetchone()
+            )}
 
-        self.assertEqual(row["identity_value"], expected)
+        # Other tests of the class reserve too, so the row is looked up by identity, not taken first.
+        self.assertIn(expected, reserved)
+        self.assertNotIn(forwarded, reserved)
 
     def test_quota_never_reserves_account_entries(self):
         with self.app_module.app.test_request_context("/", environ_base={"REMOTE_ADDR": "203.0.113.12"}):
@@ -370,7 +378,9 @@ class AppContractTests(unittest.TestCase):
     def test_ocr_returns_json_429_when_the_ip_quota_is_exhausted(self):
         remote_addr = "203.0.113.21"
         self.exhaust_ip_quota(remote_addr)
-        with patch.object(self.app_module, "get_chat_model", lambda: ExplodingChatModel()):
+        with patch.object(self.app_module, "get_chat_model", lambda: ExplodingChatModel()), patch.object(
+            self.app_module.llm_ocr, "extract_text_from_document", lambda *args: ({"text": "source text"}, 200)
+        ):
             response = self.client.post(
                 "/process_document_ocr",
                 data={"file": (io.BytesIO(b"source text"), "sample.txt")},

@@ -4,6 +4,8 @@ import sys
 import tempfile
 import unittest
 
+from tests.support import use_browser_clients
+
 
 class HealthReportingTests(unittest.TestCase):
     MODULE_NAMES = ("app", "langchain_config", "llm_model")
@@ -35,6 +37,7 @@ class HealthReportingTests(unittest.TestCase):
         for name in cls.MODULE_NAMES:
             sys.modules.pop(name, None)
         cls.app_module = importlib.import_module("app")
+        use_browser_clients(cls.app_module.app)
         cls.client = cls.app_module.app.test_client()
 
     @classmethod

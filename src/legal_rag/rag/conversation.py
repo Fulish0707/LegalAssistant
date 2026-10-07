@@ -18,10 +18,23 @@ def render_turns(turns: list[Turn], *, chars: int = 500) -> list[str]:
     return lines
 
 
+# Turns one workspace may keep across its conversations; a full workspace is refused, never evicted.
+MAX_WORKSPACE_TURNS = 5000
+
+
+def _prefix_range(prefix: str) -> tuple[str, str]:
+    """[low, high) bounds of the ids that start with `prefix`, so SQLite can use the primary key."""
+    return prefix, prefix[:-1] + chr(ord(prefix[-1]) + 1)
+
+
 class ConversationStore(Protocol):
     def get(self, conversation_id: str) -> Conversation: ...
 
     def append(self, conversation_id: str, turn: Turn) -> None: ...
+
+    def delete_prefix(self, prefix: str) -> None: ...
+
+    def has_capacity(self, prefix: str, needed: int = 2) -> bool: ...
 
 
 class InMemoryConversationStore:
@@ -29,10 +42,18 @@ class InMemoryConversationStore:
         self._turns: dict[str, list[Turn]] = {}
 
     def get(self, conversation_id: str) -> Conversation:
-        return Conversation(id=conversation_id, turns=list(self._turns.get(conversation_id, [])))
+        return Conversation(id=conversation_id, turns=list(self._turns.get(conversation_id, [])[-100:]))
 
     def append(self, conversation_id: str, turn: Turn) -> None:
         self._turns.setdefault(conversation_id, []).append(turn)
+
+    def delete_prefix(self, prefix: str) -> None:
+        for key in list(self._turns):
+            if key.startswith(prefix):
+                del self._turns[key]
+
+    def has_capacity(self, prefix: str, needed: int = 2) -> bool:
+        return sum(len(turns) for key, turns in self._turns.items() if key.startswith(prefix)) + needed <= MAX_WORKSPACE_TURNS
 
 
 class SQLiteConversationStore:
@@ -49,7 +70,7 @@ class SQLiteConversationStore:
 
     def get(self, conversation_id: str) -> Conversation:
         with self._connect() as conn:
-            rows = conn.execute("SELECT payload FROM turns WHERE conversation_id=? ORDER BY seq", (conversation_id,)).fetchall()
+            rows = conn.execute("SELECT payload FROM turns WHERE conversation_id=? ORDER BY seq DESC LIMIT 100", (conversation_id,)).fetchall()[::-1]
         return Conversation(id=conversation_id, turns=[Turn.model_validate_json(row[0]) for row in rows])
 
     def append(self, conversation_id: str, turn: Turn) -> None:
@@ -57,3 +78,13 @@ class SQLiteConversationStore:
             # One statement, so two concurrent appends cannot take the same seq.
             conn.execute("INSERT INTO turns SELECT ?, COALESCE(MAX(seq), -1) + 1, ? FROM turns WHERE conversation_id=?",
                          (conversation_id, turn.model_dump_json(), conversation_id))
+
+    def delete_prefix(self, prefix: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM turns WHERE conversation_id>=? AND conversation_id<?", _prefix_range(prefix))
+
+    def has_capacity(self, prefix: str, needed: int = 2) -> bool:
+        with self._connect() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM turns WHERE conversation_id>=? AND conversation_id<?",
+                                 _prefix_range(prefix)).fetchone()[0]
+        return count + needed <= MAX_WORKSPACE_TURNS

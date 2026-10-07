@@ -5,8 +5,11 @@ and verifies citations; this module only calls it and turns the structured respo
 into the chat text and source cards the front end shows.
 """
 
+import ipaddress
 import json
+import os
 import re
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -41,7 +44,44 @@ class LegalBackendUnavailable(Exception):
     """The service could not be reached or did not return a chat response."""
 
 
-def ask(base_url, message, conversation_id, documents=(), pinned=()):
+def is_loopback_url(value):
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password or not parsed.hostname:
+        return False
+    if parsed.hostname == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(parsed.hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _headers(base_url, workspace):
+    """The service token and the browser's workspace id. The service trusts the workspace only from
+    a caller holding the token (src/legal_rag/api/security.py)."""
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password or not parsed.hostname:
+        raise LegalBackendUnavailable("invalid_service_url")
+    if not is_loopback_url(base_url) and parsed.scheme != "https":
+        raise LegalBackendUnavailable("service_tls_required")
+    token = os.getenv("LEGAL_RAG__API__SERVICE_TOKEN", "")
+    if len(token) < 32 or token.startswith("replace-"):
+        raise LegalBackendUnavailable("service_auth_not_configured")
+    return {"Authorization": "Bearer " + token, "X-Workspace-ID": workspace}
+
+
+def forget(base_url, workspace, conversation_id=None):
+    """Delete the turns the service keeps for this browser's workspace: of one conversation, or all."""
+    try:
+        response = httpx.delete(base_url.rstrip("/") + "/v1/workspace/conversations",
+                                params={"conversation_id": conversation_id} if conversation_id else None,
+                                headers=_headers(base_url, workspace), timeout=TIMEOUT)
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        raise LegalBackendUnavailable("history_delete_failed") from error
+
+
+def ask(base_url, message, conversation_id, documents=(), pinned=(), *, workspace):
     """One chat turn, read as it streams. Yields the service's {"type": "stage" | "draft" | "draft_reset"}
     events, then {"type": "response", "body": <the /v1/chat body>}.
     `documents` are passages of the user's own files: [{name, text, ...}].
@@ -54,7 +94,7 @@ def ask(base_url, message, conversation_id, documents=(), pinned=()):
     if pinned:
         payload["pinned_chunk_ids"] = list(pinned)
     try:
-        with httpx.stream("POST", endpoint, json=payload, timeout=TIMEOUT) as response:
+        with httpx.stream("POST", endpoint, json=payload, headers=_headers(base_url, workspace), timeout=TIMEOUT) as response:
             response.raise_for_status()
             for line in response.iter_lines():
                 if not line:
@@ -66,23 +106,23 @@ def ask(base_url, message, conversation_id, documents=(), pinned=()):
                 if event["type"] == "response":
                     return
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
-        raise LegalBackendUnavailable(f"{type(error).__name__}: {error}") from error
+        raise LegalBackendUnavailable("chat_service_failed") from error
     raise LegalBackendUnavailable("the stream ended without an answer")
 
 
-def _read(base_url, path, shape, **params):
+def _read(base_url, path, shape, workspace, **params):
     """A GET to the service, passed through `shape`; None when the service answers 404."""
     try:
-        response = httpx.get(base_url.rstrip("/") + path, params=params, timeout=TIMEOUT)
+        response = httpx.get(base_url.rstrip("/") + path, params=params, headers=_headers(base_url, workspace), timeout=TIMEOUT)
         if response.status_code == 404:
             return None
         response.raise_for_status()
         return shape(response.json())
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
-        raise LegalBackendUnavailable(f"{type(error).__name__}: {error}") from error
+        raise LegalBackendUnavailable(f"lookup_failed ({type(error).__name__})") from error
 
 
-def document(base_url, chunk_id):
+def document(base_url, chunk_id, *, workspace):
     """The whole document that holds a cited chunk, or None if not indexed: {before, cited, after}.
 
     The text is cut here: the service counts characters as Python does, and a browser counts a rare
@@ -92,12 +132,12 @@ def document(base_url, chunk_id):
         text, start, end = body["text"], body["cited_start"], body["cited_end"]
         return {"before": text[:start], "cited": text[start:end], "after": text[end:]}
 
-    return _read(base_url, "/v1/document", cut, chunk_id=chunk_id)
+    return _read(base_url, "/v1/document", cut, workspace, chunk_id=chunk_id)
 
 
-def law(base_url, name):
+def law(base_url, name, *, workspace):
     """One law's articles in order, or None if no such law: {name, articles: [{article, title, text, chunk_id}]}."""
-    return _read(base_url, "/v1/law", lambda body: {"name": body["name"], "articles": body["articles"]}, name=name)
+    return _read(base_url, "/v1/law", lambda body: {"name": body["name"], "articles": body["articles"]}, workspace, name=name)
 
 
 # The reranker scores 20 passages; the service keeps the best one of each case.
@@ -129,15 +169,16 @@ def _case_card(hit, labels, statutes):
     }
 
 
-def search_cases(base_url, query):
+def search_cases(base_url, query, *, workspace):
     """Cases closest to `query`, one card per case, best first, each with the articles it cites."""
     try:
-        response = httpx.post(base_url.rstrip("/") + "/v1/cases", json={"query": query, "k": CASE_SEARCH_K}, timeout=TIMEOUT)
+        response = httpx.post(base_url.rstrip("/") + "/v1/cases", json={"query": query, "k": CASE_SEARCH_K},
+                              headers=_headers(base_url, workspace), timeout=TIMEOUT)
         response.raise_for_status()
         body = response.json()
         return [_case_card(hit, body.get("labels") or {}, body.get("statutes") or {}) for hit in body["hits"]]
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
-        raise LegalBackendUnavailable(f"{type(error).__name__}: {error}") from error
+        raise LegalBackendUnavailable(f"case_search_failed ({type(error).__name__})") from error
 
 
 def _numbered(text, numbers):

@@ -7,12 +7,13 @@ A real call would need the service, its indexes and a model.
 
 import importlib
 import contextlib
-import json
 import os
 import sys
 import tempfile
 import unittest
-from urllib.parse import quote
+
+from tests.support import chat, events as sse_events, use_browser_clients
+from urllib.parse import parse_qs, quote
 from unittest import mock
 
 
@@ -65,6 +66,7 @@ class ChatStreamBase(unittest.TestCase):
         for name in cls.MODULE_NAMES:
             sys.modules.pop(name, None)
         cls.app_module = importlib.import_module("app")
+        use_browser_clients(cls.app_module.app)
         cls.client = cls.app_module.app.test_client()
 
     @classmethod
@@ -86,7 +88,8 @@ class ChatStreamBase(unittest.TestCase):
             flask_session["user_id"] = user_id
 
     def collect(self, backend=None, query="message=보증금 문의", url="http://legal:8000"):
-        """Stream one turn; `backend` is a /v1/chat body, an exception to raise, or a Mock."""
+        """Stream one turn; `backend` is a /v1/chat body, an exception to raise, or a Mock.
+        `query` is the message as a query string, as the page once sent it."""
         ask = backend if isinstance(backend, mock.Mock) else mock.Mock(
             side_effect=backend if isinstance(backend, Exception) else None,
             return_value=turn(backend_answer() if backend is None else backend),
@@ -94,13 +97,8 @@ class ChatStreamBase(unittest.TestCase):
         self.ask = ask
         with mock.patch.dict(os.environ, {"LEGAL_RAG_URL": url}), \
                 mock.patch.object(self.app_module.legal_backend, "ask", ask):
-            response = self.client.get("/chat?" + query)
-            body = response.get_data(as_text=True)
-        return [
-            json.loads(line[len("data: "):])
-            for line in body.splitlines()
-            if line.startswith("data: ")
-        ]
+            response = chat(self.client, parse_qs(query).get("message", [None])[0])
+        return sse_events(response)
 
     def final(self, events):
         return [e for e in events if e["type"] == "final_response"][0]
@@ -222,17 +220,16 @@ class ChatStreamingTests(ChatStreamBase):
 
     def test_a_bare_yes_or_no_reaches_the_backend_once_the_consultation_has_an_answer(self):
         """It answers what the consultation asked; before any answer it is only a short message."""
-        self.as_browser("yes-no-browser")
         for message in ("네", "아니요"):
             with self.subTest(first=message):
+                self.as_browser(f"yes-no-browser-first-{message}")
                 self.assertIn("안녕하세요", self.final(self.collect(query="message=" + quote(message)))["chat_response"])
                 self.ask.assert_not_called()
+        self.as_browser("yes-no-browser")
         for message in ("계약서를 쓰긴 했어요", "네", "아니요", "응."):
             with self.subTest(later=message):
-                self.client.post("/chat", json={"message": message})
                 self.collect(query="message=" + quote(message))
                 self.ask.assert_called_once()
-        self.client.post("/chat", json={"message": "ㅇㅇ"})
         self.assertIn("이어서 적어 주세요", self.final(self.collect(query="message=" + quote("ㅇㅇ")))["chat_response"])
         self.ask.assert_not_called()
 
@@ -281,7 +278,7 @@ class ChatStreamingTests(ChatStreamBase):
         backend = [{"type": "draft_reset"}, {"type": "draft", "text": "분석"}, *turn(backend_answer("떠나도 저장되는 답변입니다."))]
         with mock.patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
                 mock.patch.object(self.app_module.legal_backend, "ask", mock.Mock(return_value=iter(backend))):
-            response = self.client.get("/chat?message=보증금 문의", buffered=False)
+            response = chat(self.client, "보증금 문의", buffered=False)
             for chunk in response.response:
                 if b'"draft"' in chunk:
                     break
@@ -290,15 +287,43 @@ class ChatStreamingTests(ChatStreamBase):
         history = self.client.get("/get_initial_state").json["chat_history"]
         self.assertEqual(history[-1], {"role": "assistant", "content": "떠나도 저장되는 답변입니다."})
 
-    def test_missing_message_still_ends_the_stream(self):
-        response = self.client.get("/chat")
-        body = response.get_data(as_text=True)
-        types = [
-            json.loads(line[len("data: "):])["type"]
-            for line in body.splitlines()
-            if line.startswith("data: ")
-        ]
-        self.assertEqual(types, ["error", "stream_end"])
+    def test_a_turn_without_a_message_is_refused_before_anything_is_stored(self):
+        self.as_browser("no-message-browser")
+        response = chat(self.client, None)
+        self.assertEqual((response.status_code, response.json), (400, {"error": "invalid_input"}))
+        self.assertEqual(self.client.get("/get_initial_state").json["chat_history"], [])
+
+    def test_the_message_no_longer_travels_in_a_url(self):
+        """GET /chat?message=... was the old stream; a GET carries no CSRF token and lands in logs."""
+        self.assertEqual(self.client.get("/chat?message=보증금 문의").status_code, 405)
+
+    def test_a_turn_needs_the_sessions_csrf_token(self):
+        self.as_browser("csrf-browser")
+        ask = mock.Mock(return_value=turn(backend_answer()))
+        with mock.patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
+                mock.patch.object(self.app_module.legal_backend, "ask", ask):
+            payload = {"message": "보증금 문의", "request_id": "a" * 32}
+            missing = self.client.post("/chat", json=payload, without_csrf=True, buffered=True)
+            wrong = self.client.post("/chat", json=payload, headers={"X-CSRF-Token": "x" * 43}, buffered=True)
+        self.assertEqual((missing.status_code, wrong.status_code), (403, 403))
+        ask.assert_not_called()
+        self.assertEqual(self.client.get("/get_initial_state").json["chat_history"], [])
+
+    def test_a_resent_request_does_not_run_the_turn_twice(self):
+        self.as_browser("resent-browser")
+        ask = mock.Mock(return_value=turn(backend_answer()))
+        with mock.patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
+                mock.patch.object(self.app_module.legal_backend, "ask", ask):
+            payload = {"message": "보증금 문의", "request_id": "b" * 32}
+            first = self.client.post("/chat", json=payload, buffered=True)
+            again = self.client.post("/chat", json=payload, buffered=True)
+        self.assertEqual((first.status_code, again.status_code), (200, 409))
+        ask.assert_called_once()
+
+    def test_the_backend_is_asked_for_this_browsers_workspace(self):
+        self.as_browser("workspace-browser-1234")
+        self.collect()
+        self.assertEqual(self.ask.call_args.kwargs["workspace"], "workspace-browser-1234")
 
 
 class LegalSourceTests(ChatStreamBase):
@@ -316,7 +341,7 @@ class LegalSourceTests(ChatStreamBase):
         response = self.read()
 
         self.assertEqual((response.status_code, response.json), (200, self.DOCUMENT))
-        self.lookup.assert_called_once_with("http://legal:8000", "law#art:제3조")
+        self.lookup.assert_called_once_with("http://legal:8000", "law#art:제3조", workspace=mock.ANY)
 
     def test_a_source_that_is_not_indexed_is_not_found(self):
         self.assertEqual(self.read(None).status_code, 404)
@@ -363,7 +388,7 @@ class CaseSearchPageTests(ChatStreamBase):
         response = self.get(("/case_search", {"query": "임차권등기명령 보증금 반환"}), search_cases=cards)
 
         self.assertEqual((response.status_code, response.json), (200, {"results": cards}))
-        self.calls["search_cases"].assert_called_once_with("http://legal:8000", "임차권등기명령 보증금 반환")
+        self.calls["search_cases"].assert_called_once_with("http://legal:8000", "임차권등기명령 보증금 반환", workspace=mock.ANY)
 
     def test_an_empty_request_or_a_missing_backend_does_not_call_out(self):
         self.assertEqual(self.get("/law?name=", law={}).status_code, 400)

@@ -71,7 +71,7 @@
       /* 상담을 고르면 그 상담을 열어 둔 채 상담 화면으로 간다 */
       pickMatter: k => {
         const c = LC.MATTERS[Number(k)];
-        const open = !c || c.live ? Promise.resolve() : fetch('/conversations/select', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id }) });
+        const open = !c || c.live ? Promise.resolve() : LC.secureFetch('/conversations/select', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id }) });
         open.catch(err => console.error('Conversation open error:', err)).then(() => { location.href = 'chatbot.html'; });
         return false;
       }

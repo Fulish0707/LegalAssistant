@@ -10,7 +10,7 @@ import yaml
 
 from .settings import Settings
 
-SECRET_PATHS: tuple[tuple[str, str], ...] = (("qdrant", "api_key"), ("llm", "api_key"))
+SECRET_PATHS: tuple[tuple[str, str], ...] = (("qdrant", "api_key"), ("llm", "api_key"), ("api", "service_token"))
 DEFAULT_CONFIG_DIR = Path(__file__).resolve().parents[3] / "configs"
 
 

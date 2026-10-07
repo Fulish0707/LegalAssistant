@@ -7,6 +7,29 @@ window.LC = window.LC || {};
 (function () {
   const a = LC.ACCENT;
 
+  let csrfPromise;
+  LC.secureFetch = async function (url, options = {}) {
+    if (!csrfPromise) {
+      csrfPromise = fetch('/get_initial_state', { credentials: 'same-origin', cache: 'no-store' })
+        .then(async response => {
+          if (!response.ok) throw new Error('세션을 확인하지 못했습니다.');
+          const state = await response.json();
+          if (!state.csrf_token) throw new Error('세션을 확인하지 못했습니다.');
+          return state.csrf_token;
+        }).catch(error => { csrfPromise = null; throw error; });
+    }
+    const send = async () => {
+      const headers = new Headers(options.headers || {});
+      headers.set('X-CSRF-Token', await csrfPromise);
+      return fetch(url, { ...options, headers, credentials: 'same-origin', cache: 'no-store' });
+    };
+    const response = await send();
+    /* 서버가 다시 시작되면 세션과 토큰이 바뀐다. 토큰을 새로 받아 한 번만 다시 보낸다 */
+    if (response.status !== 403) return response;
+    csrfPromise = null;
+    return send();
+  };
+
   /* ---------- 공통 상태 ---------- */
 
   LC.S = {
@@ -372,7 +395,7 @@ ${LC.reader()}
   LC.clearKnowledgeBase = async function () {
     if (!confirm('지식베이스에 저장된 모든 자료를 삭제하시겠습니까?')) return;
     try {
-      const r = await fetch('/knowledge_base/clear', { method: 'POST' });
+      const r = await LC.secureFetch('/knowledge_base/clear', { method: 'POST' });
       const res = await r.json().catch(() => ({}));
       if (!r.ok || !res.ok) throw new Error(res.message || r.statusText);
       LC.DOCS = [];
@@ -387,7 +410,7 @@ ${LC.reader()}
     if (!d) return;
     if (!confirm('"' + d.name + '" 자료와 색인을 지식베이스에서 삭제할까요?')) return;
     try {
-      const r = await fetch('/knowledge_base/source', {
+      const r = await LC.secureFetch('/knowledge_base/source', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source: d.name })
@@ -402,7 +425,7 @@ ${LC.reader()}
   };
 
   LC.searchKnowledgeBase = async function (query, k) {
-    const r = await fetch('/knowledge_base/search', {
+    const r = await LC.secureFetch('/knowledge_base/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: query, k: k || 6 })
@@ -427,7 +450,7 @@ ${LC.reader()}
     fd.append('question', '');
     fd.append('add_to_knowledge_base', 'true');
 
-    fetch('/process_document_ocr', { method: 'POST', body: fd })
+    LC.secureFetch('/process_document_ocr', { method: 'POST', body: fd })
       .then(r => r.json().catch(() => ({})))
       .then(res => {
         const kb = (res && res.knowledge_base) || {};

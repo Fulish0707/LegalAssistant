@@ -11,6 +11,11 @@ class FakeVectorStore:
     def add_documents(self, documents):
         self.added_documents.extend(documents)
 
+    def get(self, where=None, include=None):
+        """The ids of the stored chunks that match `where` (equality on metadata only)."""
+        return {"ids": [str(i) for i, document in enumerate(self.added_documents)
+                        if all(document.metadata.get(key) == value for key, value in (where or {}).items())]}
+
 
 class RagIsolationTests(unittest.TestCase):
     PINNED_ENV = ("EMBEDDING_PROVIDER",)

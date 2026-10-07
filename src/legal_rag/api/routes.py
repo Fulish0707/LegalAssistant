@@ -1,4 +1,4 @@
-"""HTTP routes. Business logic lives in the orchestrator and retriever, never here."""
+"""HTTP routes for the authenticated internal service."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import queue
 import threading
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
@@ -19,6 +19,7 @@ from legal_rag.schemas import ChatResponse, CitationKind, RetrievalFilters
 
 from .models import (CasesRequest, CasesResponse, ChatRequest, CitedArticle, DocumentResponse, HealthResponse,
                      LawResponse, SearchRequest, SearchResponse)
+from .security import check_egress, conversation_key, workspace
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -55,8 +56,23 @@ def health(request: Request) -> HealthResponse:
     )
 
 
+async def _run(request, operation):
+    # A cancelled HTTP request does not release a slot while its worker is still running.
+    def guarded():
+        with request.app.state.security.work():
+            try:
+                return operation()
+            except HTTPException:
+                raise
+            except Exception as error:
+                logger.error("Internal request failed (%s)", type(error).__name__)
+                raise HTTPException(500, "service_processing_failed") from None
+    return await run_in_threadpool(guarded)
+
+
 @router.post("/v1/search", response_model=SearchResponse)
-async def search(body: SearchRequest, request: Request) -> SearchResponse:
+async def search(body: SearchRequest, request: Request, owner: str = Depends(workspace)) -> SearchResponse:
+    check_egress(request.app.state.settings)
     # The getters wait on a lock while the retriever is built (~10 s at start); off the event loop.
     retriever = await run_in_threadpool(request.app.state.get_retriever)
     hits = await run_in_threadpool(retriever.retrieve, body.query, body.k, body.filters)
@@ -65,7 +81,8 @@ async def search(body: SearchRequest, request: Request) -> SearchResponse:
 
 
 @router.get("/v1/document", response_model=DocumentResponse)
-async def document(request: Request, chunk_id: str = Query(min_length=1, max_length=512)) -> DocumentResponse:
+async def document(request: Request, chunk_id: str = Query(min_length=1, max_length=512),
+                   owner: str = Depends(workspace)) -> DocumentResponse:
     """The whole document that holds one chunk, for reading a source an answer cited."""
     stores = list(_stores(await run_in_threadpool(request.app.state.get_retriever)).values())
     found = await run_in_threadpool(find_document, stores, chunk_id)
@@ -88,13 +105,14 @@ def _cases(state, query: str, k: int) -> CasesResponse:
 
 
 @router.post("/v1/cases", response_model=CasesResponse)
-async def cases(body: CasesRequest, request: Request) -> CasesResponse:
+async def cases(body: CasesRequest, request: Request, owner: str = Depends(workspace)) -> CasesResponse:
     """Cases closest to the query, each with the statute articles its text cites."""
     return await run_in_threadpool(_cases, request.app.state, body.query, body.k)
 
 
 @router.get("/v1/law", response_model=LawResponse)
-async def law(request: Request, name: str = Query(min_length=1, max_length=200)) -> LawResponse:
+async def law(request: Request, name: str = Query(min_length=1, max_length=200),
+              owner: str = Depends(workspace)) -> LawResponse:
     """One law's articles in order, each with its heading and full text."""
     store = (await run_in_threadpool(_laws, request.app.state)).get(name)
     if store is None:
@@ -102,50 +120,67 @@ async def law(request: Request, name: str = Query(min_length=1, max_length=200))
     return LawResponse(name=name, articles=articles(await run_in_threadpool(store.law_chunks, name)))
 
 
-async def _turn(body: ChatRequest, request: Request):
-    """The orchestrator, the conversation id and the pinned passages for one chat turn."""
+def _check_chat(body: ChatRequest, settings) -> None:
+    if settings.trace.include_text and not settings.api.allow_trace:
+        raise HTTPException(503, "text_trace_disabled")
+    check_egress(settings, documents=bool(body.user_documents))
+    if body.include_trace and not settings.api.allow_trace:
+        raise HTTPException(403, "trace_access_disabled")
+
+
+async def _turn(body: ChatRequest, request: Request, owner: str):
+    """The orchestrator, the caller's conversation id, its store key and the pinned passages for one turn."""
+    _check_chat(body, request.app.state.settings)
     orchestrator = await run_in_threadpool(request.app.state.get_orchestrator)
+    if not await run_in_threadpool(orchestrator.store.has_capacity, owner + ":"):
+        raise HTTPException(429, "workspace_storage_limit")
     pinned = []
     if body.pinned_chunk_ids:
         stores = list(_stores(await run_in_threadpool(request.app.state.get_retriever)).values())
         pinned = await run_in_threadpool(pinned_chunks, stores, body.pinned_chunk_ids)
-    return orchestrator, body.conversation_id or uuid.uuid4().hex, pinned
+    conversation_id = body.conversation_id or uuid.uuid4().hex
+    return orchestrator, conversation_id, conversation_key(owner, conversation_id), pinned
 
 
 @router.post("/v1/chat", response_model=ChatResponse, response_model_exclude_none=True)
-async def chat(body: ChatRequest, request: Request) -> ChatResponse:
-    orchestrator, conversation_id, pinned = await _turn(body, request)
-    response = await run_in_threadpool(orchestrator.handle, body.message, conversation_id=conversation_id,
-                                         user_documents=body.user_documents, pinned=pinned)
-    if not body.include_trace:
-        response = response.model_copy(update={"trace": None})
-    return response
+async def chat(body: ChatRequest, request: Request, owner: str = Depends(workspace)) -> ChatResponse:
+    orchestrator, conversation_id, key, pinned = await _turn(body, request, owner)
+    response = await _run(request, lambda: orchestrator.handle(body.message, conversation_id=key,
+                                                               user_documents=body.user_documents, pinned=pinned))
+    # The caller sees its own id; the store keys the turns by workspace (conversation_key).
+    return response.model_copy(update={"conversation_id": conversation_id,
+                                       "trace": response.trace if body.include_trace else None})
 
 
 @router.post("/v1/chat/stream")
-async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
+async def chat_stream(body: ChatRequest, request: Request, owner: str = Depends(workspace)) -> StreamingResponse:
     """/v1/chat as NDJSON: {"type": "stage", "stage"} as each stage starts (see Orchestrator.handle),
     {"type": "draft", "text"} pieces of the analysis while the model writes it, {"type": "draft_reset"}
     before each new attempt, then {"type": "response", "body"} with the /v1/chat body, or
     {"type": "error"}. The draft has not been verified; only the body has."""
-    orchestrator, conversation_id, pinned = await _turn(body, request)
+    orchestrator, conversation_id, key, pinned = await _turn(body, request, owner)
+    slots = request.app.state.security.slots
+    if not slots.acquire(blocking=False):
+        raise HTTPException(429, "service_busy")
     events: queue.Queue = queue.Queue()
 
     def draft(text):
         events.put({"type": "draft_reset"} if text is None else {"type": "draft", "text": text})
 
     def run():
+        # The slot is held until the turn ends, also when the client has gone: the turn still writes history.
         try:
-            response = orchestrator.handle(body.message, conversation_id=conversation_id, user_documents=body.user_documents,
+            response = orchestrator.handle(body.message, conversation_id=key, user_documents=body.user_documents,
                                            pinned=pinned, on_draft=draft,
                                            on_stage=lambda stage: events.put({"type": "stage", "stage": stage}))
-            if not body.include_trace:
-                response = response.model_copy(update={"trace": None})
+            response = response.model_copy(update={"conversation_id": conversation_id,
+                                                   "trace": response.trace if body.include_trace else None})
             events.put({"type": "response", "body": response.model_dump(mode="json", exclude_none=True)})
-        except Exception:
-            logger.exception("chat turn failed")
+        except Exception as error:
+            logger.error("chat turn failed (%s)", type(error).__name__)
             events.put({"type": "error"})
         finally:
+            slots.release()
             events.put(None)
 
     threading.Thread(target=run, daemon=True).start()
@@ -156,3 +191,17 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
             yield json.dumps(event, ensure_ascii=False) + "\n"
 
     return StreamingResponse(lines(), media_type="application/x-ndjson")
+
+
+@router.delete("/v1/workspace/conversations")
+async def delete_conversations(request: Request, owner: str = Depends(workspace),
+                               conversation_id: str | None = Query(default=None, min_length=1, max_length=128,
+                                                                   pattern=r"^[A-Za-z0-9_-]+$")) -> dict:
+    """Forget the calling workspace's turns: of one conversation, or of all of them."""
+    # A key is the owner, ":" and a fixed-length hash, so as a prefix it matches only itself.
+    prefix = conversation_key(owner, conversation_id) if conversation_id else owner + ":"
+
+    def clear():
+        request.app.state.get_orchestrator().store.delete_prefix(prefix)
+        return {"ok": True}
+    return await _run(request, clear)

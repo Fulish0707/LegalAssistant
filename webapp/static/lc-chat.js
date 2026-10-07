@@ -160,46 +160,59 @@
     LC.pinThread = true;
     LC.render();
 
-    fetch('/chat', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ message: text })
-    }).then(() => {
-      if (sse) sse.close();
-      const qs = new URLSearchParams({ message: text });
-      sse = new EventSource('/chat?' + qs.toString());
-
-      sse.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'thought') { LC.S.traceLines.push(data.content); LC.render(); }
-          else if (data.type === 'draft') { growDraft(data.content); }
-          else if (data.type === 'draft_reset') { if (P.writing) { P.writing = ''; renderKeepingInput(); } }
-          else if (data.type === 'final_response') {
-            P.extra.push({ role:'agent', text: data.chat_response });
-            P.questions = data.questions || [];
-            LC.SOURCES = sourceCards(data.sources);
-            P.thinking = false; P.writing = ''; sse.close(); LC.pinThread = true; LC.render();
-          }
-          else if (data.type === 'error') {
-            P.extra.push({ role:'agent', text:'오류: ' + data.content }); P.thinking = false; P.writing = ''; sse.close(); LC.pinThread = true; LC.render();
-          }
-          else if (data.type === 'stream_end') { P.thinking = false; P.writing = ''; sse.close(); LC.render(); }
-        } catch (err) {
-          console.error('SSE parse error:', err);
-          P.extra.push({ role:'agent', text:'응답을 해석하는 중 오류가 발생했습니다.' });
-          P.thinking = false; P.writing = ''; LC.pinThread = true; LC.render();
+    if (sse) sse.close();
+    /* 한 번의 POST가 메시지를 저장하고 답을 SSE로 흘려 보낸다. CSRF 헤더가 붙고 메시지는 URL에 실리지 않는다 */
+    const controller = new AbortController();
+    sse = { close: () => controller.abort() };
+    let received = false;
+    const userError = message => Object.assign(new Error(message), { userMessage:message });
+    const finish = () => { P.thinking = false; P.writing = ''; LC.pinThread = true; LC.render(); };
+    const handleEvent = data => {
+      if (data.type === 'thought') { LC.S.traceLines.push(data.content); LC.render(); }
+      else if (data.type === 'draft') { growDraft(data.content); }
+      else if (data.type === 'draft_reset') { if (P.writing) { P.writing = ''; renderKeepingInput(); } }
+      else if (data.type === 'final_response') {
+        received = true;
+        P.extra.push({ role:'agent', text: data.chat_response });
+        P.questions = data.questions || [];
+        LC.SOURCES = sourceCards(data.sources);
+        finish();
+      } else if (data.type === 'error') {
+        received = true;
+        P.extra.push({ role:'agent', text:'오류: ' + data.content });
+        finish();
+      } else if (data.type === 'stream_end') { P.thinking = false; P.writing = ''; LC.render(); }
+    };
+    (async () => {
+      const response = await LC.secureFetch('/chat', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ message:text, request_id:crypto.randomUUID() }), signal:controller.signal
+      });
+      if (!response.ok) {
+        const res = await response.json().catch(() => ({}));
+        throw userError(response.status === 429 ? '요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.'
+          : (typeof res.error === 'string' && /[가-힣]/.test(res.error) ? res.error : '요청을 처리하지 못했습니다.'));
+      }
+      if (!response.body) throw userError('응답 스트림을 사용할 수 없습니다.');
+      const reader = response.body.getReader(), decoder = new TextDecoder();
+      let pending = '';
+      while (true) {
+        const part = await reader.read();
+        pending += decoder.decode(part.value || new Uint8Array(), { stream:!part.done });
+        let boundary;
+        while ((boundary = pending.indexOf('\n\n')) !== -1) {
+          const event = pending.slice(0, boundary); pending = pending.slice(boundary + 2);
+          const data = event.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
+          if (data) handleEvent(JSON.parse(data));
         }
-      };
-
-      sse.onerror = () => {
-        P.extra.push({ role:'agent', text:'서버 연결이 끊어졌습니다.' });
-        P.thinking = false; P.writing = ''; sse.close(); LC.pinThread = true; LC.render();
-      };
-    }).catch((err) => {
-      console.error('Message send error:', err);
-      P.extra.push({ role:'agent', text:'메시지를 보내는 중 오류가 발생했습니다.' });
-      P.thinking = false; P.writing = ''; LC.pinThread = true; LC.render();
+        if (part.done) break;
+      }
+      if (!received) throw userError('서버 연결이 끊어졌습니다.');
+    })().catch(error => {
+      if (controller.signal.aborted) return;
+      if (!error.userMessage) console.error('Message send error:', error);
+      P.extra.push({ role:'agent', text:error.userMessage || '메시지를 보내는 중 오류가 발생했습니다.' });
+      finish();
     });
   }
 
@@ -268,7 +281,7 @@
   /* 판례 검색에서 고른 판례를 지금 상담에 붙이거나(chunkId) 뗀다(null). 입력 중인 글은 그대로 둔다 */
   async function attachCase(chunkId, title){
     try {
-      const r = await fetch('/conversations/case', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chunk_id: chunkId, title: title }) });
+      const r = await LC.secureFetch('/conversations/case', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chunk_id: chunkId, title: title }) });
       if (!r.ok) throw new Error(r.statusText);
       applyState(await r.json());
     } catch (err) {
@@ -282,13 +295,17 @@
   async function openConversation(path, body){
     if (sse) { sse.close(); sse = null; }
     try {
-      const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-      if (!r.ok) throw new Error(r.statusText);
+      const r = await LC.secureFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+      if (!r.ok) {
+        const res = await r.json().catch(() => ({}));
+        throw Object.assign(new Error(r.statusText), { userMessage: typeof res.error === 'string' && /[가-힣]/.test(res.error) ? res.error : '' });
+      }
       applyState(await r.json());
       Object.assign(P, { draft: '', thinking: false, writing: '', railTab: '전체', questions: [], answering: '' });
       LC.S.traceLines = [];
     } catch (err) {
       console.error('Conversation open error:', err);
+      if (err.userMessage) alert(err.userMessage);
     }
     LC.pinThread = true;
     LC.render();

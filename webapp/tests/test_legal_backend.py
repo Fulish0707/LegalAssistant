@@ -12,6 +12,18 @@ import httpx
 
 import legal_backend
 
+WORKSPACE = "browser-workspace-0001"
+SERVICE_TOKEN = "s" * 40
+_service_env = mock.patch.dict("os.environ", {"LEGAL_RAG__API__SERVICE_TOKEN": SERVICE_TOKEN})
+
+
+def setUpModule():
+    _service_env.start()
+
+
+def tearDownModule():
+    _service_env.stop()
+
 EVIDENCE = {
     "items": [
         {"source_id": "S1", "chunk_id": "c1", "document_id": "d1", "document_type": "statute",
@@ -68,9 +80,9 @@ class AskTests(unittest.TestCase):
             return answered()
 
         with asked(handler):
-            events = list(legal_backend.ask("http://legal:8000/", "해고당했어요", "browser-1"))
+            events = list(legal_backend.ask("http://127.0.0.1:8000/", "해고당했어요", "browser-1", workspace=WORKSPACE))
 
-        self.assertEqual(seen["url"], "http://legal:8000/v1/chat/stream")
+        self.assertEqual(seen["url"], "http://127.0.0.1:8000/v1/chat/stream")
         self.assertEqual(seen["json"], {"message": "해고당했어요", "conversation_id": "browser-1"})
         self.assertEqual(events, [{"type": "response", "body": ANSWER}])
 
@@ -78,41 +90,41 @@ class AskTests(unittest.TestCase):
         drafts = [{"type": "draft_reset"}, {"type": "draft", "text": "근로기준법"}, {"type": "draft", "text": " 제28조"}]
 
         with asked(lambda request: streamed(*drafts, {"type": "response", "body": ANSWER})):
-            self.assertEqual(list(legal_backend.ask("http://legal:8000", "q", "c")), [*drafts, {"type": "response", "body": ANSWER}])
+            self.assertEqual(list(legal_backend.ask("http://127.0.0.1:8000", "q", "c", workspace=WORKSPACE)), [*drafts, {"type": "response", "body": ANSWER}])
 
     def test_an_unreachable_service_is_unavailable(self):
         def handler(request):
             raise httpx.ConnectError("refused")
 
         with asked(handler), self.assertRaises(legal_backend.LegalBackendUnavailable):
-            list(legal_backend.ask("http://legal:8000", "q", "c"))
+            list(legal_backend.ask("http://127.0.0.1:8000", "q", "c", workspace=WORKSPACE))
 
     def test_a_timeout_is_unavailable(self):
         def handler(request):
             raise httpx.ReadTimeout("slow")
 
         with asked(handler), self.assertRaises(legal_backend.LegalBackendUnavailable):
-            list(legal_backend.ask("http://legal:8000", "q", "c"))
+            list(legal_backend.ask("http://127.0.0.1:8000", "q", "c", workspace=WORKSPACE))
 
     def test_an_error_status_is_unavailable(self):
         with asked(lambda request: httpx.Response(500, text="boom")), \
                 self.assertRaises(legal_backend.LegalBackendUnavailable):
-            list(legal_backend.ask("http://legal:8000", "q", "c"))
+            list(legal_backend.ask("http://127.0.0.1:8000", "q", "c", workspace=WORKSPACE))
 
     def test_a_turn_the_service_failed_is_unavailable(self):
         with asked(lambda request: streamed({"type": "draft_reset"}, {"type": "error"})), \
                 self.assertRaises(legal_backend.LegalBackendUnavailable):
-            list(legal_backend.ask("http://legal:8000", "q", "c"))
+            list(legal_backend.ask("http://127.0.0.1:8000", "q", "c", workspace=WORKSPACE))
 
     def test_a_stream_that_ends_without_an_answer_is_unavailable(self):
         with asked(lambda request: streamed({"type": "draft", "text": "가"})), \
                 self.assertRaises(legal_backend.LegalBackendUnavailable):
-            list(legal_backend.ask("http://legal:8000", "q", "c"))
+            list(legal_backend.ask("http://127.0.0.1:8000", "q", "c", workspace=WORKSPACE))
 
     def test_a_body_that_is_not_json_is_unavailable(self):
         with asked(lambda request: httpx.Response(200, text="<html>")), \
                 self.assertRaises(legal_backend.LegalBackendUnavailable):
-            list(legal_backend.ask("http://legal:8000", "q", "c"))
+            list(legal_backend.ask("http://127.0.0.1:8000", "q", "c", workspace=WORKSPACE))
 
 
 class DocumentTests(unittest.TestCase):
@@ -126,13 +138,13 @@ class DocumentTests(unittest.TestCase):
             return httpx.Response(200, json={"document_id": "law", "text": "제2조 \U00020000\n\n제3조 ...\n\n제4조", "cited_start": 7, "cited_end": 14})
 
         with self.fetched(handler):
-            document = legal_backend.document("http://legal:8000/", "law#art:제3조")
+            document = legal_backend.document("http://127.0.0.1:8000/", "law#art:제3조", workspace=WORKSPACE)
 
         self.assertEqual(document, {"before": "제2조 \U00020000\n\n", "cited": "제3조 ...", "after": "\n\n제4조"})
 
     def test_a_chunk_the_service_does_not_hold_has_no_document(self):
         with self.fetched(lambda request: httpx.Response(404, json={"detail": "none"})):
-            self.assertIsNone(legal_backend.document("http://legal:8000", "gone"))
+            self.assertIsNone(legal_backend.document("http://127.0.0.1:8000", "gone", workspace=WORKSPACE))
 
     def test_an_unreachable_or_broken_service_is_reported_as_unavailable(self):
         def refused(request):
@@ -140,7 +152,7 @@ class DocumentTests(unittest.TestCase):
 
         for handler in (refused, lambda request: httpx.Response(500, text="boom"), lambda request: httpx.Response(200, json={})):
             with self.subTest(handler=handler), self.fetched(handler), self.assertRaises(legal_backend.LegalBackendUnavailable):
-                legal_backend.document("http://legal:8000", "c1")
+                legal_backend.document("http://127.0.0.1:8000", "c1", workspace=WORKSPACE)
 
 
 class PinnedPassageTests(unittest.TestCase):
@@ -152,8 +164,8 @@ class PinnedPassageTests(unittest.TestCase):
             return answered()
 
         with asked(handler):
-            list(legal_backend.ask("http://legal:8000", "이 판례가 제 사건에도 적용되나요?", "c1", pinned=["서울중앙지방법원-2023가단5103393_chunk_0001"]))
-            list(legal_backend.ask("http://legal:8000", "보증금 문의", "c1"))
+            list(legal_backend.ask("http://127.0.0.1:8000", "이 판례가 제 사건에도 적용되나요?", "c1", pinned=["서울중앙지방법원-2023가단5103393_chunk_0001"], workspace=WORKSPACE))
+            list(legal_backend.ask("http://127.0.0.1:8000", "보증금 문의", "c1", workspace=WORKSPACE))
 
         self.assertEqual(sent[0]["pinned_chunk_ids"], ["서울중앙지방법원-2023가단5103393_chunk_0001"])
         self.assertNotIn("pinned_chunk_ids", sent[1])
@@ -184,8 +196,8 @@ class LawTests(unittest.TestCase):
             return httpx.Response(200, json={"name": "주택임대차보호법", "articles": [article]})
 
         with self.fetched(handler):
-            self.assertEqual(legal_backend.law("http://legal:8000", "주택임대차보호법"), {"name": "주택임대차보호법", "articles": [article]})
-            self.assertIsNone(legal_backend.law("http://legal:8000", "없는법"))
+            self.assertEqual(legal_backend.law("http://127.0.0.1:8000", "주택임대차보호법", workspace=WORKSPACE), {"name": "주택임대차보호법", "articles": [article]})
+            self.assertIsNone(legal_backend.law("http://127.0.0.1:8000", "없는법", workspace=WORKSPACE))
 
 
 def hit(document_id, score, text="본문", chunk=0, title="", **metadata):
@@ -200,7 +212,7 @@ class CaseSearchTests(unittest.TestCase):
             return httpx.Response(200, json={"hits": hits, "labels": labels or {}, "statutes": statutes or {}})
 
         with served(handler):
-            return legal_backend.search_cases("http://legal:8000", "임차권등기명령 보증금 반환")
+            return legal_backend.search_cases("http://127.0.0.1:8000", "임차권등기명령 보증금 반환", workspace=WORKSPACE)
 
     def test_the_case_search_of_the_service_is_asked(self):
         self.search([])
@@ -240,7 +252,7 @@ class CaseSearchTests(unittest.TestCase):
     def test_a_broken_reply_is_reported_as_unavailable(self):
         with served(lambda request: httpx.Response(200, json={"results": []})), \
                 self.assertRaises(legal_backend.LegalBackendUnavailable):
-            legal_backend.search_cases("http://legal:8000", "x")
+            legal_backend.search_cases("http://127.0.0.1:8000", "x", workspace=WORKSPACE)
 
 
 class RenderTests(unittest.TestCase):
@@ -332,3 +344,61 @@ class RenderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ServiceAuthenticationTests(unittest.TestCase):
+    """legal_rag trusts a workspace only from a caller holding the service token."""
+
+    def test_every_call_carries_the_token_and_the_browsers_workspace(self):
+        seen = []
+
+        def handler(request):
+            seen.append((request.method, request.url.path, request.headers.get("Authorization"), request.headers.get("X-Workspace-ID")))
+            if request.url.path == "/v1/chat/stream":
+                return answered()
+            if request.url.path == "/v1/cases":
+                return httpx.Response(200, json={"hits": []})
+            if request.method == "DELETE":
+                return httpx.Response(200, json={"ok": True})
+            return httpx.Response(404)
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        with mock.patch.object(legal_backend.httpx, "stream", client.stream), \
+                mock.patch.object(legal_backend.httpx, "post", client.post), \
+                mock.patch.object(legal_backend.httpx, "get", client.get), \
+                mock.patch.object(legal_backend.httpx, "delete", client.delete):
+            list(legal_backend.ask("http://127.0.0.1:8000", "q", "c", workspace=WORKSPACE))
+            legal_backend.search_cases("http://127.0.0.1:8000", "q", workspace=WORKSPACE)
+            legal_backend.document("http://127.0.0.1:8000", "c1", workspace=WORKSPACE)
+            legal_backend.law("http://127.0.0.1:8000", "민법", workspace=WORKSPACE)
+            legal_backend.forget("http://127.0.0.1:8000", WORKSPACE)
+        self.assertEqual({entry[2:] for entry in seen}, {("Bearer " + SERVICE_TOKEN, WORKSPACE)})
+        self.assertEqual([entry[:2] for entry in seen], [
+            ("POST", "/v1/chat/stream"), ("POST", "/v1/cases"), ("GET", "/v1/document"), ("GET", "/v1/law"),
+            ("DELETE", "/v1/workspace/conversations")])
+
+    def test_forgetting_one_conversation_names_it(self):
+        seen = {}
+
+        def handler(request):
+            seen["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"ok": True})
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        with mock.patch.object(legal_backend.httpx, "delete", client.delete):
+            legal_backend.forget("http://127.0.0.1:8000", WORKSPACE, "browser-1-abcd-2")
+        self.assertEqual(seen["params"], {"conversation_id": "browser-1-abcd-2"})
+
+    def test_without_a_token_nothing_is_sent(self):
+        network = mock.Mock(side_effect=AssertionError("no request may leave without the token"))
+        for token in ("", "short", "replace-" + "x" * 40):
+            with self.subTest(token=token), mock.patch.dict("os.environ", {"LEGAL_RAG__API__SERVICE_TOKEN": token}), \
+                    mock.patch.object(legal_backend.httpx, "stream", network):
+                with self.assertRaisesRegex(legal_backend.LegalBackendUnavailable, "service_auth_not_configured"):
+                    list(legal_backend.ask("http://127.0.0.1:8000", "q", "c", workspace=WORKSPACE))
+
+    def test_a_remote_service_needs_tls(self):
+        network = mock.Mock(side_effect=AssertionError("plain HTTP to another host would expose the token"))
+        with mock.patch.object(legal_backend.httpx, "stream", network):
+            with self.assertRaisesRegex(legal_backend.LegalBackendUnavailable, "service_tls_required"):
+                list(legal_backend.ask("http://legal.example:8000", "q", "c", workspace=WORKSPACE))

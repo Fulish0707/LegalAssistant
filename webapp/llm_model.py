@@ -1,6 +1,8 @@
 """Model connectors. Provider names appear here and nowhere else."""
 
 import os
+import ipaddress
+from urllib.parse import urlsplit
 
 DEFAULT_LLM_PROVIDER = "ollama"
 DEFAULT_EMBEDDING_PROVIDER = "ollama"
@@ -29,6 +31,24 @@ def _embedding_provider():
 DEFAULT_NUM_CTX = 12288  # configs/local.yaml llm.num_ctx
 
 
+def _model_url():
+    url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password or not parsed.hostname:
+        raise RuntimeError("invalid_model_url")
+    local = parsed.hostname == "localhost"
+    if not local:
+        try:
+            local = ipaddress.ip_address(parsed.hostname).is_loopback
+        except ValueError:
+            pass
+    if not local:
+        allowed = os.getenv("ALLOW_USER_DOCUMENT_EGRESS", "").lower() in {"1", "true", "yes", "on"}
+        if not allowed or parsed.scheme != "https":
+            raise RuntimeError("document_egress_disabled")
+    return url
+
+
 def get_chat_model():
     """Return a chat model, or None when the provider is disabled."""
     provider = _llm_provider()
@@ -43,7 +63,9 @@ def get_chat_model():
         # Response parsing supports both structured output and JSON text.
         options = {
             "model": os.getenv("OLLAMA_MODEL", "qwen3:4b"),
-            "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+            "base_url": _model_url(),
+            "client_kwargs": {"timeout": 120.0},
+            "num_predict": 2048,
             # Sampling settings can be overridden for the configured model.
             "temperature": float(os.getenv("OLLAMA_TEMPERATURE", "0.7")),
             "top_p": 0.8,
@@ -84,7 +106,8 @@ def get_embedding_model():
 
         return OllamaEmbeddings(
             model=os.getenv("OLLAMA_EMBED_MODEL", DEFAULT_OLLAMA_EMBED_MODEL),
-            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+            base_url=_model_url(),
+            client_kwargs={"timeout": 60.0},
             # Same window as legal_rag's embedding.query_num_ctx: Ollama reloads bge-m3
             # when clients disagree. Upload chunks are 1,000 characters, well under it.
             num_ctx=int(os.getenv("OLLAMA_EMBED_NUM_CTX", "1024")),

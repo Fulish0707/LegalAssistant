@@ -56,7 +56,7 @@
   /* ---------- 서버 호출 ---------- */
 
   async function ask(url, options){
-    const r = await fetch(url, options);
+    const r = await LC.secureFetch(url, options);
     const res = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(res.error || r.statusText);
     return res;

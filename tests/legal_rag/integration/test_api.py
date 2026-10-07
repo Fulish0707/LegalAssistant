@@ -1,6 +1,7 @@
 import json
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from legal_rag.api import create_app
 from legal_rag.config import load_settings
@@ -12,12 +13,27 @@ from legal_rag.verification import VerificationPolicy, Verifier
 from tests.legal_rag.integration.test_chat_turn import _answer
 
 
-def _client(indexed, model):
+SERVICE_TOKEN = "t" * 40
+WORKSPACE = "workspace-aaaaaaaaaaaa"
+
+
+def secured(settings, **api):
+    """`settings` with the web service's token configured (and any other api settings)."""
+    return settings.model_copy(update={"api": settings.api.model_copy(update={"service_token": SecretStr(SERVICE_TOKEN), **api})})
+
+
+def auth(workspace=WORKSPACE):
+    return {"Authorization": f"Bearer {SERVICE_TOKEN}", "X-Workspace-ID": workspace}
+
+
+def _client(indexed, model, *, store=None, **api):
+    """A client authenticated as the web service. Traces are allowed unless `allow_trace=False`."""
     settings, _, retriever = indexed
+    settings = secured(settings, **{"allow_trace": True, **api})
     orchestrator = Orchestrator.from_components(
-        settings=settings, retriever=retriever, model=model, store=InMemoryConversationStore(), verifier=Verifier(), policy=VerificationPolicy()
+        settings=settings, retriever=retriever, model=model, store=store or InMemoryConversationStore(), verifier=Verifier(), policy=VerificationPolicy()
     )
-    return TestClient(create_app(settings=settings, orchestrator=orchestrator, retriever=retriever))
+    return TestClient(create_app(settings=settings, orchestrator=orchestrator, retriever=retriever), headers=auth())
 
 
 def test_health(indexed):
@@ -123,8 +139,8 @@ def test_a_failed_stream_turn_ends_with_an_error_line(indexed):
 
 
 def test_chat_validation_error_needs_no_backends():
-    settings = load_settings(profile="default", overrides={"embedding": {"backend": "fake"}, "llm": {"backend": "fake"}})
-    client = TestClient(create_app(settings=settings))
+    settings = secured(load_settings(profile="default", overrides={"embedding": {"backend": "fake"}, "llm": {"backend": "fake"}}))
+    client = TestClient(create_app(settings=settings), headers=auth())
     assert client.post("/v1/chat", json={}).status_code == 422
     assert client.post("/v1/chat", json={"message": "x", "extra": 1}).status_code == 422
     assert client.get("/health").json()["collection"] is None

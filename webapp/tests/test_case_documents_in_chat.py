@@ -5,10 +5,19 @@ import json
 import unittest
 from unittest import mock
 
-
 import legal_backend
 from tests.test_chat_streaming import ChatStreamBase, backend_answer
-from tests.test_legal_backend import ANSWER, answered, asked
+from tests.test_legal_backend import ANSWER, SERVICE_TOKEN, answered, asked
+
+_service_env = mock.patch.dict("os.environ", {"LEGAL_RAG__API__SERVICE_TOKEN": SERVICE_TOKEN})
+
+
+def setUpModule():
+    _service_env.start()
+
+
+def tearDownModule():
+    _service_env.stop()
 
 LEASE = {"name": "임대차계약서.pdf", "text": "제5조 임대인은 계약 종료일에 보증금 1억 원을 반환한다.", "score": 0.82}
 
@@ -22,7 +31,7 @@ class AskWithDocumentsTests(unittest.TestCase):
             return answered()
 
         with asked(handler):
-            list(legal_backend.ask("http://legal:8000", "보증금 문의", "browser-1", *args))
+            list(legal_backend.ask("http://127.0.0.1:8000", "보증금 문의", "browser-1", *args, workspace="browser-workspace-0001"))
         return seen
 
     def test_no_documents_sends_the_same_body_as_before(self):
@@ -84,8 +93,7 @@ class ChatWithCaseDocumentsTests(ChatStreamBase):
         self.assertEqual([(d["name"], d["text"]) for d in documents], [("임대차계약서.pdf", self.stored()["quote"])])
 
     def turn(self, message):
-        """One turn the way the page sends it: POST stores the message, GET streams the reply."""
-        self.client.post("/chat", json={"message": message})
+        """One turn the way the page sends it: one POST stores the message and streams the reply."""
         search = mock.Mock(return_value={"ok": True, "results": []})
         with mock.patch.object(self.app_module, "search_knowledge_base", search):
             self.collect(query="message=" + message)

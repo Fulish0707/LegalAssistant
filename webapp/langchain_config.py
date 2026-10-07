@@ -1,5 +1,6 @@
 import os
 import uuid
+from threading import Lock
 from datetime import datetime, timezone
 
 from langchain_chroma import Chroma
@@ -7,6 +8,11 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from llm_model import get_collection_name, get_embedding_model
+
+# One web worker adds documents at a time, so the per-browser chunk cap below is checked and kept.
+_ingest_lock = Lock()
+# One extracted document at most (document_security.MAX_EXTRACTED_CHARS).
+MAX_INGEST_CHARS = 200_000
 
 # Define directories. Resolved at call time, never at import: importing this
 # module must not touch disk or construct a client.
@@ -70,7 +76,7 @@ def ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
     if vector_store is None:
         return {"ok": False, "message": "Embedding model is not configured.", "chunk_count": 0}
 
-    if not text or not text.strip():
+    if not isinstance(text, str) or len(text) > MAX_INGEST_CHARS or not text.strip():
         return {"ok": False, "message": "No text was available to ingest.", "chunk_count": 0}
 
     document_metadata = {
@@ -97,7 +103,13 @@ def ingest_text_to_vector_store(text, source_name, metadata=None, user_id=None):
     if not chunks:
         return {"ok": False, "message": "Document text could not be split into chunks.", "chunk_count": 0}
 
-    vector_store.add_documents(chunks)
+    # Use one web worker until a shared storage admission lock is implemented.
+    # Refuse new data when full; never evict existing documents implicitly.
+    with _ingest_lock:
+        existing = vector_store.get(where={"user_id": user_id}, include=[])
+        if len(existing.get("ids", [])) + len(chunks) > 5000:
+            return {"ok": False, "message": "workspace_storage_limit", "chunk_count": 0}
+        vector_store.add_documents(chunks)
 
     if hasattr(vector_store, "persist"):
         vector_store.persist()
@@ -142,12 +154,12 @@ def get_knowledge_base_status(user_id):
             "chunk_count": len(metadatas),
             "sources": sources,
         }
-    except Exception as e:
+    except Exception:
         return {
             "available": False,
             "chunk_count": 0,
             "sources": [],
-            "error": str(e),
+            "error": "knowledge_base_failed",
         }
 
 def clear_knowledge_base(user_id):
@@ -164,8 +176,8 @@ def clear_knowledge_base(user_id):
             if hasattr(vector_store, "persist"):
                 vector_store.persist()
         return {"ok": True, "message": f"Removed {len(ids)} chunks from the knowledge base.", "deleted_count": len(ids)}
-    except Exception as e:
-        return {"ok": False, "message": f"Failed to clear knowledge base: {e}", "deleted_count": 0}
+    except Exception:
+        return {"ok": False, "message": "Failed to clear knowledge base.", "deleted_count": 0}
 
 def search_knowledge_base(user_id, query, k=6):
     """Similarity search over the user's chunks. Returns a list of {source, score, quote, chunk_index}."""
@@ -186,8 +198,8 @@ def search_knowledge_base(user_id, query, k=6):
                 "analysis_mode": metadata.get("analysis_mode", ""),
             })
         return {"ok": True, "results": results}
-    except Exception as e:
-        return {"ok": False, "results": [], "error": str(e)}
+    except Exception:
+        return {"ok": False, "results": [], "error": "knowledge_base_failed"}
 
 def delete_knowledge_base_source(user_id, source):
     """Remove every chunk that belongs to one uploaded file for this user."""
@@ -204,7 +216,7 @@ def delete_knowledge_base_source(user_id, source):
             if hasattr(vector_store, "persist"):
                 vector_store.persist()
         return {"ok": True, "deleted_count": len(ids)}
-    except Exception as e:
-        return {"ok": False, "message": f"Failed to delete source: {e}", "deleted_count": 0}
+    except Exception:
+        return {"ok": False, "message": "Failed to delete source.", "deleted_count": 0}
 
 

@@ -14,6 +14,7 @@ from legal_rag.schemas import StageTiming, Trace
 class TraceRecorder:
     def __init__(self, *, conversation_id: str, user_text: str, include_text: bool = False, path: Path | None = None, model: str | None = None) -> None:
         self.path = Path(path) if path else None
+        self.include_text = include_text
         self.trace = Trace(conversation_id=conversation_id, turn_id=uuid.uuid4().hex, model=model, user_text=user_text if include_text else None)
 
     @contextmanager
@@ -27,7 +28,12 @@ class TraceRecorder:
     def finish(self, *, policy_action: str) -> Trace:
         self.trace.policy_action = policy_action
         if self.path is not None:
+            # The analysis, the search queries and the verifier's findings restate the user's text, so
+            # the file keeps them only with include_text. The returned trace keeps them: the API sends
+            # it only to a caller allowed traces (api.allow_trace), and evaluations read it in process.
+            written = self.trace if self.include_text else self.trace.model_copy(
+                update={"analysis": None, "search_queries": [], "verification": None})
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as handle:
-                handle.write(self.trace.model_dump_json() + "\n")
+                handle.write(written.model_dump_json() + "\n")
         return self.trace

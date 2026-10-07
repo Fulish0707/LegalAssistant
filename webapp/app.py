@@ -24,6 +24,13 @@ import os
 import secrets
 import tempfile
 import requests
+from functools import wraps
+from threading import BoundedSemaphore
+from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
+from flask import abort, make_response
+from web_security import check_browser_request, csrf_token, public_error, require_text, reserve_burst, security_headers
+from document_security import DocumentRejected, validate_upload
 from quota import (
     DAILY_AI_REQUEST_LIMIT,
     QuotaResult,
@@ -52,17 +59,36 @@ secret_key = os.getenv("SECRET_KEY")
 if not secret_key:
     if not is_local_environment:
         raise RuntimeError("SECRET_KEY must be configured outside development, local, or testing environments.")
-    secret_key = "development-only-secret-key"
+    secret_key = secrets.token_urlsafe(48)
+
+if len(secret_key) < 32 or secret_key.startswith("replace-"):
+    raise RuntimeError("SECRET_KEY must be a random secret of at least 32 characters.")
 
 app.config.update(
     SECRET_KEY=secret_key,
+    MAX_CONTENT_LENGTH=26 * 1024 * 1024,
+    MAX_FORM_MEMORY_SIZE=128 * 1024,
+    MAX_FORM_PARTS=12,
+    TRUSTED_HOSTS=[host.strip() for host in os.getenv("TRUSTED_HOSTS", "localhost,127.0.0.1,[::1]").split(",") if host.strip()],
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=not is_local_environment,
     QUOTA_IP_SALT=os.getenv("QUOTA_IP_SALT"),
     DAILY_AI_REQUEST_LIMIT=int(os.getenv("DAILY_AI_REQUEST_LIMIT", str(DAILY_AI_REQUEST_LIMIT))),
+    # Requests a minute one client IP may send to the routes that do work (control_request_rate).
+    REQUEST_BURST_LIMIT=int(os.getenv("REQUEST_BURST_LIMIT", "30")),
 )
 app.config["QUOTA_IP_SALT"] = app.config["QUOTA_IP_SALT"] or secret_key
+if len(app.config["QUOTA_IP_SALT"]) < 32 or app.config["QUOTA_IP_SALT"].startswith("replace-"):
+    raise RuntimeError("QUOTA_IP_SALT must be random and at least 32 characters, or unset.")
+trusted_proxy_count = int(os.getenv("TRUSTED_PROXY_COUNT", "0"))
+if trusted_proxy_count not in {0, 1}:
+    raise RuntimeError("TRUSTED_PROXY_COUNT must be 0 or 1.")
+if trusted_proxy_count:
+    # Trust only the scheme from an explicitly configured, restricted proxy hop.
+    # IP quotas continue to use the direct peer; the proxy must enforce client budgets.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=0, x_proto=trusted_proxy_count,
+                          x_host=0, x_port=0, x_prefix=0)
 
 
 @app.before_request
@@ -80,6 +106,7 @@ def establish_anonymous_user():
     # honoured: an old account cookie never recovers that account's records.
     for key in ("authenticated_user_id", "account_email", "auth_next", "oidc_nonce"):
         session.pop(key, None)
+    check_browser_request()
 
 # Data folders stay at the repository root, whatever directory the app is started from:
 # a relative path, from .env or the default, is resolved there and not in the working directory.
@@ -105,6 +132,7 @@ def ensure_database_schema(conn):
     # The source cards of an answer, as JSON, so a reopened consultation shows them again.
     if "sources" not in chat_columns:
         cursor.execute("ALTER TABLE chat_history ADD COLUMN sources TEXT")
+    cursor.execute("CREATE TABLE IF NOT EXISTS chat_requests (user_id TEXT NOT NULL, request_id TEXT NOT NULL, PRIMARY KEY(user_id, request_id))")
     # The Google-era users table is no longer created. Existing installs keep
     # theirs untouched; nothing in the app reads it any more.
     # daily_ai_quota keeps the legacy 'user' kind so old rows stay valid; the app
@@ -140,7 +168,9 @@ def get_db():
 
 @app.teardown_appcontext
 def close_connection(exception):
-    db = getattr(g, '_database', None)
+    # Popped, not only closed: a streamed /chat response runs after the view's context is torn down
+    # (stream_with_context), and must open its own connection rather than reuse the closed one.
+    db = g.pop('_database', None)
     if db is not None:
         db.close()
 
@@ -200,6 +230,7 @@ def clear_chat_history_in_db(user_id):
     conn = get_db()
     c = conn.cursor()
     c.execute('DELETE FROM chat_history WHERE user_id=?', (user_id,))
+    c.execute('DELETE FROM chat_requests WHERE user_id=?', (user_id,))
     conn.commit()
     print("Chat history cleared for the active browser workspace.")
 
@@ -269,6 +300,60 @@ _SERVICE_REPLIES = [
 ]
 SMALL_TALK_CHARS, SERVICE_QUESTION_CHARS = 20, 30
 
+# Controls apply before expensive work. Only the direct peer defines an IP budget.
+_work_slots = BoundedSemaphore(2)
+_conversation_slots = BoundedSemaphore(1)
+_upload_slots = BoundedSemaphore(1)
+
+def limited_work(function, slots=_work_slots):
+    @wraps(function)
+    def guarded(*args, **kwargs):
+        if not slots.acquire(blocking=False):
+            abort(429, description="service_busy")
+        try:
+            response = make_response(function(*args, **kwargs))
+        except BaseException:
+            slots.release()
+            raise
+        if response.is_streamed:
+            response.call_on_close(slots.release)
+        else:
+            slots.release()
+        return response
+    return guarded
+
+def conversation_work(function):
+    return limited_work(function, _conversation_slots)
+
+def upload_work(function):
+    return limited_work(function, _upload_slots)
+
+def json_object():
+    if request.content_length and request.content_length > 32768:
+        abort(413)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        abort(400, description="invalid_input")
+    return data
+
+@app.before_request
+def control_request_rate():
+    if request.method in {"POST", "DELETE", "PUT", "PATCH"} and request.endpoint != "process_document_ocr":
+        request.max_content_length = 32768
+    if request.endpoint in {"chat", "process_document_ocr", "search_knowledge_base_route"} and tracing_status()["enabled"]:
+        abort(403, description="external_tracing_disabled")
+    if request.endpoint in {"chat", "process_document_ocr", "knowledge_base_status_route",
+                            "clear_knowledge_base_route", "search_knowledge_base_route",
+                            "delete_knowledge_base_source_route", "clear_chat_history_endpoint",
+                            "legal_source", "law", "case_search"}:
+        identity = guest_ip_identity(client_ip_from_request(request), app.config["QUOTA_IP_SALT"])
+        if not reserve_burst(get_db(), identity, limit=app.config["REQUEST_BURST_LIMIT"]):
+            abort(429, description="rate_limit_exceeded")
+
+app.after_request(security_headers)
+app.register_error_handler(HTTPException, public_error)
+app.register_error_handler(500, public_error)
+
 
 def _fixed_reply(text, in_conversation=False):
     """The reply to a message that needs no legal search, or None when it does.
@@ -301,6 +386,9 @@ LEGAL_BACKEND_UNSET = "법률 답변 서비스가 설정되지 않았습니다. 
 LEGAL_BACKEND_DOWN = "법률 답변 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."
 # legal_rag refuses a longer message (ChatRequest in src/legal_rag/api/models.py).
 MESSAGE_MAX_CHARS = 4000
+CONSULTATION_NOT_DELETED = "법률 답변 서비스에 남은 상담 기록을 지우지 못해 상담을 삭제하지 않았습니다. 잠시 후 다시 시도해 주세요."
+# Messages one browser keeps across its consultations: two a turn. More are refused, not evicted.
+CHAT_ROWS_PER_BROWSER = 500
 MESSAGE_TOO_LONG = "질문이 너무 깁니다. 4,000자 이하로 줄여 주세요. 계약서 같은 긴 자료는 사건 자료 탭에 올리면 답변에 쓰입니다."
 
 
@@ -318,8 +406,8 @@ SERVER_START = secrets.token_hex(4)
 def _legal_conversation_id():
     """The browser's workspace id, this server start, and the number of the open consultation.
 
-    legal_rag keeps recent turns per conversation id and has no call to forget them,
-    so each consultation, and a cleared chat, continues under an id of its own.
+    legal_rag keeps recent turns per conversation id, so each consultation continues under an id of
+    its own. Clearing the chat first deletes the workspace's turns in legal_rag (legal_backend.forget).
     """
     return f"{session['user_id']}-{SERVER_START}-{_conversation()}"
 
@@ -436,7 +524,7 @@ def _generate_legal_response_stream(user_input):
                 yield _sse({'type': 'thought', 'content': f"붙인 판례 참고: {case['title']}"})
             body = None
             for event in legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id(), documents,
-                                           pinned=[case["chunk_id"]] if case else ()):
+                                           pinned=[case["chunk_id"]] if case else (), workspace=session["user_id"]):
                 if event["type"] == "response":
                     body = event["body"]
                 elif not left:
@@ -471,13 +559,14 @@ def _generate_legal_response_stream(user_input):
             "questions": questions,
         })
 
-    except legal_backend.LegalBackendUnavailable:
-        logging.exception("legal_rag /v1/chat is unavailable")
+    except legal_backend.LegalBackendUnavailable as error:
+        # Type names only: an exception's text can quote the user's message or a document.
+        logging.error("legal_rag /v1/chat is unavailable (%s)", error.__cause__ and type(error.__cause__).__name__)
         add_chat_message_to_db(session["user_id"], "assistant", LEGAL_BACKEND_DOWN, _conversation())
         if not left:
             yield _sse({'type': 'error', 'content': LEGAL_BACKEND_DOWN})
-    except Exception:
-        logging.exception("Error during AI processing stream (_generate_legal_response_stream)")
+    except Exception as error:
+        logging.error("Chat processing failed (%s)", type(error).__name__)
         error_response_content = "An error occurred while processing your request. Please check server logs."
         add_chat_message_to_db(session["user_id"], "assistant", error_response_content, _conversation())
         if not left:
@@ -528,7 +617,12 @@ def probe_llm_reachable():
 
 @app.route('/health', methods=['GET'])
 def health():
-    llm_available = get_chat_model() is not None
+    try:
+        llm_available = get_chat_model() is not None
+    except RuntimeError as error:  # a remote model URL without ALLOW_USER_DOCUMENT_EGRESS (llm_model._model_url)
+        llm_available, refused = False, str(error)
+    else:
+        refused = None
     payload = {
         "status": "ok",
         "llm_configured": llm_available,
@@ -548,50 +642,43 @@ def health():
     except Exception as error:
         payload["configuration_error"] = str(error)
 
+    if refused:
+        payload["configuration_error"] = refused
     if request.args.get("probe") == "llm":
         payload["llm_reachable"] = probe_llm_reachable()
 
     return jsonify(payload)
 
-@app.route('/chat', methods=['GET', 'POST'])
+@app.route('/chat', methods=['POST'])
+@conversation_work
 def chat():
-    if request.method == 'POST':
-        data = request.get_json(silent=True) or {}
-        user_input = data.get('message')
+    """Store the message and stream the answer as server-sent events in the same response.
 
-        if not user_input:
-            return jsonify({"error": "No message provided"}), 400
-        if len(user_input) > MESSAGE_MAX_CHARS:
-            return jsonify({"error": MESSAGE_TOO_LONG}), 400
-
-        add_chat_message_to_db(session["user_id"], "user", user_input, _conversation())
-        # The POST request now just acknowledges receipt.
-        # The actual processing and streaming will be triggered by the frontend's GET request.
-        return jsonify({"status": "message_received_ok", "message": "Proceed to connect to SSE for response."})
-
-    elif request.method == 'GET':
-        # For SSE, data comes from query parameters
-        user_input = request.args.get('message')
-
-        if not user_input:
-            # SSE requires a specific format for errors if connection is established
-            def error_stream():
-                yield f"data: {json.dumps({'type': 'error', 'content': 'No message provided in SSE request.'})}\n\n"
-                yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
-            return Response(stream_with_context(error_stream()), mimetype='text/event-stream')
-
-        # Note: The user message for this GET request is NOT added to DB here,
-        # as the POST request should have already handled it.
-        # If GET is called without a preceding POST, this could lead to inconsistencies
-        # in chat history if not handled carefully. The current frontend flow (POST then GET) is assumed.
-
-        return Response(stream_with_context(_generate_legal_response_stream(user_input)), mimetype='text/event-stream')
-
-    # Fallback to satisfy type checkers: ensure the route always returns a valid response
-    return jsonify({"error": "Invalid request method."}), 405
+    One POST, so the CSRF header covers the turn; the message never travels in a URL. A request id
+    the browser has used before is refused, so a resent request cannot run a turn twice.
+    """
+    data = json_object()
+    user_input = data.get('message')
+    if isinstance(user_input, str) and len(user_input) > MESSAGE_MAX_CHARS:
+        return jsonify({"error": MESSAGE_TOO_LONG}), 400
+    user_input = require_text(user_input, limit=MESSAGE_MAX_CHARS)
+    request_id = require_text(data.get('request_id'), limit=64)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", request_id):
+        abort(400, description="invalid_input")
+    user_id = session["user_id"]
+    rows = get_db().execute("SELECT COUNT(*) FROM chat_history WHERE user_id=?", (user_id,)).fetchone()[0]
+    if rows + 2 > CHAT_ROWS_PER_BROWSER:
+        return jsonify({"error": "workspace_storage_limit"}), 429
+    inserted = get_db().execute("INSERT OR IGNORE INTO chat_requests VALUES (?, ?)", (user_id, request_id))
+    if inserted.rowcount != 1:
+        get_db().rollback()
+        return jsonify({"error": "duplicate_request"}), 409
+    add_chat_message_to_db(user_id, "user", user_input, _conversation())
+    return Response(stream_with_context(_generate_legal_response_stream(user_input)),
+                    mimetype='text/event-stream', headers={"X-Accel-Buffering": "no"})
 
 def _from_legal_backend(lookup, asked, missing):
-    """Answer a page's read of the legal corpus: `lookup(url, asked)` as JSON, or the error to show."""
+    """Answer a page's read of the legal corpus: `lookup(url, asked, workspace=...)` as JSON, or the error to show."""
     legal_rag_url = os.getenv("LEGAL_RAG_URL", "").strip()
     asked = (asked or '').strip()
     if not asked:
@@ -599,9 +686,9 @@ def _from_legal_backend(lookup, asked, missing):
     if not legal_rag_url:
         return jsonify({"error": LEGAL_BACKEND_UNSET}), 503
     try:
-        found = lookup(legal_rag_url, asked)
+        found = lookup(legal_rag_url, asked, workspace=session["user_id"])
     except legal_backend.LegalBackendUnavailable as error:
-        app.logger.error(f"Legal corpus lookup failed: {error}")
+        app.logger.error("Legal corpus lookup failed (%s)", error)
         return jsonify({"error": "법률 답변 서비스에 연결할 수 없습니다."}), 502
     if found is None:
         return jsonify({"error": missing}), 404
@@ -624,13 +711,13 @@ def law():
 def case_search():
     """Cases closest to what the user described, each with the statute articles it cites."""
     query = (request.get_json(silent=True) or {}).get('query')
-    return _from_legal_backend(lambda url, asked: {"results": legal_backend.search_cases(url, asked)},
+    return _from_legal_backend(lambda url, asked, workspace: {"results": legal_backend.search_cases(url, asked, workspace=workspace)},
                                query if isinstance(query, str) else '', "")
 
 
 @app.route('/get_initial_state', methods=['GET'])
 def get_initial_state():
-    return jsonify(_chat_state())
+    return jsonify({**_chat_state(), "csrf_token": csrf_token()})
 
 
 @app.route('/conversations/new', methods=['POST'])
@@ -666,9 +753,20 @@ def attach_case():
 
 
 @app.route('/conversations/delete', methods=['POST'])
+@conversation_work
 def delete_conversation():
-    """Delete the open consultation with its messages, sources and attached case, and open an empty one."""
+    """Delete the open consultation with its messages, sources and attached case, and open an empty one.
+
+    legal_rag's turns of the consultation go first; if they cannot be deleted, nothing is.
+    """
     user_id, conversation = session["user_id"], _conversation()
+    legal_rag_url = os.getenv("LEGAL_RAG_URL", "").strip()
+    if legal_rag_url:  # without the service no turn of this consultation was sent anywhere
+        try:
+            legal_backend.forget(legal_rag_url, user_id, _legal_conversation_id())
+        except legal_backend.LegalBackendUnavailable as error:
+            logging.error("Consultation deletion failed (%s)", error)
+            return jsonify({"error": CONSULTATION_NOT_DELETED}), 502
     conn = get_db()
     conn.execute('DELETE FROM chat_history WHERE user_id=? AND conversation=?', (user_id, conversation))
     conn.commit()
@@ -688,29 +786,37 @@ def select_conversation():
 
 
 @app.route('/clear_chat_history_endpoint', methods=['POST']) # Added specific endpoint name
+@conversation_work
 def clear_chat_history_endpoint():
     try:
         user_id = session["user_id"]
+        backend_url = os.getenv("LEGAL_RAG_URL", "").strip()
+        if not backend_url:
+            raise legal_backend.LegalBackendUnavailable("backend_not_configured")
+        legal_backend.forget(backend_url, user_id)
         _open_new_conversation()
         clear_chat_history_in_db(user_id)
         return jsonify({"message": "Chat history cleared successfully."}), 200
     except Exception as e:
-        logging.error(f"Error clearing chat history: {e}")
+        logging.error("History deletion failed (%s)", type(e).__name__)
         return jsonify({"error": "Failed to clear chat history."}), 500
 
 @app.route('/knowledge_base/status', methods=['GET'])
+@limited_work
 def knowledge_base_status_route():
     return jsonify(get_knowledge_base_status(session["user_id"]))
 
 @app.route('/knowledge_base/clear', methods=['POST'])
+@limited_work
 def clear_knowledge_base_route():
     result = clear_knowledge_base(session["user_id"])
     return jsonify(result), 200 if result.get("ok") else 500
 
 @app.route('/knowledge_base/search', methods=['POST'])
+@limited_work
 def search_knowledge_base_route():
-    data = request.get_json(silent=True) or {}
-    query = (data.get('query') or '').strip()
+    data = json_object()
+    query = require_text(data.get("query"), limit=2000)
     if not query:
         return jsonify({"ok": False, "results": [], "error": "No query provided"}), 400
     try:
@@ -721,9 +827,10 @@ def search_knowledge_base_route():
     return jsonify(result), 200 if result.get("ok") else 500
 
 @app.route('/knowledge_base/source', methods=['DELETE'])
+@limited_work
 def delete_knowledge_base_source_route():
-    data = request.get_json(silent=True) or {}
-    source = (data.get('source') or '').strip()
+    data = json_object()
+    source = require_text(data.get("source"), limit=200)
     if not source:
         return jsonify({"ok": False, "message": "No source provided"}), 400
     result = delete_knowledge_base_source(session["user_id"], source)
@@ -747,6 +854,7 @@ def allowed_file(filename, allowed_extensions):
 
 
 @app.route('/process_document_ocr', methods=['POST'])
+@upload_work
 def process_document_ocr():
     if llm_ocr is None:
         return jsonify({"error": "OCR processing requires optional OCR dependencies such as pytesseract."}), 503
@@ -760,6 +868,14 @@ def process_document_ocr():
     analysis_mode = request.form.get('analysis_mode', 'report')
     add_to_knowledge_base = request.form.get('add_to_knowledge_base', '').lower() in {'1', 'true', 'yes', 'on'}
 
+    require_text(file.filename, limit=200)
+    user_instructions = require_text(request.form.get("user_instructions", ""), limit=2000, allow_empty=True)
+    question = require_text(request.form.get("question", ""), limit=2000, allow_empty=True)
+    if analysis_mode not in llm_ocr.DOCUMENT_ANALYSIS_MODES:
+        abort(400, description="invalid_input")
+    if tracing_status()["enabled"]:
+        return jsonify({"error": "document_tracing_disabled"}), 403
+
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
     if not allowed_file(file.filename, ALLOWED_EXTENSIONS_OCR):
@@ -769,6 +885,10 @@ def process_document_ocr():
     # beyond dropping any path. secure_filename would drop Hangul and leave "txt".
     filename = os.path.basename(file.filename.replace("\\", "/"))
     extension = filename.rsplit('.', 1)[1].lower()
+    try:
+        validate_upload(file, extension)
+    except DocumentRejected:
+        return jsonify({"error": "document_rejected"}), 422
     temp_file_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, dir=app.config['UPLOAD_FOLDER'],
@@ -779,12 +899,12 @@ def process_document_ocr():
         result_dict, status_code = llm_ocr.analyze_document(
             file_path=temp_file_path,
             file_extension=extension,
-            user_instructions=request.form.get('user_instructions', ''),
+            user_instructions=user_instructions,
             llm=llm,
             prompt_template=main_chat_prompt_template,
             logger=app.logger,
             analysis_mode=analysis_mode,
-            question=request.form.get('question', ''),
+            question=question,
             include_extracted_text=add_to_knowledge_base,
             quota_reserver=reserve_ai_request,
         )
@@ -799,8 +919,8 @@ def process_document_ocr():
             )
         return jsonify(result_dict), status_code
     except Exception as e:
-        app.logger.error(f"Unhandled error in process_document_ocr for {filename}: {e}", exc_info=True)
-        return jsonify({"error": f"An unexpected server error occurred during file preparation: {str(e)}"}), 500
+        app.logger.error("Document processing failed (%s)", type(e).__name__)
+        return jsonify({"error": "document_processing_failed"}), 500
     finally:
         if temp_file_path and os.path.exists(temp_file_path):
             try:
@@ -812,4 +932,5 @@ def process_document_ocr():
 if __name__ == '__main__':
     init_db() # Initialize the database
     clear_all_chat_history()  # consultations last until the server restarts
-    app.run(host="0.0.0.0", port=5005, debug=True, use_reloader=False)
+    # Loopback only and without the debugger: Werkzeug's debugger runs code sent to it.
+    app.run(host="127.0.0.1", port=5005, debug=False, use_reloader=False)
