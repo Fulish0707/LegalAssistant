@@ -278,8 +278,9 @@ def _generate_legal_response_stream(user_input):
             # Second check on the shown text, whatever the service's verifier decided. It reads
             # the full evidence; the source cards carry only an excerpt. Of the user's documents it
             # reads what they cite by name; their own clause numbers vouch only for a bare 제5조.
+            # What the last answers cited (prior_refs) may be repeated, as the service allows.
             document_citations = [citation for d in documents for citation in named_citations(d["text"])]
-            evidence_texts = [user_input, *document_citations] + legal_backend.evidence_texts(body)
+            evidence_texts = [user_input, *document_citations, *body.get("prior_refs", [])] + legal_backend.evidence_texts(body)
             missing = unsupported_citations(chat_response, evidence_texts, own_clauses=[d["text"] for d in documents])
             chat_response = annotate_figures(annotate_unsupported(chat_response, missing))
         else:

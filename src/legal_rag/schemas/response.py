@@ -22,4 +22,6 @@ class ChatResponse(BaseModel):
     reason: str | None = None
     evidence: EvidenceBundle | None = None
     verification: VerificationReport | None = None
+    # What recent answers of the conversation cited; the verifier let the answer repeat these.
+    prior_refs: list[str] = Field(default_factory=list)
     trace: Trace | None = None
