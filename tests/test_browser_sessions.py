@@ -19,7 +19,6 @@ class BrowserSessionTests(unittest.TestCase):
     MODULE_NAMES = ("app", "langchain_config", "llm_model", "llm_prompt")
     ENVIRONMENT_NAMES = (
         "APP_STATE_DB",
-        "AGENT_CHECKPOINT_DB",
         "RAG_PERSIST_DIR",
         "APP_ENV",
         "FLASK_ENV",
@@ -42,7 +41,6 @@ class BrowserSessionTests(unittest.TestCase):
             for name in cls.MODULE_NAMES
         }
         os.environ["APP_STATE_DB"] = cls.db_file
-        os.environ["AGENT_CHECKPOINT_DB"] = os.path.join(cls.tmpdir.name, "checkpoints.db")
         os.environ["RAG_PERSIST_DIR"] = os.path.join(cls.tmpdir.name, "chroma")
         os.environ["APP_ENV"] = "testing"
         os.environ["LLM_PROVIDER"] = "none"
@@ -82,7 +80,6 @@ class BrowserSessionTests(unittest.TestCase):
 
         self.assertNotIn("users", tables)
         self.assertIn("daily_ai_quota", tables)
-        self.assertIn("personal_statement", tables)
         self.assertIn("chat_history", tables)
 
     def test_existing_installs_keep_their_users_table_across_schema_calls(self):
@@ -205,9 +202,9 @@ class BrowserSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             environment = os.environ.copy()
             environment["APP_STATE_DB"] = os.path.join(temp_dir, "app_state.db")
-            environment["AGENT_CHECKPOINT_DB"] = os.path.join(temp_dir, "checkpoints.db")
+            # Empty, not removed: app.py's load_dotenv() fills in variables that are missing.
             for name in ("APP_ENV", "FLASK_ENV", "SECRET_KEY"):
-                environment.pop(name, None)
+                environment[name] = ""
 
             completed = subprocess.run(
                 [sys.executable, "-c", "import app"],
@@ -226,10 +223,9 @@ class BrowserSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             environment = os.environ.copy()
             environment["APP_STATE_DB"] = os.path.join(temp_dir, "app_state.db")
-            environment["AGENT_CHECKPOINT_DB"] = os.path.join(temp_dir, "checkpoints.db")
             environment["SECRET_KEY"] = "production-secret"
             for name in ("APP_ENV", "FLASK_ENV"):
-                environment.pop(name, None)
+                environment[name] = ""
 
             completed = subprocess.run(
                 [sys.executable, "-c", "import app; print(app.app.config['SESSION_COOKIE_SECURE'])"],
@@ -249,7 +245,6 @@ class BrowserSessionTests(unittest.TestCase):
             with self.subTest(environment=environment_name), tempfile.TemporaryDirectory() as temp_dir:
                 environment = os.environ.copy()
                 environment["APP_STATE_DB"] = os.path.join(temp_dir, "app_state.db")
-                environment["AGENT_CHECKPOINT_DB"] = os.path.join(temp_dir, "checkpoints.db")
                 environment["APP_ENV"] = environment_name
                 environment.pop("FLASK_ENV", None)
                 environment.pop("SECRET_KEY", None)

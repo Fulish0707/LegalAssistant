@@ -1,0 +1,188 @@
+{
+  "date": "2026-10-05",
+  "removed_caches": [
+    {
+      "path": ".ruff_cache",
+      "bytes": 127930
+    },
+    {
+      "path": "__pycache__",
+      "bytes": 539533
+    },
+    {
+      "path": "scripts/__pycache__",
+      "bytes": 170654
+    },
+    {
+      "path": "evals/__pycache__",
+      "bytes": 4045
+    },
+    {
+      "path": ".pytest_cache",
+      "bytes": 5536
+    },
+    {
+      "path": "src/legal_rag/ingestion/__pycache__",
+      "bytes": 76003
+    },
+    {
+      "path": "src/legal_rag/ingestion/normalize/__pycache__",
+      "bytes": 20784
+    },
+    {
+      "path": "src/legal_rag/__pycache__",
+      "bytes": 18904
+    },
+    {
+      "path": "src/legal_rag/config/__pycache__",
+      "bytes": 15785
+    },
+    {
+      "path": "src/legal_rag/verification/__pycache__",
+      "bytes": 20433
+    },
+    {
+      "path": "src/legal_rag/api/__pycache__",
+      "bytes": 12170
+    },
+    {
+      "path": "src/legal_rag/textutil/__pycache__",
+      "bytes": 8704
+    },
+    {
+      "path": "src/legal_rag/rag/__pycache__",
+      "bytes": 44288
+    },
+    {
+      "path": "src/legal_rag/training/__pycache__",
+      "bytes": 83123
+    },
+    {
+      "path": "src/legal_rag/reranking/__pycache__",
+      "bytes": 8281
+    },
+    {
+      "path": "src/legal_rag/evaluation/__pycache__",
+      "bytes": 372203
+    },
+    {
+      "path": "src/legal_rag/embeddings/__pycache__",
+      "bytes": 8452
+    },
+    {
+      "path": "src/legal_rag/schemas/__pycache__",
+      "bytes": 31209
+    },
+    {
+      "path": "src/legal_rag/chunking/__pycache__",
+      "bytes": 60156
+    },
+    {
+      "path": "src/legal_rag/llm/__pycache__",
+      "bytes": 22040
+    },
+    {
+      "path": "src/legal_rag/llm/prompts/__pycache__",
+      "bytes": 746
+    },
+    {
+      "path": "src/legal_rag/retrieval/__pycache__",
+      "bytes": 64005
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/statute-api-pilot-2026-10-01/scripts/__pycache__",
+      "bytes": 5773
+    },
+    {
+      "path": "data/eval/reports/chat_pipeline/reranker-length-2026-10-03/__pycache__",
+      "bytes": 2566
+    },
+    {
+      "path": "data/eval/reports/structural-all-2026-10-03/judge-repair/__pycache__",
+      "bytes": 14501
+    },
+    {
+      "path": "data/eval/reports/domain-prompt-pilot-2026-10-03/__pycache__",
+      "bytes": 19541
+    },
+    {
+      "path": "tests/__pycache__",
+      "bytes": 340907
+    },
+    {
+      "path": "tests/legal_rag/live/__pycache__",
+      "bytes": 7911
+    },
+    {
+      "path": "tests/legal_rag/__pycache__",
+      "bytes": 104157
+    },
+    {
+      "path": "tests/legal_rag/unit/__pycache__",
+      "bytes": 821642
+    },
+    {
+      "path": "tests/legal_rag/training/__pycache__",
+      "bytes": 107184
+    },
+    {
+      "path": "tests/legal_rag/evaluation/__pycache__",
+      "bytes": 745397
+    },
+    {
+      "path": "tests/legal_rag/integration/__pycache__",
+      "bytes": 89470
+    },
+    {
+      "path": "tests/legal_rag/llm/__pycache__",
+      "bytes": 17203
+    }
+  ],
+  "removed_files": [
+    {
+      "path": "package-lock.json",
+      "sha256": "7bd8c7e54fb3f080293466572f451cec57b4010841112cf4e82fe7ac2d58e31e",
+      "reason": "Empty npm packages mapping; root package.json absent"
+    }
+  ],
+  "removed_empty_directories": [
+    "data/data"
+  ],
+  "preserved": "Historical scripts, saved results, manifests, logs, datasets, models and worktrees",
+  "regenerated_caches_at_followup": [
+    "__pycache__",
+    "scripts/__pycache__",
+    "src/legal_rag/ingestion/__pycache__",
+    "src/legal_rag/ingestion/normalize/__pycache__",
+    "src/legal_rag/__pycache__",
+    "src/legal_rag/config/__pycache__",
+    "src/legal_rag/verification/__pycache__",
+    "src/legal_rag/api/__pycache__",
+    "src/legal_rag/textutil/__pycache__",
+    "src/legal_rag/rag/__pycache__",
+    "src/legal_rag/training/__pycache__",
+    "src/legal_rag/reranking/__pycache__",
+    "src/legal_rag/evaluation/__pycache__",
+    "src/legal_rag/embeddings/__pycache__",
+    "src/legal_rag/schemas/__pycache__",
+    "src/legal_rag/chunking/__pycache__",
+    "src/legal_rag/llm/__pycache__",
+    "src/legal_rag/llm/prompts/__pycache__",
+    "src/legal_rag/retrieval/__pycache__",
+    "tests/__pycache__",
+    "tests/legal_rag/live/__pycache__",
+    "tests/legal_rag/__pycache__",
+    "tests/legal_rag/unit/__pycache__",
+    "tests/legal_rag/training/__pycache__",
+    "tests/legal_rag/evaluation/__pycache__",
+    "tests/legal_rag/integration/__pycache__",
+    "tests/legal_rag/llm/__pycache__"
+  ],
+  "preserved_hashes_checked": 68,
+  "source_inspection": {
+    "syntax_compiled_files": 2,
+    "normalized_generation_body_matches_snapshot": true,
+    "http_retry_usage_block_matches_snapshot": true,
+    "tests_or_live_evaluation_run": false
+  }
+}

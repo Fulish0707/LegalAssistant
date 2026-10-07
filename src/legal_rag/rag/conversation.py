@@ -9,6 +9,15 @@ from typing import Protocol
 from legal_rag.schemas import Conversation, Turn
 
 
+def render_turns(turns: list[Turn], *, chars: int = 500) -> list[str]:
+    """One line per turn, each cut to `chars`: enough to resolve "그 신청", not enough to carry an answer."""
+    lines = []
+    for turn in turns:
+        text = " ".join(turn.content.split())
+        lines.append(f"- {'사용자' if turn.role == 'user' else '상담'}: {text[:chars]}{'…' if len(text) > chars else ''}")
+    return lines
+
+
 class ConversationStore(Protocol):
     def get(self, conversation_id: str) -> Conversation: ...
 

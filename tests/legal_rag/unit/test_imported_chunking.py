@@ -8,6 +8,7 @@ from collections import Counter
 import pytest
 
 from legal_rag.chunking.imported import ChunkingOptions, chunk_imported_document
+from legal_rag.chunking.roles import ROLE_LABELS
 from legal_rag.schemas import DocumentType, SourceRef
 from legal_rag.schemas.documents import ImportedDocument
 
@@ -57,7 +58,7 @@ class TestHeaderLine:
         doc = _document(DECISION_TEXT, "patent_trial_decision", id="2011101003196", title="게시 시스템")
         chunks, _ = chunk_imported_document(doc, "ip-v2", OPTS)
         headers = [c.text.split("\n")[0] for c in chunks]
-        assert any("주문·청구취지–2. 판단" in h for h in headers)
+        assert any("1. 기초사실 > 가–나" in h for h in headers)
         assert any(" · " in h for h in headers)
 
 
@@ -72,8 +73,8 @@ class TestSizing:
         chunks, _ = chunk_imported_document(doc, "ip-v2", OPTS)
         merged = [c for c in chunks if "특허출원" in c.text and "거절결정" in c.text]
         assert len(merged) == 1
-        # 주문 is one line, so it rides along; the header states the range it now covers.
-        assert merged[0].text.split("\n")[0].endswith("주문·청구취지–2. 판단")
+        # 가 and 나 share the role of their parent and merge. 주문 and 판단 have other roles and stay apart.
+        assert merged[0].text.split("\n")[0] == "doc-1 상표법 · 1. 기초사실 > 가–나 [역할: 사실관계]"
 
     def test_a_merged_header_never_names_only_one_of_its_sections(self):
         doc = _document(DECISION_TEXT, "patent_trial_decision")
@@ -115,11 +116,11 @@ class TestFallback:
         chunks, report = chunk_imported_document(doc, "ip-v2", OPTS)
         assert not report.parsed and report.reason == "no structure"
         assert len(chunks) > 1
-        assert all(c.text.startswith("doc-1 상표법\n") for c in chunks)
+        assert all(c.text.startswith(f"doc-1 상표법 [역할: {ROLE_LABELS['unknown']}]\n") for c in chunks)
 
     def test_fallback_chunks_still_carry_a_header(self):
         chunks, _ = chunk_imported_document(_document(UNSTRUCTURED, "judgment"), "ip-v2", OPTS)
-        assert chunks[0].text.split("\n")[0] == "doc-1 상표법"
+        assert chunks[0].text.split("\n")[0] == f"doc-1 상표법 [역할: {ROLE_LABELS['unknown']}]"
 
 
 class TestIdentityAndMetadata:
@@ -168,9 +169,8 @@ class TestIdentityAndMetadata:
     def test_section_metadata_holds_the_readable_path(self):
         chunks, _ = chunk_imported_document(_document(DECISION_TEXT, "judgment"), "ip-v2", OPTS)
         sections = [c.metadata.section for c in chunks]
-        assert "주문·청구취지–2. 판단" in sections
-        # 주문 is a single line; it rides with its neighbour instead of standing alone.
-        assert "주문·청구취지" not in sections
+        # Sections of different roles are never merged, so each keeps its own path.
+        assert sections == ["주문·청구취지", "1. 기초사실 > 가–나", "2. 판단"]
 
 
 class TestCoverage:

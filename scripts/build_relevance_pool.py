@@ -63,6 +63,7 @@ def main(
     finally:
         close_legs(hybrid)
     write_pool(output, pool, runs, {
+        'domain': domain,
         'target': str(target.resolve()), 'target_sha256': hashlib.sha256(target.read_bytes()).hexdigest(),
         'qa_file': provenance['qa_file'], 'corpus_version': settings.corpus.version,
         'retrieval_corpora': settings.retrieval.corpora or [settings.corpus.version],

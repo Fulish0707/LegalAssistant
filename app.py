@@ -6,29 +6,22 @@ load_dotenv()
 
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context, g, session
 from langchain_config import (
-    AgentContext,
-    build_agent,
-    extract_agent_sections,
-    SECTION_FIELDS,
-    search_legal_evidence,
     ingest_text_to_vector_store,
     get_knowledge_base_status,
     clear_knowledge_base,
     search_knowledge_base,
     delete_knowledge_base_source,
-    build_run_config,
     tracing_status,
 )
 import logging
 
-from citation_guard import annotate_unsupported, unsupported_citations
+from citation_guard import annotate_figures, annotate_unsupported, named_citations, unsupported_citations
+import legal_backend
 import sqlite3
 import json
 import re
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 import os
 import secrets
-from werkzeug.utils import secure_filename
 import tempfile
 import requests
 from quota import (
@@ -47,15 +40,6 @@ except ModuleNotFoundError:
 
 from llm_prompt import prompt as main_chat_prompt_template
 from llm_model import describe_configuration, get_chat_model
-from statistics_analysis import (
-    ALLOWED_STATISTICS_EXTENSIONS,
-    analyze_dataframe,
-    build_ai_statistics_prompt,
-    build_statistics_knowledge_text,
-    load_table,
-    render_statistics_html,
-)
-from html_sanitizer import sanitize_report_html
 
 # Disable Flask's default request logging for cleaner output if not needed
 log = logging.getLogger('werkzeug')
@@ -85,8 +69,8 @@ app.config["QUOTA_IP_SALT"] = app.config["QUOTA_IP_SALT"] or secret_key
 def establish_anonymous_user():
     """Give every browser one opaque workspace id, carried in the signed cookie.
 
-    This is the only identity in the app: SQL rows, vector filters, the agent's
-    context and its checkpoint thread all key on it. Nothing submitted by the
+    This is the only identity in the app: SQL rows, vector filters and the
+    legal_rag conversation id all key on it. Nothing submitted by the
     client -- query string, JSON, headers, or the old account cookie keys --
     can pick a different owner.
     """
@@ -96,61 +80,17 @@ def establish_anonymous_user():
     # honoured: an old account cookie never recovers that account's records.
     for key in ("authenticated_user_id", "account_email", "auth_next", "oidc_nonce"):
         session.pop(key, None)
-    # Drafts used to live in the cookie itself. Migrate one once, without
-    # overwriting a draft the workspace has already saved server-side.
-    legacy_draft = session.pop("guest_draft", None)
-    if isinstance(legacy_draft, str):
-        connection = get_db()
-        connection.execute(
-            "INSERT OR IGNORE INTO personal_statement (user_id, draft) VALUES (?, ?)",
-            (session["user_id"], legacy_draft),
-        )
-        connection.commit()
 
 DB_FILE = os.getenv("APP_STATE_DB", "sqlite_db/app_state.db") # Define DB_FILE before use
 db_dir = os.path.dirname(DB_FILE)
 if db_dir:
     os.makedirs(db_dir, exist_ok=True)
 
-# The agent's working state, kept deliberately apart from DB_FILE's chat_history
-# table. chat_history is the display record the UI renders; this is what the agent
-# actually reasons over between turns. Unifying them would mean the renderer and
-# the model share one schema, and they do not: the checkpointer stores tool calls,
-# tool results and structured-output messages the UI never shows.
-CHECKPOINT_DB_FILE = os.getenv("AGENT_CHECKPOINT_DB", "sqlite_db/checkpoints.db")
-checkpoint_db_dir = os.path.dirname(CHECKPOINT_DB_FILE)
-if checkpoint_db_dir:
-    os.makedirs(checkpoint_db_dir, exist_ok=True)
-
-
-def build_checkpointer():
-    """One long-lived SqliteSaver over one connection, shared by every request.
-
-    Not SqliteSaver.from_conn_string(): that is a context manager which closes the
-    connection on exit, which is right for a test and wrong for a process that must
-    keep it open. check_same_thread=False is not optional either -- Flask runs the
-    streaming generator on a different thread from the one that opens this
-    connection, and without it the first streamed request raises a thread-affinity
-    error from sqlite3.
-    """
-    from langgraph.checkpoint.sqlite import SqliteSaver
-
-    connection = sqlite3.connect(CHECKPOINT_DB_FILE, check_same_thread=False)
-    connection.execute("PRAGMA busy_timeout = 5000")
-    return SqliteSaver(connection)
-
-
-CHECKPOINTER = build_checkpointer()
-
 def ensure_database_schema(conn):
     cursor = conn.cursor()
-    statement_columns = {row[1] for row in cursor.execute("PRAGMA table_info(personal_statement)")}
-    if statement_columns and "user_id" not in statement_columns:
-        cursor.execute("ALTER TABLE personal_statement RENAME TO personal_statement_legacy")
     chat_columns = {row[1] for row in cursor.execute("PRAGMA table_info(chat_history)")}
     if chat_columns and "user_id" not in chat_columns:
         cursor.execute("ALTER TABLE chat_history RENAME TO chat_history_legacy")
-    cursor.execute("CREATE TABLE IF NOT EXISTS personal_statement (user_id TEXT PRIMARY KEY, draft TEXT NOT NULL DEFAULT '')")
     cursor.execute("CREATE TABLE IF NOT EXISTS chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_user_id_id ON chat_history(user_id, id)")
     # The Google-era users table is no longer created. Existing installs keep
@@ -166,11 +106,6 @@ def ensure_database_schema(conn):
             PRIMARY KEY (identity_kind, identity_value, quota_day)
         )
     """)
-    if cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='personal_statement_legacy'").fetchone():
-        row = cursor.execute("SELECT draft FROM personal_statement_legacy WHERE id=1").fetchone()
-        if row:
-            cursor.execute("INSERT OR IGNORE INTO personal_statement (user_id, draft) VALUES ('legacy-unassigned', ?)", (row[0],))
-        cursor.execute("DROP TABLE personal_statement_legacy")
     if cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='chat_history_legacy'").fetchone():
         cursor.execute("INSERT INTO chat_history (user_id, role, content, timestamp) SELECT 'legacy-unassigned', role, content, timestamp FROM chat_history_legacy")
         cursor.execute("DROP TABLE chat_history_legacy")
@@ -207,19 +142,6 @@ def init_db():
         # For standalone init, explicitly closing is safer if not within app context management
         # but since we used `with app.app_context()`, `close_connection` will be triggered.
 
-
-def get_personal_statement_from_db(user_id):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT draft FROM personal_statement WHERE user_id=?', (user_id,))
-    row = c.fetchone()
-    return row['draft'] if row else ""
-
-def set_personal_statement_in_db(user_id, draft):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('INSERT INTO personal_statement (user_id, draft) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET draft=excluded.draft', (user_id, draft))
-    conn.commit()
 
 def get_chat_history_from_db(user_id):
     conn = get_db()
@@ -262,254 +184,6 @@ def quota_exceeded_response(result: QuotaResult):
 
 
 # --- Text Cleaning Utility ---
-def clean_agent_output(text_content):
-    if not text_content:
-        return ""
-    
-    # Remove ANSI escape codes
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    cleaned_text = ansi_escape.sub('', text_content)
-
-    # Remove Markdown code blocks (```text``` or ```lang\ntext\n```)
-    # This regex looks for ``` followed by an optional language, then newline, then content, then newline, then ```
-    # Or ``` followed by content then ```
-    # It captures the content in between.
-    
-    # Pattern for ```lang\ncontent\n``` (multiline with language)
-    # and ```\ncontent\n``` (multiline without language)
-    multiline_code_block_pattern = re.compile(r"^```(?:[a-zA-Z]*)?\n(.*?)\n```$", re.DOTALL | re.MULTILINE)
-    
-    # Pattern for ```content``` (inline)
-    inline_code_block_pattern = re.compile(r"^```(.*?)```$", re.DOTALL | re.MULTILINE)
-
-    match = multiline_code_block_pattern.match(cleaned_text)
-    if match:
-        # For multiline blocks, we want the content inside
-        cleaned_text = match.group(1)
-    else:
-        # Check for inline blocks if multiline didn't match
-        match = inline_code_block_pattern.match(cleaned_text)
-        if match:
-            cleaned_text = match.group(1)
-            
-    return cleaned_text.strip()
-
-def parse_agent_output_sections(text_content):
-    """Split model output into user-facing chat and writing/report suggestions."""
-    section_names = [
-        "CHAT",
-        "STATEMENT_SUGGESTION",
-        "JOB_STATEMENT_SUGGESTION",
-        "REPORT_SUGGESTION",
-    ]
-    parsed = {name: "" for name in section_names}
-    if not text_content:
-        return {
-            "chat_response": "",
-            "statement_suggestion": "",
-            "job_statement_suggestion": "",
-            "report_suggestion": "",
-        }
-
-    section_pattern = re.compile(
-        r"\[(CHAT|STATEMENT_SUGGESTION|JOB_STATEMENT_SUGGESTION|REPORT_SUGGESTION)\]",
-        re.IGNORECASE,
-    )
-    matches = list(section_pattern.finditer(text_content))
-    if not matches:
-        return {
-            "chat_response": text_content.strip(),
-            "statement_suggestion": "",
-            "job_statement_suggestion": "",
-            "report_suggestion": "",
-        }
-
-    for index, match in enumerate(matches):
-        name = match.group(1).upper()
-        start = match.end()
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text_content)
-        parsed[name] = text_content[start:end].strip()
-
-    chat_response = parsed["CHAT"].strip()
-    if not chat_response:
-        chat_response = text_content[:matches[0].start()].strip()
-    if not chat_response:
-        chat_response = "I prepared suggestions for your document."
-
-    return {
-        "chat_response": chat_response,
-        "statement_suggestion": parsed["STATEMENT_SUGGESTION"].strip(),
-        "job_statement_suggestion": parsed["JOB_STATEMENT_SUGGESTION"].strip(),
-        "report_suggestion": parsed["REPORT_SUGGESTION"].strip(),
-    }
-
-# --- Streaming helpers ---
-
-DRAFT_CONTEXT_HEADER = "[Current Draft Context]"
-
-_THINK_OPEN = "<think>"
-_THINK_CLOSE = "</think>"
-
-
-def _message_text(content):
-    """Normalise a message's content to a plain string.
-
-    ChatOllama with reasoning enabled can hand back a list of content blocks
-    rather than a str; json.dumps-ing that straight to the browser arrives as
-    "[object Object]" because the frontend does `streamed += data.content`. Only
-    text blocks are visible answer; reasoning blocks are dropped here.
-    """
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("type") == "text":
-                parts.append(block.get("text") or "")
-        return "".join(parts)
-    return ""
-
-
-def _tail_prefix_length(text, tag):
-    """Length of the longest suffix of text that is a proper prefix of tag."""
-    for size in range(min(len(text), len(tag) - 1), 0, -1):
-        if text.endswith(tag[:size]):
-            return size
-    return 0
-
-
-_SECTION_LABEL = re.compile(r'\**"?(' + "|".join(SECTION_FIELDS) + r')"?\**\s*:')
-
-
-def _could_become_section_label(text):
-    """True while text is still a prefix of a `key:` label, so the gate must wait."""
-    core = text.lstrip('*"')
-    for key in SECTION_FIELDS:
-        if key.startswith(core):
-            return True
-        if core.startswith(key) and re.fullmatch(r'"?\**\s*', core[len(key):]):
-            return True
-    return False
-
-
-class _AnswerTokenFilter:
-    """Decide once, per model call, whether a message stream is visible answer.
-
-    Two things must never reach the browser as answer tokens. Reasoning, which
-    some models emit inline as <think>...</think>, is stripped wherever it appears.
-    Schema JSON can appear in message content instead of a structured tool call;
-    its field names and delimiters must not reach users as answer tokens.
-
-    The gate is deliberately decide-once rather than an incremental JSON parser.
-    The frontend overwrites the streamed text with final_response.chat_response
-    anyway, so a partial-JSON extractor would buy progressive reveal at the cost
-    of a new class of leak (escapes, keys split across chunks, braces inside a
-    value). Here the first non-whitespace character settles it: `{` or a code
-    fence means structured output, and nothing from that message is streamed.
-    The sections still arrive, once, in final_response.
-    """
-
-    def __init__(self):
-        self._pending = ""
-        self._in_think = False
-        self._decided = False
-        self._suppressed = False
-        self._head = ""
-
-    def feed(self, text):
-        if not text:
-            return ""
-        self._pending += text
-        visible = []
-        while self._pending:
-            if self._in_think:
-                index = self._pending.find(_THINK_CLOSE)
-                if index == -1:
-                    keep = _tail_prefix_length(self._pending, _THINK_CLOSE)
-                    self._pending = self._pending[len(self._pending) - keep:] if keep else ""
-                    break
-                self._pending = self._pending[index + len(_THINK_CLOSE):]
-                self._in_think = False
-                continue
-            index = self._pending.find(_THINK_OPEN)
-            if index == -1:
-                keep = _tail_prefix_length(self._pending, _THINK_OPEN)
-                cut = len(self._pending) - keep
-                if cut:
-                    visible.append(self._pending[:cut])
-                self._pending = self._pending[cut:]
-                break
-            visible.append(self._pending[:index])
-            self._pending = self._pending[index + len(_THINK_OPEN):]
-            self._in_think = True
-        return self._gate("".join(visible))
-
-    def flush(self):
-        """Emit whatever was held back waiting on a possible tag or label boundary."""
-        if self._in_think:
-            self._pending = ""
-            return ""
-        remainder, self._pending = self._pending, ""
-        emitted = self._gate(remainder)
-        if not self._decided and not self._suppressed and self._head:
-            # The message ended while still looking like the start of a label.
-            emitted, self._head = emitted + self._head, ""
-        return emitted
-
-    def _gate(self, text):
-        if self._suppressed or not text:
-            return ""
-        if self._decided:
-            return text
-        self._head += text
-        stripped = self._head.lstrip()
-        if not stripped:
-            return ""
-        if stripped[0] in "{`" or _SECTION_LABEL.match(stripped):
-            self._suppressed = True
-            self._head = ""
-            return ""
-        if _could_become_section_label(stripped):
-            return ""
-        self._decided = True
-        emitted, self._head = self._head, ""
-        return emitted
-
-
-def _tool_activity(node, update):
-    """One short trace line per tool result, mirroring the old on_tool_end.
-
-    The frontend shows only the newest trace line while a turn is in flight, and
-    the surrounding UI is Korean, so these are written for a reader rather than
-    emitted as raw node names.
-    """
-    lines = []
-    messages = (update or {}).get("messages") if isinstance(update, dict) else None
-    for message in messages or []:
-        if not isinstance(message, ToolMessage):
-            continue
-        output = clean_agent_output(_message_text(message.content))
-        if len(output) > 200:
-            output = output[:200] + "..."
-        name = getattr(message, "name", None) or "tool"
-        lines.append(f"도구 결과 ({name}): {output}" if output else f"도구 실행: {name}")
-    if lines:
-        return lines
-    return ["답변 생성 중" if node == "model" else f"단계: {node}"]
-
-
-def _tool_sources(update):
-    """Structured retrieval hits a tool attached to its ToolMessage.artifact."""
-    sources = []
-    messages = (update or {}).get("messages") if isinstance(update, dict) else None
-    for message in messages or []:
-        if isinstance(message, ToolMessage) and isinstance(message.artifact, list):
-            sources.extend(hit for hit in message.artifact if isinstance(hit, dict))
-    return sources
-
-
 _SMALL_TALK = re.compile(r"^(?:안녕|반가|고마|감사|수고|ㅎㅇ|hi|hello|thanks?|thank you|bye)", re.IGNORECASE)
 
 
@@ -521,66 +195,70 @@ def _needs_legal_search(text):
     return not (_SMALL_TALK.match(stripped) and len(stripped) <= 20)
 
 
-def _draft_is_already_in_thread(agent, run_config, draft):
-    """True when the thread's last user turn already carried this exact draft.
-
-    The draft used to be appended to every user message. That was harmless while
-    turns were stateless, but the thread is persisted now, so turn N carried N
-    copies of the draft into the model's context window. The fix keeps the draft in
-    the message (the model needs it inline; the system prompt is static and the
-    typed context is not interpolated into it) but sends it only when it changed.
-
-    The thread itself is the source of truth, not a process-local cache: multiple
-    workers would each hold a different one. A workspace whose thread has no
-    state yet (its first turn) always gets the draft.
-    """
-    if not draft:
-        return True
-    if "thread_id" not in (run_config.get("configurable") or {}):
-        return False
-    try:
-        state = agent.get_state(run_config)
-    except Exception:
-        logging.debug("Could not read thread state for draft de-duplication", exc_info=True)
-        return False
-    messages = (getattr(state, "values", None) or {}).get("messages") or []
-    # Scan back to the most recent turn that actually carried a draft, not merely
-    # the most recent user turn: once a draft is skipped, the latest user message
-    # has no draft in it, and comparing against that would re-send on every other
-    # turn -- half-rate accumulation is still accumulation.
-    for message in reversed(messages):
-        if isinstance(message, HumanMessage):
-            content = _message_text(message.content)
-            if DRAFT_CONTEXT_HEADER in content:
-                carried = content.split(DRAFT_CONTEXT_HEADER, 1)[1].strip()
-                return carried == draft.strip()
-    return False
-
-
 def _sse(payload):
     return f"data: {json.dumps(payload)}\n\n"
 
 
 # --- Flask Routes ---
 
-def _generate_agent_response_stream(user_input, current_personal_statement_draft):
-    """Stream a chat turn as SSE events from the LangGraph agent's own stream.
+GREETING_REPLY = "안녕하세요. 법률 관련 궁금한 점을 구체적으로 적어 주시면 법령과 판례를 찾아 안내해 드리겠습니다."
+LEGAL_BACKEND_UNSET = "법률 답변 서비스가 설정되지 않았습니다. LEGAL_RAG_URL을 설정한 뒤 다시 시작하세요."
+LEGAL_BACKEND_DOWN = "법률 답변 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."
 
-    The old producer pushed AgentExecutor callbacks (on_agent_action,
-    on_tool_end, on_agent_finish) into a queue. Those callbacks never fire under
-    create_agent, and the drain loop also broke on the first on_llm_end, which in
-    a tool loop discarded the final turn. Iterating agent.stream() to exhaustion
-    replaces both.
+
+def _legal_conversation_id():
+    """The browser's workspace id plus an epoch that clearing the chat advances.
+
+    legal_rag keeps recent turns per conversation id and has no call to forget them,
+    so a cleared chat continues under a new id instead.
+    """
+    return f"{session['user_id']}-{session.get('conversation_epoch', 0)}"
+
+
+# Passages of the user's files sent with a turn. Three of 1,000 characters add about 2,700
+# tokens to the answer prompt: up to 9,250 on the longest-evidence questions, which with 2,048
+# output tokens fits the 12,288 context (2026-10-06). /v1/chat accepts at most three.
+CASE_DOCUMENT_LIMIT = min(int(os.getenv("CASE_DOCUMENT_LIMIT", "3")), 3)
+CASE_DOCUMENT_CHARS = int(os.getenv("CASE_DOCUMENT_CHARS", "1000"))
+# One lease against eight questions (bge-m3, 2026-10-06): four about the lease scored 0.52,
+# 0.38, 0.34 and 0.17 (a short follow-up), four about other matters 0.21, 0.21, 0.14, 0.12.
+CASE_DOCUMENT_MIN_SCORE = float(os.getenv("CASE_DOCUMENT_MIN_SCORE", "0.25"))
+# A message this short (characters without spaces) is taken for a follow-up and searched
+# together with the question before it. One lease, 59 pairs (bge-m3, 2026-10-06): follow-ups
+# of 9 to 11 characters reached the floor on 6 of 15 alone and 15 of 15 joined, and after a
+# question on another matter on 8 of 20 alone and 0 of 20 joined. Full questions of 15
+# characters or more are searched alone: joined, a new topic kept the lease on 10 of 12.
+# data/eval/reports/chat_pipeline/context-budget-2026-10-06/followup-scores.json.
+FOLLOW_UP_CHARS = 12
+
+
+def _document_query(user_input):
+    if len("".join(user_input.split())) > FOLLOW_UP_CHARS:
+        return user_input
+    asked = [turn["content"] for turn in get_chat_history_from_db(session["user_id"]) if turn["role"] == "user"]
+    if asked and asked[-1] == user_input:  # POST /chat stored this message before the stream began
+        asked.pop()
+    return f"{asked[-1]}\n{user_input}" if asked else user_input
+
+
+def _case_documents(user_input):
+    """Passages of this browser's uploaded files that are closest to the message."""
+    found = search_knowledge_base(session["user_id"], _document_query(user_input), k=CASE_DOCUMENT_LIMIT)
+    return [{"name": hit["source"], "text": hit["quote"][:CASE_DOCUMENT_CHARS], "score": hit["score"]}
+            for hit in found.get("results", []) if hit.get("quote") and hit["score"] >= CASE_DOCUMENT_MIN_SCORE]
+
+
+def _generate_legal_response_stream(user_input):
+    """Stream a chat turn as SSE events; legal_rag's /v1/chat writes the answer.
+
+    The service retrieves, generates and verifies, so the reply arrives whole and
+    there are no token chunks. There is no fallback to a local model: an answer that
+    skipped verification must not look like one that passed it.
     """
     try:
-        # thread_id is the browser's own workspace id and nothing else: the same
-        # opaque session token that owns its SQL rows and vector chunks. Two
-        # browsers therefore cannot land in one thread, and one browser always
-        # returns to its own.
-        thread_user_id = session["user_id"]
-        agent = build_agent(thread_user_id, checkpointer=CHECKPOINTER)
-        if agent is None:
-            yield _sse({'type': 'error', 'content': 'AI chat is not configured. Set LLM_PROVIDER and start Ollama, then restart the app.'})
+        legal_rag_url = os.getenv("LEGAL_RAG_URL", "").strip()
+        if not legal_rag_url:
+            yield _sse({'type': 'error', 'content': LEGAL_BACKEND_UNSET})
             return
 
         quota_result = reserve_ai_request()
@@ -588,112 +266,40 @@ def _generate_agent_response_stream(user_input, current_personal_statement_draft
             yield _sse({'type': 'error', 'content': 'Daily AI request quota exceeded.', 'error': 'daily_ai_quota_exceeded', 'limit': quota_result.limit})
             return
 
-        # Metadata and tags ride on the runnable config, which is how LangChain
-        # gets them onto the LangSmith run, and configurable.thread_id is what
-        # the checkpointer keys on.
-        run_config = build_run_config(thread_user_id)
+        if _needs_legal_search(user_input):
+            yield _sse({'type': 'thought', 'content': '법령·판례 검색 및 답변 작성 중'})
+            documents = _case_documents(user_input)
+            if documents:
+                yield _sse({'type': 'thought', 'content': f'사건 자료 {len(documents)}건 참고'})
+            body = legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id(), documents)
+            chat_response, sources = legal_backend.render(body, documents)
+            questions = legal_backend.questions(body)
+            yield _sse({'type': 'thought', 'content': f'근거 {len(sources)}건 확인'})
+            # Second check on the shown text, whatever the service's verifier decided. It reads
+            # the full evidence; the source cards carry only an excerpt. Of the user's documents it
+            # reads what they cite by name; their own clause numbers vouch only for a bare 제5조.
+            # What the last answers cited (prior_refs) may be repeated, as the service allows.
+            document_citations = [citation for d in documents for citation in named_citations(d["text"])]
+            evidence_texts = [user_input, *document_citations, *body.get("prior_refs", [])] + legal_backend.evidence_texts(body)
+            missing = unsupported_citations(chat_response, evidence_texts, own_clauses=[d["text"] for d in documents])
+            chat_response = annotate_figures(annotate_unsupported(chat_response, missing))
+        else:
+            chat_response, sources, questions = GREETING_REPLY, [], []
 
-        # Only the new turn goes in. The checkpointer replays the thread's earlier
-        # messages, so passing history here as well would duplicate every turn.
-        agent_prompt = user_input
-        if current_personal_statement_draft and not _draft_is_already_in_thread(
-            agent, run_config, current_personal_statement_draft
-        ):
-            agent_prompt += f"\n\n{DRAFT_CONTEXT_HEADER}\n{current_personal_statement_draft}"
-
-        final_state = None
-        sources = []
-        # Search statutes and case law before the model runs. Left to the model,
-        # qwen3:4b skipped the search and invented a deadline (2026-09-27).
-        legal_evidence = ""
-        legal_rag_url = os.getenv("LEGAL_RAG_URL", "").strip()
-        if legal_rag_url and _needs_legal_search(user_input):
-            yield _sse({'type': 'thought', 'content': '법령·판례 검색 중'})
-            legal_evidence, hits = search_legal_evidence(legal_rag_url, user_input)
-            sources.extend(hits)
-            yield _sse({'type': 'thought', 'content': f'법령·판례 {len(hits)}건 확인'})
-        filters = {}
-        buffer = ""
-        for mode, chunk in agent.stream(
-            {"messages": [("user", agent_prompt)]},
-            run_config,
-            context=AgentContext(user_id=thread_user_id, legal_evidence=legal_evidence),
-            stream_mode=["messages", "updates", "values"],
-        ):
-            if mode == "messages":
-                message = chunk[0] if isinstance(chunk, tuple) else chunk
-                # ToolMessages ride this same channel; RAG hits are trace, not answer.
-                if not isinstance(message, AIMessage):
-                    if isinstance(message, ToolMessage):
-                        # A tool result always separates two model calls, so it is a
-                        # safe place to retire the per-call filters. Verified that
-                        # ChatOllama gives each call a distinct chunk id, but this
-                        # keeps the id-less fallback key from being shared across
-                        # calls, which would let prose in call 1 open the gate for
-                        # the schema JSON in call 2.
-                        for retired in filters.values():
-                            buffer += retired.flush()
-                        filters.clear()
-                    continue
-                key = getattr(message, "id", None) or "default"
-                token_filter = filters.get(key)
-                if token_filter is None:
-                    token_filter = filters[key] = _AnswerTokenFilter()
-                visible = token_filter.feed(_message_text(getattr(message, "content", "")))
-                if visible:
-                    buffer += visible
-                    if len(buffer) >= 20 or any(p in visible for p in ('.', '!', '?', '\n', ' ')):
-                        yield _sse({'type': 'token_chunk', 'content': buffer})
-                        buffer = ""
-            elif mode == "updates":
-                for node, update in (chunk or {}).items():
-                    sources.extend(_tool_sources(update))
-                    for line in _tool_activity(node, update):
-                        yield _sse({'type': 'thought', 'content': line})
-            elif mode == "values":
-                final_state = chunk
-
-        for token_filter in filters.values():
-            buffer += token_filter.flush()
-        if buffer:
-            yield _sse({'type': 'token_chunk', 'content': buffer})
-
-        # Preferred route: the schema-enforced sections, from structured_response
-        # or from JSON in the final message content. Falls back
-        # to the legacy [CHAT] marker parser when neither is available.
-        parsed_sections = extract_agent_sections(final_state)
-        if parsed_sections is None:
-            messages = (final_state or {}).get("messages") or []
-            agent_output_string = getattr(messages[-1], "content", "") if messages else ""
-            cleaned_agent_output_string = clean_agent_output(_message_text(agent_output_string))
-            parsed_sections = parse_agent_output_sections(cleaned_agent_output_string)
-            if not agent_output_string:
-                print(f"Warning: Agent returned no final message. Full response object: {final_state}")
-            elif not cleaned_agent_output_string:
-                print(f"Warning: Agent output became empty after cleaning. Original: '{agent_output_string}'")
-        parsed_chat_response = parsed_sections["chat_response"] if parsed_sections["chat_response"] else "Sorry, I couldn't generate a response."
-        # Citations the evidence does not back get a visible notice, whatever the model did.
-        evidence_texts = [legal_evidence, user_input, current_personal_statement_draft]
-        evidence_texts += [f"{hit.get('source', '')} {hit.get('quote', '')}" for hit in sources]
-        parsed_chat_response = annotate_unsupported(
-            parsed_chat_response, unsupported_citations(parsed_chat_response, evidence_texts)
-        )
-
-        add_chat_message_to_db(thread_user_id, "assistant", parsed_chat_response)
-
-        final_data = {
+        add_chat_message_to_db(session["user_id"], "assistant", chat_response)
+        yield _sse({
             "type": "final_response",
-            "chat_response": parsed_chat_response,
-            "statement_suggestion": parsed_sections["statement_suggestion"],
-            "job_statement_suggestion": parsed_sections["job_statement_suggestion"],
-            "report_suggestion": parsed_sections["report_suggestion"],
+            "chat_response": chat_response,
             "sources": sources,
-            "current_draft_processed": current_personal_statement_draft
-        }
-        yield _sse(final_data)
+            "questions": questions,
+        })
 
-    except Exception as e:
-        logging.exception("Error during AI processing stream (_generate_agent_response_stream)")
+    except legal_backend.LegalBackendUnavailable:
+        logging.exception("legal_rag /v1/chat is unavailable")
+        add_chat_message_to_db(session["user_id"], "assistant", LEGAL_BACKEND_DOWN)
+        yield _sse({'type': 'error', 'content': LEGAL_BACKEND_DOWN})
+    except Exception:
+        logging.exception("Error during AI processing stream (_generate_legal_response_stream)")
         error_response_content = "An error occurred while processing your request. Please check server logs."
         add_chat_message_to_db(session["user_id"], "assistant", error_response_content)
         yield _sse({'type': 'error', 'content': error_response_content})
@@ -746,7 +352,6 @@ def health():
     payload = {
         "status": "ok",
         "llm_configured": llm_available,
-        "agent_configured": llm_available,
         "llm_provider": None,
         "embedding_provider": None,
         "collection": None,
@@ -773,7 +378,6 @@ def chat():
     if request.method == 'POST':
         data = request.get_json(silent=True) or {}
         user_input = data.get('message')
-        current_personal_statement_draft = data.get('personal_statement_draft', '')
 
         if not user_input:
             return jsonify({"error": "No message provided"}), 400
@@ -786,7 +390,6 @@ def chat():
     elif request.method == 'GET':
         # For SSE, data comes from query parameters
         user_input = request.args.get('message')
-        current_personal_statement_draft = request.args.get('personal_statement_draft', '')
 
         if not user_input:
             # SSE requires a specific format for errors if connection is established
@@ -800,7 +403,7 @@ def chat():
         # If GET is called without a preceding POST, this could lead to inconsistencies
         # in chat history if not handled carefully. The current frontend flow (POST then GET) is assumed.
 
-        return Response(stream_with_context(_generate_agent_response_stream(user_input, current_personal_statement_draft)), mimetype='text/event-stream')
+        return Response(stream_with_context(_generate_legal_response_stream(user_input)), mimetype='text/event-stream')
 
     # Fallback to satisfy type checkers: ensure the route always returns a valid response
     return jsonify({"error": "Invalid request method."}), 405
@@ -809,61 +412,8 @@ def chat():
 def get_initial_state():
     user_id = session["user_id"]
     return jsonify({
-        "personal_statement_draft": get_personal_statement_from_db(user_id),
         "chat_history": get_chat_history_from_db(user_id)
     })
-
-@app.route('/update_statement', methods=['POST'])
-def update_statement():
-    data = request.get_json(silent=True) or {}
-    new_draft = data.get('personal_statement_draft')
-    if new_draft is None: # Check for None, as empty string is a valid draft
-        return jsonify({"error": "No personal_statement_draft provided"}), 400
-    
-    try:
-        set_personal_statement_in_db(session["user_id"], new_draft)
-        return jsonify({"message": "Personal statement updated successfully."}), 200
-    except Exception as e:
-        logging.exception("Error updating personal statement in DB")
-        return jsonify({"error": "Failed to update personal statement."}), 500
-
-@app.route('/get_similar_chats', methods=['POST']) # This seems more like a debug/utility endpoint
-def get_similar_chats_route(): # Renamed to avoid conflict with internal var
-    data = request.get_json(silent=True) or {}
-    query = data.get('query', '')
-    if not query:
-        return jsonify({"error": "No query provided"}), 400
-
-    user_id = session["user_id"]
-    conn = get_db()
-    c = conn.cursor()
-    # Example: find chats containing the query text, excluding very recent ones to avoid self-match
-    c.execute('''
-        SELECT role, content, timestamp
-        FROM chat_history
-        WHERE user_id=? AND content LIKE ? AND timestamp < datetime('now', '-5 seconds')
-        ORDER BY timestamp DESC
-        LIMIT 5
-    ''', (user_id, f'%{query}%'))
-    similar_chats = [{"role": row["role"], "content": row["content"], "timestamp": row["timestamp"]}
-                     for row in c.fetchall()]
-
-    return jsonify({"similar_chats": similar_chats})
-
-
-def clear_agent_thread(user_id):
-    """Drop the agent's checkpointed thread when the display history is cleared.
-
-    These two stores are separate, but a user clearing their history means one
-    thing, not two: a user who clears the transcript and then finds the agent still
-    quoting it back would call that a bug, correctly. Failures here are logged and
-    swallowed -- clearing the record the user can see is this endpoint's job, and it
-    must not 500 because the checkpoint store is unhappy.
-    """
-    try:
-        CHECKPOINTER.delete_thread(user_id)
-    except Exception as error:
-        logging.warning(f"Could not clear the agent thread for {user_id}: {error}")
 
 
 @app.route('/clear_chat_history_endpoint', methods=['POST']) # Added specific endpoint name
@@ -871,7 +421,7 @@ def clear_chat_history_endpoint():
     try:
         user_id = session["user_id"]
         clear_chat_history_in_db(user_id)
-        clear_agent_thread(user_id)
+        session["conversation_epoch"] = session.get("conversation_epoch", 0) + 1
         return jsonify({"message": "Chat history cleared successfully."}), 200
     except Exception as e:
         logging.error(f"Error clearing chat history: {e}")
@@ -909,14 +459,6 @@ def delete_knowledge_base_source_route():
     return jsonify(result), 200 if result.get("ok") else 500
 
 
-def application_setup():
-    """Encapsulates setup that should happen in the worker process."""
-    print("--- Worker Process Setup ---")
-    print("Initializing DB...")
-    init_db()
-    # Add any other one-time initializations for the worker here
-    print("--- Worker Process Setup Complete ---")
-
 #################################################
 # --- File Upload Configuration (for OCR) --- #
 #################################################
@@ -933,165 +475,65 @@ def allowed_file(filename, allowed_extensions):
            filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
 
-@app.route('/statistics/analyze', methods=['POST'])
-def analyze_statistics_route():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part"}), 400
-
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
-
-    if not allowed_file(file.filename, ALLOWED_STATISTICS_EXTENSIONS):
-        return jsonify({"error": "File type not allowed. Upload CSV, TSV, or XLSX."}), 400
-
-    filename = secure_filename(file.filename)
-    file_extension = filename.rsplit('.', 1)[1].lower()
-    user_question = request.form.get('question', '')
-    add_to_knowledge_base = request.form.get('add_to_knowledge_base', '').lower() in {'1', 'true', 'yes', 'on'}
-    temp_file_path = None
-
-    try:
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            dir=app.config['UPLOAD_FOLDER'],
-            suffix=os.path.splitext(filename)[1],
-        ) as temp_file_obj:
-            temp_file_path = temp_file_obj.name
-            file.save(temp_file_obj)
-
-        dataframe = load_table(temp_file_path, file_extension)
-        analysis = analyze_dataframe(dataframe)
-
-        llm = get_chat_model()
-        ai_insight = None
-        if llm is not None:
-            prompt_text = build_ai_statistics_prompt(filename, analysis, user_question)
-            quota_result = reserve_ai_request()
-            if not quota_result.allowed:
-                return quota_exceeded_response(quota_result)
-            ai_response = llm.invoke(prompt_text)
-            ai_insight = sanitize_report_html(getattr(ai_response, "content", str(ai_response)))
-
-        report_html = sanitize_report_html(render_statistics_html(
-            filename=filename,
-            analysis=analysis,
-            ai_insight=ai_insight,
-            ai_enabled=llm is not None,
-        ))
-
-        response_payload = {
-            "report_html": report_html,
-            "analysis": analysis,
-            "ai_enabled": llm is not None,
-            "filename": filename,
-        }
-
-        if add_to_knowledge_base:
-            response_payload["knowledge_base"] = ingest_text_to_vector_store(
-                text=build_statistics_knowledge_text(filename, analysis, ai_insight),
-                source_name=filename,
-                metadata={
-                    "analysis_type": "statistics",
-                    "uploaded_via": "statistics_workspace",
-                }, user_id=session["user_id"],
-            )
-
-        return jsonify(response_payload), 200
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        app.logger.error(f"Unhandled error in analyze_statistics_route for {filename}: {str(e)}", exc_info=True)
-        return jsonify({"error": f"An unexpected server error occurred during statistics analysis: {str(e)}"}), 500
-    finally:
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.remove(temp_file_path)
-            except Exception as e_clean:
-                app.logger.error(f"Error cleaning up temp file {temp_file_path}: {e_clean}")
-
-# --- OCR Processing Route (Existing) ---
 @app.route('/process_document_ocr', methods=['POST'])
 def process_document_ocr():
     if llm_ocr is None:
-        return jsonify({
-            "error": "OCR processing requires optional OCR dependencies such as pytesseract."
-        }), 503
+        return jsonify({"error": "OCR processing requires optional OCR dependencies such as pytesseract."}), 503
     llm = get_chat_model()
     if llm is None:
-        return jsonify({
-            "error": "Document analysis requires an LLM provider to be configured."
-        }), 503
+        return jsonify({"error": "Document analysis requires an LLM provider to be configured."}), 503
 
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
     file = request.files['file']
-    user_instructions = request.form.get('user_instructions', '')
     analysis_mode = request.form.get('analysis_mode', 'report')
-    question = request.form.get('question', '')
     add_to_knowledge_base = request.form.get('add_to_knowledge_base', '').lower() in {'1', 'true', 'yes', 'on'}
 
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
-
     if not allowed_file(file.filename, ALLOWED_EXTENSIONS_OCR):
         return jsonify({"error": "File type not allowed for OCR"}), 400
 
-    filename = secure_filename(file.filename)
-    temp_file_path = None  # Initialize to ensure it's defined for the finally block
-
+    # The name is only a label and the temp file gets a random one, so it needs no sanitising
+    # beyond dropping any path. secure_filename would drop Hangul and leave "txt".
+    filename = os.path.basename(file.filename.replace("\\", "/"))
+    extension = filename.rsplit('.', 1)[1].lower()
+    temp_file_path = None
     try:
-        # Create a temporary file to save the upload
-        # Using 'with' ensures the file handle is closed even if errors occur during creation/saving
-        with tempfile.NamedTemporaryFile(delete=False, dir=app.config['UPLOAD_FOLDER'], 
-                                         suffix=os.path.splitext(filename)[1]) as temp_file_obj:
-            temp_file_path = temp_file_obj.name
-            file.save(temp_file_obj) # Save the uploaded file object to the temp file
-
-        # At this point, temp_file_obj is closed, and the file is saved at temp_file_path
-        file_extension = filename.rsplit('.', 1)[1].lower()
+        with tempfile.NamedTemporaryFile(delete=False, dir=app.config['UPLOAD_FOLDER'],
+                                         suffix="." + extension) as temp_file:
+            temp_file_path = temp_file.name
+            file.save(temp_file)
 
         result_dict, status_code = llm_ocr.analyze_document(
             file_path=temp_file_path,
-            file_extension=file_extension,
-            user_instructions=user_instructions,
-            llm=llm, # Passed from app.py's imports
-            prompt_template=main_chat_prompt_template, # Passed from app.py's imports
-            logger=app.logger, # Pass Flask app's logger
+            file_extension=extension,
+            user_instructions=request.form.get('user_instructions', ''),
+            llm=llm,
+            prompt_template=main_chat_prompt_template,
+            logger=app.logger,
             analysis_mode=analysis_mode,
-            question=question,
+            question=request.form.get('question', ''),
             include_extracted_text=add_to_knowledge_base,
             quota_reserver=reserve_ai_request,
         )
-
         if status_code == 429 and result_dict.get("error") == "daily_ai_quota_exceeded":
             return quota_exceeded_response(result_dict["quota_result"])
-
         if status_code == 200 and add_to_knowledge_base:
-            extracted_text = result_dict.pop("extracted_text", "")
-            ingestion_result = ingest_text_to_vector_store(
-                text=extracted_text,
+            result_dict["knowledge_base"] = ingest_text_to_vector_store(
+                text=result_dict.pop("extracted_text", ""),
                 source_name=filename,
-                metadata={
-                    "analysis_mode": analysis_mode,
-                    "uploaded_via": "document_workspace",
-                }, user_id=session["user_id"]
+                metadata={"analysis_mode": analysis_mode, "uploaded_via": "document_workspace"},
+                user_id=session["user_id"],
             )
-            result_dict["knowledge_base"] = ingestion_result
-        
         return jsonify(result_dict), status_code
-
     except Exception as e:
-        # This catch block is for errors during file handling in app.py itself, 
-        # before calling analyze_document.
-        app.logger.error(f"Unhandled error in process_document_ocr (file handling stage) for {filename if 'filename' in locals() else 'unknown file'}: {str(e)}", exc_info=True)
+        app.logger.error(f"Unhandled error in process_document_ocr for {filename}: {e}", exc_info=True)
         return jsonify({"error": f"An unexpected server error occurred during file preparation: {str(e)}"}), 500
     finally:
-        # Cleanup the temporary file
         if temp_file_path and os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)
-                app.logger.info(f"Cleaned up temp file: {temp_file_path}")
             except Exception as e_clean:
                 app.logger.error(f"Error cleaning up temp file {temp_file_path}: {e_clean}")
 

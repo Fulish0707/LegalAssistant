@@ -39,7 +39,7 @@ class DailyQuotaTests(unittest.TestCase):
 
         with self._connection() as connection:
             results = [
-                reserve_daily_quota(connection, "user", "account-1", now=datetime(2026, 8, 20, tzinfo=timezone.utc))
+                reserve_daily_quota(connection, "user", "account-1", limit=20, now=datetime(2026, 8, 20, tzinfo=timezone.utc))
                 for _ in range(21)
             ]
 
@@ -74,7 +74,7 @@ class DailyQuotaTests(unittest.TestCase):
             connection = self._connection()
             try:
                 start.wait()
-                result = reserve_daily_quota(connection, "guest_ip", "hashed-ip", now=datetime(2026, 8, 20, tzinfo=timezone.utc))
+                result = reserve_daily_quota(connection, "guest_ip", "hashed-ip", limit=20, now=datetime(2026, 8, 20, tzinfo=timezone.utc))
                 with result_lock:
                     results.append(result)
             finally:

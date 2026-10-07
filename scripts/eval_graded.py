@@ -33,8 +33,10 @@ def main(
     allow_partial: bool = typer.Option(False, help='Write --output even if some top-10/top-20 chunks are unjudged.'),
     think: bool = typer.Option(JUDGE_THINK, '--think/--no-think', help='Use judgments made with thinking on.'),
     threshold: int = typer.Option(2, min=1, max=2, help='Minimum grade counted as relevant by the headline metrics.'),
+    prompt_profile: str = typer.Option('corpus', help='Relevance instructions: corpus, shared or corpus-experimental.'),
+    judge_domain: str = typer.Option(None, help='Use the same domain override as the judging command.'),
 ) -> None:
-    key = judge_key(f'ollama:{model}', think=think)
+    key = judge_key(f'ollama:{model}', think=think, prompt_profile=prompt_profile, domain=judge_domain)
     typer.echo(describe_key(key, think=think), err=True)
     try:
         store = JudgmentStore(pool_dir / 'judgments.jsonl')
@@ -54,6 +56,7 @@ def main(
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     judge = {'model': key.model, 'prompt_sha256': key.prompt_sha256, 'think': think,
+             'prompt_profile': prompt_profile, 'question_domain_override': judge_domain,
              'failed_parses': len(failures), 'out_of_pool_judgments': out_of_pool}
     text = render_markdown(summary, judge=judge, pool=pool, threshold=threshold)
     typer.echo(text)

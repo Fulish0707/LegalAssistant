@@ -45,7 +45,8 @@ async def search(body: SearchRequest, request: Request) -> SearchResponse:
 async def chat(body: ChatRequest, request: Request) -> ChatResponse:
     orchestrator = request.app.state.get_orchestrator()
     conversation_id = body.conversation_id or uuid.uuid4().hex
-    response = await run_in_threadpool(orchestrator.handle, body.message, conversation_id=conversation_id)
+    response = await run_in_threadpool(orchestrator.handle, body.message, conversation_id=conversation_id,
+                                         user_documents=body.user_documents)
     if not body.include_trace:
         response = response.model_copy(update={"trace": None})
     return response

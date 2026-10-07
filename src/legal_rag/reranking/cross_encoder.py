@@ -48,6 +48,9 @@ class CrossEncoderReranker:
         # The API's startup warm-up and a first user request can both reach encoder();
         # loading twice would put two copies of the model on the GPU.
         self._load_lock = threading.Lock()
+        # One pass at a time: two together need twice the activation memory. The warm-up and a
+        # first request scoring together ran the 8 GB card out of memory (2026-10-06).
+        self._score_lock = threading.Lock()
 
     @property
     def is_loaded(self) -> bool:
@@ -64,7 +67,9 @@ class CrossEncoderReranker:
         if k <= 0 or not candidates:
             return []
         pairs = [(query, candidate.chunk.text) for candidate in candidates]
-        scores = [float(score) for score in self.encoder().predict(pairs, batch_size=self.batch_size)]
+        encoder = self.encoder()
+        with self._score_lock:
+            scores = [float(score) for score in encoder.predict(pairs, batch_size=self.batch_size)]
         order = sorted(range(len(candidates)), key=lambda index: (-scores[index], index))
         return [candidates[index].model_copy(update={'score': scores[index], 'retriever': 'reranked'})
                 for index in order[:k]]

@@ -11,8 +11,6 @@ window.LC = window.LC || {};
 
   LC.S = {
     scale: localStorage.getItem('lc.scale') || '보통',
-    statementDraft: '',
-    saveState: '저장됨',
     chunkLabel: '지식베이스 확인 중',
     traceOpen: false,
     traceLines: [],
@@ -262,16 +260,6 @@ ${LC.S.traceOpen ? `
   document.addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); location.href = 'cases.html'; }
   });
-  let draftTimer = null;
-  document.addEventListener('input', e => {
-    if (e.target.id !== 'personalStatementDraft') return;
-    LC.S.statementDraft = e.target.value;
-    LC.S.saveState = '저장 중';
-    const el = document.getElementById('savingIndicator');
-    if (el) el.textContent = LC.S.saveState;
-    clearTimeout(draftTimer);
-    draftTimer = setTimeout(LC.saveDraft, 800);
-  });
 
   LC.definePage = function (page) {
     LC.page = page;
@@ -375,22 +363,6 @@ ${LC.S.traceOpen ? `
     }
   };
 
-  LC.saveDraft = async function () {
-    try {
-      const r = await fetch('/update_statement', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ personal_statement_draft: LC.S.statementDraft || '' })
-      });
-      if (!r.ok) throw new Error(r.statusText);
-      LC.S.saveState = '저장됨';
-    } catch (err) {
-      console.error('Draft save error:', err);
-      LC.S.saveState = '저장 실패';
-    }
-    const el = document.getElementById('savingIndicator');
-    if (el) el.textContent = LC.S.saveState;
-  };
 
   /* 자료 업로드 — 사건 자료·상담 페이지가 공유 */
   LC.uploadFile = function (file, onDone) {

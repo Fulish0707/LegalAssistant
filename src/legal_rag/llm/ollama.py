@@ -8,7 +8,7 @@ import re
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from .base import Message, ModelResponse, StructuredOutputError
+from .base import ModelResponse, StructuredOutputError
 
 _FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 

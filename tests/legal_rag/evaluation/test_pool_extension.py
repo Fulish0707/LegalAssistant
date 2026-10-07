@@ -10,10 +10,10 @@ def make_chunk(chunk_id, document_id=None, text='본문'):
                  metadata=ChunkMetadata(dataset='d', corpus_version='ip-v1', authority='특허법원'))
 
 SOURCE = [
-    {'case_id': 'c1', 'chunk_id': 'a#0', 'question': '질문', 'reference_answer': '답변', 'document_id': 'a',
+    {'case_id': 'c1', 'chunk_id': 'a#0', 'question': '질문', 'question_domain': None, 'reference_answer': '답변', 'document_id': 'a',
      'document_type': 'judgment', 'title': '제목', 'text': '본문', 'authority': '특허법원', 'date': None,
      'case_number': 'a', 'search_query': '특허법원 a', 'ranks': {'dense': 1, 'hybrid': 2}, 'is_gold_chunk': False},
-    {'case_id': 'c1', 'chunk_id': 'gold#0', 'question': '질문', 'reference_answer': '답변', 'document_id': 'gold',
+    {'case_id': 'c1', 'chunk_id': 'gold#0', 'question': '질문', 'question_domain': None, 'reference_answer': '답변', 'document_id': 'gold',
      'document_type': 'judgment', 'title': '제목', 'text': '본문', 'authority': '특허법원', 'date': None,
      'case_number': 'gold', 'search_query': '특허법원 gold', 'ranks': {}, 'is_gold_chunk': True},
 ]

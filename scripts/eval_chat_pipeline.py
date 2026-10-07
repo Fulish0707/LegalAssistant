@@ -7,14 +7,22 @@
 with citation_guard as a second checker on the text the user sees. `report` prints both.
 Results are resumable JSONL; both runs drive the real components in handle()'s order.
 
+Two live runs of the same questions retrieve different evidence for about four in ten, so to
+compare a prompt, verifier or generator change, `freeze` the analysis and retrieved chunks once
+and `verify --frozen` each arm on them. `overlap` compares two judged runs without the grader.
+
 Example (one heavy process at a time; unload Ollama models first):
     uv run python scripts/eval_chat_pipeline.py rewrite --out data/eval/reports/chat_pipeline/formal
     uv run python scripts/eval_chat_pipeline.py verify --out data/eval/reports/chat_pipeline/formal
     uv run python scripts/eval_chat_pipeline.py report --out data/eval/reports/chat_pipeline/formal
+    uv run python scripts/eval_chat_pipeline.py freeze --out data/eval/reports/chat_pipeline/ab
+    uv run python scripts/eval_chat_pipeline.py verify --frozen data/eval/reports/chat_pipeline/ab/frozen.jsonl --out data/eval/reports/chat_pipeline/ab/arm-a
+    uv run python scripts/eval_chat_pipeline.py overlap --base data/eval/reports/chat_pipeline/ab/arm-a --new data/eval/reports/chat_pipeline/ab/arm-b
 """
 from __future__ import annotations
 
 import collections
+import hashlib
 import json
 import random
 import sys
@@ -52,6 +60,18 @@ def _done(path: Path) -> set[str]:
     return {json.loads(line)["key"] for line in open(path)} if path.exists() else set()
 
 
+def _set_aside_errors(path: Path) -> None:
+    """Error rows (a rate limit, a dropped connection) are not results: move them out so a rerun redoes them."""
+    if not path.exists():
+        return
+    rows = [json.loads(line) for line in open(path)]
+    errors = [row for row in rows if row.get("kind") == "error"]
+    if errors:
+        with open(str(path) + ".errors", "a") as fh:
+            fh.writelines(json.dumps(row, ensure_ascii=False) + "\n" for row in errors)
+        path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows if row.get("kind") != "error"))
+
+
 def _docs(hits) -> list[str]:
     out: list[str] = []
     for hit in hits:
@@ -60,15 +80,48 @@ def _docs(hits) -> list[str]:
     return out
 
 
-def _orchestrator(overrides: str | None = None):
-    """The local profile without clarification; `overrides` is JSON merged over it, e.g. an evidence arm."""
+def _orchestrator(overrides: str | None = None, *, frozen: bool = False):
+    """The local profile without clarification; `overrides` is JSON merged over it, e.g. an evidence arm.
+
+    `frozen` swaps the retriever and analyzer for ones that replay a recorded turn, so no index is loaded."""
     from legal_rag.cli import settings_from_options
     from legal_rag.factory import build_orchestrator
 
     extra: dict = {"rag": {"allow_clarification": False}}
     for section, values in json.loads(overrides or "{}").items():
         extra.setdefault(section, {}).update(values)
-    return build_orchestrator(settings_from_options(profile="local", extra=extra))
+    settings = settings_from_options(profile="local", extra=extra)
+    if not frozen:
+        return build_orchestrator(settings)
+    from legal_rag.evaluation.frozen import FrozenAnalyzer, FrozenRetriever
+
+    orch = build_orchestrator(settings, retriever=FrozenRetriever())
+    orch.analyzer = FrozenAnalyzer()
+    return orch
+
+
+@app.command()
+def freeze(
+    out: Path = typer.Option(..., help="Directory for frozen.jsonl."),
+    questions: Path = typer.Option(None, exists=True, help="Custom question JSONL instead of the pilot sample."),
+    per_domain: int = typer.Option(20), seed: int = typer.Option(11), cross: int = typer.Option(20),
+    overrides: str = typer.Option(None, help="Settings JSON for the retrieval being frozen."),
+) -> None:
+    """Record each question's analysis and retrieved chunks, without generating an answer."""
+    from legal_rag.evaluation.frozen import capture_turn
+
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "frozen.jsonl"
+    orch = _orchestrator(overrides)
+    done = _done(path)
+    with path.open("a") as fh:
+        for dataset, ex in _questions(questions, per_domain, seed, cross):
+            key = f"{dataset}:{ex['id']}"
+            if key in done:
+                continue
+            turn = capture_turn(orch, ex["query"])
+            fh.write(json.dumps({"key": key, "dataset": dataset, "gold": ex["relevant_document_ids"], **turn}, ensure_ascii=False) + "\n")
+            fh.flush()
 
 
 @app.command()
@@ -114,6 +167,9 @@ def verify(
     questions: Path = typer.Option(None, exists=True, help="Custom question JSONL instead of the pilot sample."),
     per_domain: int = typer.Option(20), seed: int = typer.Option(11), cross: int = typer.Option(20),
     overrides: str = typer.Option(None, help='Settings JSON, e.g. \'{"retrieval": {"k_final": 8}}\'.'),
+    frozen: Path = typer.Option(None, exists=True, dir_okay=False, help="A frozen.jsonl to replay instead of analyzing and retrieving."),
+    answer_prompt: Path = typer.Option(None, exists=True, dir_okay=False,
+                                       help="Use this file as the answer system prompt for this arm, leaving the served prompt untouched."),
 ) -> None:
     import legal_rag.rag.orchestrator as orchestrator_module
     from citation_guard import unsupported_citations
@@ -122,7 +178,24 @@ def verify(
 
     out.mkdir(parents=True, exist_ok=True)
     path = out / "verify.jsonl"
-    orch = _orchestrator(overrides)
+    _set_aside_errors(path)
+    orch = _orchestrator(overrides, frozen=frozen is not None)
+    if answer_prompt is not None:
+        import legal_rag.rag.generator as generator_module
+
+        prompt_text, load_served = answer_prompt.read_text(encoding="utf-8"), generator_module.load_prompt
+        generator_module.load_prompt = lambda name: prompt_text if name == "answer_system" else load_served(name)
+    served = (ROOT / "src/legal_rag/llm/prompts/answer_system.md").read_bytes()
+    (out / "arm.json").write_text(json.dumps({
+        "model": getattr(orch.generator.model, "name", None), "frozen": str(frozen) if frozen else None, "overrides": overrides,
+        "answer_prompt": str(answer_prompt) if answer_prompt else "served",
+        "answer_prompt_sha256": hashlib.sha256(answer_prompt.read_bytes() if answer_prompt else served).hexdigest(),
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    turns: dict = {}
+    if frozen is not None:
+        from legal_rag.evaluation.frozen import load_frozen
+
+        turns = load_frozen(frozen)
     log: dict = {}
 
     def evidence(bundle) -> list[str]:
@@ -133,6 +206,7 @@ def verify(
 
     original_backfill = orchestrator_module.backfill_citations
     original_verify, original_decide = orch.verifier.verify, orch.policy.decide
+    frozen_analyzer = orch.analyzer  # the spy below replaces .analyze; a frozen analyzer still needs .load
     original_analyze = orch.analyzer.analyze
 
     def analyze_spy(message, history):
@@ -146,8 +220,8 @@ def verify(
                                 "raw_guard": unsupported_citations(answer_text(answer), evidence(bundle) + [log["q"]])})
         return original_backfill(answer, bundle)
 
-    def verify_spy(answer, bundle, *, user_refs=()):
-        report = original_verify(answer, bundle, user_refs=user_refs)
+    def verify_spy(answer, bundle, **exemptions):
+        report = original_verify(answer, bundle, **exemptions)
         log["attempts"][-1].update({"ok": report.ok, "issues": issues(report)})
         return report
 
@@ -166,6 +240,9 @@ def verify(
                 continue
             log.clear()
             log.update({"attempts": [], "q": ex["query"], "user_refs": []})
+            if frozen is not None:
+                orch.retriever.load(turns[key])
+                frozen_analyzer.load(turns[key])
             started = time.perf_counter()
             try:
                 response = orch.handle(ex["query"], conversation_id=uuid.uuid4().hex)
@@ -216,6 +293,34 @@ def coverage(
                                  "chunk_documents": [hit.chunk.document_id for hit in hits],
                                  "chunk_chars": [len(hit.chunk.text) for hit in hits]}, ensure_ascii=False) + "\n")
             fh.flush()
+
+
+@app.command()
+def overlap(
+    base: Path = typer.Option(..., exists=True, file_okay=False, help="Run directory with answer_pairs.jsonl."),
+    new: Path = typer.Option(..., exists=True, file_okay=False, help="Run directory with answer_pairs.jsonl."),
+    chars: int = typer.Option(700, help="Compare the first N characters of every answer; recall grows with length."),
+) -> None:
+    """Compare two runs' answers with their references without the grader (overlap, not correctness)."""
+    from legal_rag.evaluation.reference_overlap import bigram_recall, fact_recall, paired_difference
+
+    runs = [{row["key"]: row for row in map(json.loads, open(run / "answer_pairs.jsonl"))} for run in (base, new)]
+    keys = sorted(set(runs[0]) & set(runs[1]))
+    scores = []
+    for run in runs:
+        recall = [bigram_recall(run[key]["answer"][:chars], run[key]["reference"]) for key in keys]
+        facts = [fact_recall(run[key]["answer"][:chars], run[key]["reference"]) for key in keys]
+        scores.append((recall, facts))
+    typer.echo(f"{len(keys)} shared questions, first {chars} characters of each answer")
+    for name, (recall, facts) in zip(("base", "new"), scores):
+        present = [value for value in facts if value is not None]
+        typer.echo(f"  {name}: bigram recall {sum(recall) / len(recall):.3f} | article and quantity recall "
+                   f"{sum(present) / len(present):.3f} (n={len(present)})")
+    mean, (low, high) = paired_difference(scores[0][0], scores[1][0])
+    typer.echo(f"  new - base, bigram recall: {mean:+.3f} [{low:+.3f}, {high:+.3f}]")
+    both = [(a, b) for a, b in zip(scores[0][1], scores[1][1]) if a is not None and b is not None]
+    mean, (low, high) = paired_difference([a for a, _ in both], [b for _, b in both])
+    typer.echo(f"  new - base, article and quantity recall: {mean:+.3f} [{low:+.3f}, {high:+.3f}]")
 
 
 def _rank(top: list[str], gold: list[str]) -> int | None:

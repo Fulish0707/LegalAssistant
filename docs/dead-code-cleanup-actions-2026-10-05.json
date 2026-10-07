@@ -1,0 +1,174 @@
+{
+  "date": "2026-10-05",
+  "scope": "Current Python modules in src/, tracked and visible scripts/, and root application modules; source/notebook/test/docs/config references inspected. Historical experiment implementations not removed.",
+  "python_files_scanned": 173,
+  "modified_files": [
+    {
+      "path": "app.py",
+      "removed": [
+        {
+          "kind": "function",
+          "name": "application_setup",
+          "old_line": 912
+        }
+      ],
+      "retained_ast_matches_baseline": true,
+      "before_sha256": "b11dbc93cf18c57f289494450cf487abe2dd2091eb504125d4924f6f7a7e4982",
+      "after_sha256": "780a661ff3bed730ea6c168e77c28597c9824f64b6200d29b87c964c4f520ced"
+    },
+    {
+      "path": "scripts/build_fanout_pool.py",
+      "removed": [
+        {
+          "kind": "import",
+          "name": "json",
+          "old_line": 19
+        }
+      ],
+      "retained_ast_matches_baseline": true,
+      "before_sha256": "7e7bf90bc73d000d0d4373f8abfce8f6c1204e4c7a7c1858b4f05a5431ef39c4",
+      "after_sha256": "667f3ca28cdb35d7e2a8c03b3e743473a248b3b56bd2b52836ab66c4ce6649ff"
+    },
+    {
+      "path": "scripts/judge_agreement.py",
+      "removed": [
+        {
+          "kind": "import",
+          "name": "boundary_kappa",
+          "old_line": 25
+        }
+      ],
+      "retained_ast_matches_baseline": true,
+      "before_sha256": "2aa75e421241ccc5fb531ba27d11949d2c482308058b04936c66efba710e8ec8",
+      "after_sha256": "02b94c636c4912bcc3427e446f890c4cce856d491d4791568b2e2dd3271eb04f"
+    },
+    {
+      "path": "src/legal_rag/chunking/korean_structure.py",
+      "removed": [
+        {
+          "kind": "assignment",
+          "name": "_ITEM",
+          "old_line": 30
+        }
+      ],
+      "retained_ast_matches_baseline": true,
+      "before_sha256": "8834a45ad80c4658c73640dbc3979bfc3df1d8c5ae3c0e8d3a1b0c38d8285616",
+      "after_sha256": "5b327d2506721629af5910a290ebe92f679c4953d2273646819400505cb6a7f6"
+    },
+    {
+      "path": "src/legal_rag/evaluation/answer_judge.py",
+      "removed": [
+        {
+          "kind": "assignment",
+          "name": "MAX_RETRY_OUTPUT_CHARS",
+          "old_line": 36
+        },
+        {
+          "kind": "assignment",
+          "name": "RETRY_INSTRUCTION",
+          "old_line": 37
+        },
+        {
+          "kind": "function",
+          "name": "retry_feedback",
+          "old_line": 237
+        }
+      ],
+      "retained_ast_matches_baseline": true,
+      "before_sha256": "740a7300942f05d645feb9bc4b5bfc6c0318ca83a9d0aec1722cddc57d9de710",
+      "after_sha256": "0d0031a534896a3fbf90421ee832d6c6427b45669099afc97f2b4861abf580bd"
+    },
+    {
+      "path": "src/legal_rag/ingestion/normalize/base.py",
+      "removed": [
+        {
+          "kind": "function",
+          "name": "require",
+          "old_line": 30
+        }
+      ],
+      "retained_ast_matches_baseline": true,
+      "before_sha256": "5cef6c87ef3b3e5df6eed0e831773785bf6c0dde3e5ad39f69acd5f3fe88cc98",
+      "after_sha256": "9b5c23cc7bf13ce522de51c31a3b6bd04153414546b5083edb987ebc7cb75b0b"
+    },
+    {
+      "path": "src/legal_rag/llm/ollama.py",
+      "removed": [
+        {
+          "kind": "import",
+          "name": "Message",
+          "old_line": 11
+        }
+      ],
+      "retained_ast_matches_baseline": true,
+      "before_sha256": "6d6f98bdfa6f5e4207d81d4c08e69a3a2ba4d7f9915dc0faab4c911ddb53eb3c",
+      "after_sha256": "ffee893f1a2aa42442d25ef98a5eaa0815abe228274f8c4617505190fc037e3c"
+    },
+    {
+      "path": "src/legal_rag/schemas/documents.py",
+      "removed": [
+        {
+          "kind": "assignment",
+          "name": "MetadataValue",
+          "old_line": 12
+        }
+      ],
+      "retained_ast_matches_baseline": true,
+      "before_sha256": "0a2d1b9fbee8bd9b72b4931594fc8698758a1e1ac43b4e4eefdb9d69d17ca26e",
+      "after_sha256": "0aa4cb09911c65a07072d0b57a9c7ea60f1af10487c41114b2315b751508d8fe"
+    }
+  ],
+  "removed_symbols": 10,
+  "verification": {
+    "syntax_compiled_files": 173,
+    "retained_ast_matches_baseline": true,
+    "unchanged_protected_files": 69,
+    "test_suite_run": false,
+    "live_model_calls": false,
+    "ignored_source_references_searched": true,
+    "unreachable_statement_candidates": 0,
+    "unused_local_assignment_candidates": 0
+  },
+  "retained_candidates": [
+    {
+      "symbol": "scripts/judge_answers.py:_retry_manifest_hashes",
+      "reason": "Historical quick-review prepare.py resolves this wrapper by string key."
+    },
+    {
+      "symbol": "src/legal_rag/evaluation/calibration.py:boundary_kappa",
+      "reason": "Historical frozen_agreement_cli.py imports it; remove only the unused current CLI import."
+    },
+    {
+      "symbol": "src/legal_rag/api/app.py:app_for_uvicorn",
+      "reason": "Externally callable Uvicorn factory; no internal caller does not prove it dead."
+    },
+    {
+      "symbol": "src/legal_rag/verification/citations.py:StatuteRef, extract_case_refs",
+      "reason": "Explicit __all__ re-exports; extract_case_refs is used by verifier/backfill/replay."
+    },
+    {
+      "symbol": "langchain_config.py:wrap_model_call",
+      "reason": "LangChain middleware hook and existing tests."
+    },
+    {
+      "symbol": "scripts/eval_golden_answers.py:prepare",
+      "reason": "Argparse phase dispatch via globals()[phase]."
+    },
+    {
+      "symbol": "src/legal_rag/retrieval/hybrid.py:neighbor_chunks",
+      "reason": "Orchestrator resolves it via getattr; historical retrieval runner also calls it."
+    },
+    {
+      "symbol": "langchain_config.py:ingest_source_folder, get_user_retriever",
+      "reason": "Existing isolation tests and callable ingestion/retriever helpers."
+    },
+    {
+      "symbol": "load_full_splits, pad_batch, balance_encoded",
+      "reason": "Training notebooks and existing tests."
+    },
+    {
+      "symbol": "InMemoryConversationStore, select_review_cases, known_schemas, RetrievalFilters.is_empty, load_generation_examples",
+      "reason": "Existing tests or package exports."
+    }
+  ]
+}
