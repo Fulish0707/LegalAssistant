@@ -23,7 +23,13 @@ import re
 import os
 import secrets
 import tempfile
-import requests
+from functools import wraps
+from threading import BoundedSemaphore
+from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
+from flask import abort, make_response
+from web_security import check_browser_request, csrf_token, public_error, require_text, reserve_burst, security_headers
+from document_security import DocumentRejected, validate_upload
 from quota import (
     DAILY_AI_REQUEST_LIMIT,
     QuotaResult,
@@ -39,7 +45,7 @@ except ModuleNotFoundError:
     llm_ocr = None
 
 from llm_prompt import prompt as main_chat_prompt_template
-from llm_model import describe_configuration, get_chat_model
+from llm_model import get_chat_model
 
 # Disable Flask's default request logging for cleaner output if not needed
 log = logging.getLogger('werkzeug')
@@ -52,10 +58,17 @@ secret_key = os.getenv("SECRET_KEY")
 if not secret_key:
     if not is_local_environment:
         raise RuntimeError("SECRET_KEY must be configured outside development, local, or testing environments.")
-    secret_key = "development-only-secret-key"
+    secret_key = secrets.token_urlsafe(48)
+
+if len(secret_key) < 32 or secret_key.startswith("replace-"):
+    raise RuntimeError("SECRET_KEY must be a random secret of at least 32 characters.")
 
 app.config.update(
     SECRET_KEY=secret_key,
+    MAX_CONTENT_LENGTH=26 * 1024 * 1024,
+    MAX_FORM_MEMORY_SIZE=128 * 1024,
+    MAX_FORM_PARTS=12,
+    TRUSTED_HOSTS=[host.strip() for host in os.getenv("TRUSTED_HOSTS", "localhost,127.0.0.1,[::1]").split(",") if host.strip()],
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=not is_local_environment,
@@ -63,6 +76,16 @@ app.config.update(
     DAILY_AI_REQUEST_LIMIT=int(os.getenv("DAILY_AI_REQUEST_LIMIT", str(DAILY_AI_REQUEST_LIMIT))),
 )
 app.config["QUOTA_IP_SALT"] = app.config["QUOTA_IP_SALT"] or secret_key
+if len(app.config["QUOTA_IP_SALT"]) < 32 or app.config["QUOTA_IP_SALT"].startswith("replace-"):
+    raise RuntimeError("QUOTA_IP_SALT must be random and at least 32 characters, or unset.")
+trusted_proxy_count = int(os.getenv("TRUSTED_PROXY_COUNT", "0"))
+if trusted_proxy_count not in {0, 1}:
+    raise RuntimeError("TRUSTED_PROXY_COUNT must be 0 or 1.")
+if trusted_proxy_count:
+    # Trust only the scheme from an explicitly configured, restricted proxy hop.
+    # IP quotas continue to use the direct peer; the proxy must enforce client budgets.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=0, x_proto=trusted_proxy_count,
+                          x_host=0, x_port=0, x_prefix=0)
 
 
 @app.before_request
@@ -80,6 +103,7 @@ def establish_anonymous_user():
     # honoured: an old account cookie never recovers that account's records.
     for key in ("authenticated_user_id", "account_email", "auth_next", "oidc_nonce"):
         session.pop(key, None)
+    check_browser_request()
 
 DB_FILE = os.getenv("APP_STATE_DB", "sqlite_db/app_state.db") # Define DB_FILE before use
 db_dir = os.path.dirname(DB_FILE)
@@ -93,6 +117,7 @@ def ensure_database_schema(conn):
         cursor.execute("ALTER TABLE chat_history RENAME TO chat_history_legacy")
     cursor.execute("CREATE TABLE IF NOT EXISTS chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_user_id_id ON chat_history(user_id, id)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS chat_requests (user_id TEXT NOT NULL, request_id TEXT NOT NULL, PRIMARY KEY(user_id, request_id))")
     # The Google-era users table is no longer created. Existing installs keep
     # theirs untouched; nothing in the app reads it any more.
     # daily_ai_quota keeps the legacy 'user' kind so old rows stay valid; the app
@@ -146,8 +171,8 @@ def init_db():
 def get_chat_history_from_db(user_id):
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT role, content FROM chat_history WHERE user_id=? ORDER BY id ASC', (user_id,))
-    rows = c.fetchall()
+    c.execute('SELECT role, content FROM chat_history WHERE user_id=? ORDER BY id DESC LIMIT 100', (user_id,))
+    rows = c.fetchall()[::-1]
     return [{"role": row["role"], "content": row["content"]} for row in rows]
 
 def add_chat_message_to_db(user_id, role, content):
@@ -160,6 +185,7 @@ def clear_chat_history_in_db(user_id):
     conn = get_db()
     c = conn.cursor()
     c.execute('DELETE FROM chat_history WHERE user_id=?', (user_id,))
+    c.execute('DELETE FROM chat_requests WHERE user_id=?', (user_id,))
     conn.commit()
     print("Chat history cleared for the active browser workspace.")
 
@@ -182,6 +208,59 @@ def quota_exceeded_response(result: QuotaResult):
         "remaining": result.remaining,
     }), 429
 
+
+# Controls apply before expensive work. Only the direct peer defines an IP budget.
+_work_slots = BoundedSemaphore(2)
+_conversation_slots = BoundedSemaphore(1)
+_upload_slots = BoundedSemaphore(1)
+
+def limited_work(function, slots=_work_slots):
+    @wraps(function)
+    def guarded(*args, **kwargs):
+        if not slots.acquire(blocking=False):
+            abort(429, description="service_busy")
+        try:
+            response = make_response(function(*args, **kwargs))
+        except BaseException:
+            slots.release()
+            raise
+        if response.is_streamed:
+            response.call_on_close(slots.release)
+        else:
+            slots.release()
+        return response
+    return guarded
+
+def conversation_work(function):
+    return limited_work(function, _conversation_slots)
+
+def upload_work(function):
+    return limited_work(function, _upload_slots)
+
+def json_object():
+    if request.content_length and request.content_length > 32768:
+        abort(413)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        abort(400, description="invalid_input")
+    return data
+
+@app.before_request
+def control_request_rate():
+    if request.method in {"POST", "DELETE", "PUT", "PATCH"} and request.endpoint != "process_document_ocr":
+        request.max_content_length = 32768
+    if request.endpoint in {"chat", "process_document_ocr", "search_knowledge_base_route"} and tracing_status()["enabled"]:
+        abort(403, description="external_tracing_disabled")
+    if request.endpoint in {"chat", "process_document_ocr", "knowledge_base_status_route",
+                            "clear_knowledge_base_route", "search_knowledge_base_route",
+                            "delete_knowledge_base_source_route", "clear_chat_history_endpoint"}:
+        identity = guest_ip_identity(client_ip_from_request(request), app.config["QUOTA_IP_SALT"])
+        if not reserve_burst(get_db(), identity, limit=30):
+            abort(429, description="rate_limit_exceeded")
+
+app.after_request(security_headers)
+app.register_error_handler(HTTPException, public_error)
+app.register_error_handler(500, public_error)
 
 # --- Text Cleaning Utility ---
 _SMALL_TALK = re.compile(r"^(?:안녕|반가|고마|감사|수고|ㅎㅇ|hi|hello|thanks?|thank you|bye)", re.IGNORECASE)
@@ -209,8 +288,7 @@ LEGAL_BACKEND_DOWN = "법률 답변 서비스를 사용할 수 없습니다. 잠
 def _legal_conversation_id():
     """The browser's workspace id plus an epoch that clearing the chat advances.
 
-    legal_rag keeps recent turns per conversation id and has no call to forget them,
-    so a cleared chat continues under a new id instead.
+    Clearing first deletes the backend workspace history, then advances this epoch.
     """
     return f"{session['user_id']}-{session.get('conversation_epoch', 0)}"
 
@@ -261,17 +339,12 @@ def _generate_legal_response_stream(user_input):
             yield _sse({'type': 'error', 'content': LEGAL_BACKEND_UNSET})
             return
 
-        quota_result = reserve_ai_request()
-        if not quota_result.allowed:
-            yield _sse({'type': 'error', 'content': 'Daily AI request quota exceeded.', 'error': 'daily_ai_quota_exceeded', 'limit': quota_result.limit})
-            return
-
         if _needs_legal_search(user_input):
             yield _sse({'type': 'thought', 'content': '법령·판례 검색 및 답변 작성 중'})
             documents = _case_documents(user_input)
             if documents:
                 yield _sse({'type': 'thought', 'content': f'사건 자료 {len(documents)}건 참고'})
-            body = legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id(), documents)
+            body = legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id(), documents, workspace=session["user_id"])
             chat_response, sources = legal_backend.render(body, documents)
             questions = legal_backend.questions(body)
             yield _sse({'type': 'thought', 'content': f'근거 {len(sources)}건 확인'})
@@ -295,16 +368,15 @@ def _generate_legal_response_stream(user_input):
         })
 
     except legal_backend.LegalBackendUnavailable:
-        logging.exception("legal_rag /v1/chat is unavailable")
+        logging.error("legal_rag chat service unavailable")
         add_chat_message_to_db(session["user_id"], "assistant", LEGAL_BACKEND_DOWN)
         yield _sse({'type': 'error', 'content': LEGAL_BACKEND_DOWN})
-    except Exception:
-        logging.exception("Error during AI processing stream (_generate_legal_response_stream)")
+    except Exception as error:
+        logging.error("Chat processing failed (%s)", type(error).__name__)
         error_response_content = "An error occurred while processing your request. Please check server logs."
         add_chat_message_to_db(session["user_id"], "assistant", error_response_content)
         yield _sse({'type': 'error', 'content': error_response_content})
-    finally:
-        yield _sse({'type': 'stream_end'})
+    yield _sse({'type': 'stream_end'})
 
 
 @app.route('/')
@@ -323,123 +395,75 @@ def documents_page():
 def cases_page():
     return render_template('cases.html')
 
-LLM_PROBE_TIMEOUT_SECONDS = 1.0
-
-
-def probe_llm_reachable():
-    """Is the local LLM server actually answering?
-
-    get_chat_model() builds a ChatOllama unconditionally -- no key, no
-    connection -- so llm_configured reports True with Ollama stopped. This is the
-    only field that can tell the difference. Opt-in via ?probe=llm, short timeout,
-    never raises. Returns None when reachability is not something we can answer:
-    the probe was not requested, or the provider is a hosted API we do not ping.
-    """
-    provider = os.getenv("LLM_PROVIDER", "ollama").strip().lower()
-    if provider != "ollama":
-        return None
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-    try:
-        response = requests.get(f"{base_url}/api/tags", timeout=LLM_PROBE_TIMEOUT_SECONDS)
-        return response.ok
-    except Exception:
-        return False
-
-
 @app.route('/health', methods=['GET'])
 def health():
-    llm_available = get_chat_model() is not None
-    payload = {
-        "status": "ok",
-        "llm_configured": llm_available,
-        "llm_provider": None,
-        "embedding_provider": None,
-        "collection": None,
-        "llm_reachable": None,
-        # Whether prompts and retrieved document text are being shipped to
-        # LangSmith is an operational fact worth being able to check.
-        "tracing": tracing_status(),
-    }
+    return jsonify({"status": "ok"})
 
-    # An endpoint whose job is to make misconfiguration visible must not 500 on
-    # misconfiguration: describe_configuration() raises on an unknown provider.
-    try:
-        payload.update(describe_configuration())
-    except Exception as error:
-        payload["configuration_error"] = str(error)
-
-    if request.args.get("probe") == "llm":
-        payload["llm_reachable"] = probe_llm_reachable()
-
-    return jsonify(payload)
-
-@app.route('/chat', methods=['GET', 'POST'])
+@app.route('/chat', methods=['POST'])
+@conversation_work
 def chat():
-    if request.method == 'POST':
-        data = request.get_json(silent=True) or {}
-        user_input = data.get('message')
-
-        if not user_input:
-            return jsonify({"error": "No message provided"}), 400
-
-        add_chat_message_to_db(session["user_id"], "user", user_input)
-        # The POST request now just acknowledges receipt.
-        # The actual processing and streaming will be triggered by the frontend's GET request.
-        return jsonify({"status": "message_received_ok", "message": "Proceed to connect to SSE for response."})
-
-    elif request.method == 'GET':
-        # For SSE, data comes from query parameters
-        user_input = request.args.get('message')
-
-        if not user_input:
-            # SSE requires a specific format for errors if connection is established
-            def error_stream():
-                yield f"data: {json.dumps({'type': 'error', 'content': 'No message provided in SSE request.'})}\n\n"
-                yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
-            return Response(stream_with_context(error_stream()), mimetype='text/event-stream')
-
-        # Note: The user message for this GET request is NOT added to DB here,
-        # as the POST request should have already handled it.
-        # If GET is called without a preceding POST, this could lead to inconsistencies
-        # in chat history if not handled carefully. The current frontend flow (POST then GET) is assumed.
-
-        return Response(stream_with_context(_generate_legal_response_stream(user_input)), mimetype='text/event-stream')
-
-    # Fallback to satisfy type checkers: ensure the route always returns a valid response
-    return jsonify({"error": "Invalid request method."}), 405
+    data = json_object()
+    user_input = require_text(data.get('message'), limit=4000)
+    request_id = require_text(data.get('request_id'), limit=64)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", request_id):
+        abort(400, description="invalid_input")
+    if get_db().execute("SELECT 1 FROM chat_requests WHERE user_id=? AND request_id=?", (session["user_id"], request_id)).fetchone():
+        return jsonify({"error": "duplicate_request"}), 409
+    rows = get_db().execute("SELECT COUNT(*) FROM chat_history WHERE user_id=?", (session["user_id"],)).fetchone()[0]
+    if rows + 2 > 500:
+        return jsonify({"error": "workspace_storage_limit"}), 429
+    quota_result = reserve_ai_request()
+    if not quota_result.allowed:
+        return quota_exceeded_response(quota_result)
+    inserted = get_db().execute("INSERT OR IGNORE INTO chat_requests VALUES (?, ?)", (session["user_id"], request_id))
+    if inserted.rowcount != 1:
+        get_db().rollback()
+        return jsonify({"error": "duplicate_request"}), 409
+    add_chat_message_to_db(session["user_id"], "user", user_input)
+    return Response(stream_with_context(_generate_legal_response_stream(user_input)),
+                    mimetype='text/event-stream', headers={"X-Accel-Buffering": "no"})
 
 @app.route('/get_initial_state', methods=['GET'])
 def get_initial_state():
     user_id = session["user_id"]
     return jsonify({
+        "csrf_token": csrf_token(),
         "chat_history": get_chat_history_from_db(user_id)
     })
 
 
 @app.route('/clear_chat_history_endpoint', methods=['POST']) # Added specific endpoint name
+@conversation_work
 def clear_chat_history_endpoint():
     try:
         user_id = session["user_id"]
+        backend_url = os.getenv("LEGAL_RAG_URL", "").strip()
+        if not backend_url:
+            raise legal_backend.LegalBackendUnavailable("backend_not_configured")
+        legal_backend.forget(backend_url, user_id)
         clear_chat_history_in_db(user_id)
         session["conversation_epoch"] = session.get("conversation_epoch", 0) + 1
         return jsonify({"message": "Chat history cleared successfully."}), 200
     except Exception as e:
-        logging.error(f"Error clearing chat history: {e}")
+        logging.error("History deletion failed (%s)", type(e).__name__)
         return jsonify({"error": "Failed to clear chat history."}), 500
 
 @app.route('/knowledge_base/status', methods=['GET'])
+@limited_work
 def knowledge_base_status_route():
     return jsonify(get_knowledge_base_status(session["user_id"]))
 
 @app.route('/knowledge_base/clear', methods=['POST'])
+@limited_work
 def clear_knowledge_base_route():
     result = clear_knowledge_base(session["user_id"])
     return jsonify(result), 200 if result.get("ok") else 500
 
 @app.route('/knowledge_base/search', methods=['POST'])
+@limited_work
 def search_knowledge_base_route():
-    data = request.get_json(silent=True) or {}
-    query = (data.get('query') or '').strip()
+    data = json_object()
+    query = require_text(data.get("query"), limit=2000)
     if not query:
         return jsonify({"ok": False, "results": [], "error": "No query provided"}), 400
     try:
@@ -450,9 +474,10 @@ def search_knowledge_base_route():
     return jsonify(result), 200 if result.get("ok") else 500
 
 @app.route('/knowledge_base/source', methods=['DELETE'])
+@limited_work
 def delete_knowledge_base_source_route():
-    data = request.get_json(silent=True) or {}
-    source = (data.get('source') or '').strip()
+    data = json_object()
+    source = require_text(data.get("source"), limit=200)
     if not source:
         return jsonify({"ok": False, "message": "No source provided"}), 400
     result = delete_knowledge_base_source(session["user_id"], source)
@@ -476,6 +501,7 @@ def allowed_file(filename, allowed_extensions):
 
 
 @app.route('/process_document_ocr', methods=['POST'])
+@upload_work
 def process_document_ocr():
     if llm_ocr is None:
         return jsonify({"error": "OCR processing requires optional OCR dependencies such as pytesseract."}), 503
@@ -489,6 +515,14 @@ def process_document_ocr():
     analysis_mode = request.form.get('analysis_mode', 'report')
     add_to_knowledge_base = request.form.get('add_to_knowledge_base', '').lower() in {'1', 'true', 'yes', 'on'}
 
+    require_text(file.filename, limit=200)
+    user_instructions = require_text(request.form.get("user_instructions", ""), limit=2000, allow_empty=True)
+    question = require_text(request.form.get("question", ""), limit=2000, allow_empty=True)
+    if analysis_mode not in llm_ocr.DOCUMENT_ANALYSIS_MODES:
+        abort(400, description="invalid_input")
+    if tracing_status()["enabled"]:
+        return jsonify({"error": "document_tracing_disabled"}), 403
+
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
     if not allowed_file(file.filename, ALLOWED_EXTENSIONS_OCR):
@@ -498,6 +532,13 @@ def process_document_ocr():
     # beyond dropping any path. secure_filename would drop Hangul and leave "txt".
     filename = os.path.basename(file.filename.replace("\\", "/"))
     extension = filename.rsplit('.', 1)[1].lower()
+    try:
+        validate_upload(file, extension)
+    except DocumentRejected:
+        return jsonify({"error": "document_rejected"}), 422
+    quota_result = reserve_ai_request()
+    if not quota_result.allowed:
+        return quota_exceeded_response(quota_result)
     temp_file_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, dir=app.config['UPLOAD_FOLDER'],
@@ -508,14 +549,13 @@ def process_document_ocr():
         result_dict, status_code = llm_ocr.analyze_document(
             file_path=temp_file_path,
             file_extension=extension,
-            user_instructions=request.form.get('user_instructions', ''),
+            user_instructions=user_instructions,
             llm=llm,
             prompt_template=main_chat_prompt_template,
             logger=app.logger,
             analysis_mode=analysis_mode,
-            question=request.form.get('question', ''),
+            question=question,
             include_extracted_text=add_to_knowledge_base,
-            quota_reserver=reserve_ai_request,
         )
         if status_code == 429 and result_dict.get("error") == "daily_ai_quota_exceeded":
             return quota_exceeded_response(result_dict["quota_result"])
@@ -528,8 +568,8 @@ def process_document_ocr():
             )
         return jsonify(result_dict), status_code
     except Exception as e:
-        app.logger.error(f"Unhandled error in process_document_ocr for {filename}: {e}", exc_info=True)
-        return jsonify({"error": f"An unexpected server error occurred during file preparation: {str(e)}"}), 500
+        app.logger.error("Document processing failed (%s)", type(e).__name__)
+        return jsonify({"error": "document_processing_failed"}), 500
     finally:
         if temp_file_path and os.path.exists(temp_file_path):
             try:
@@ -540,4 +580,4 @@ def process_document_ocr():
 
 if __name__ == '__main__':
     init_db() # Initialize the database
-    app.run(host="0.0.0.0", port=5005, debug=True, use_reloader=False)
+    app.run(host="127.0.0.1", port=5005, debug=False, use_reloader=False)

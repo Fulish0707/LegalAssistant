@@ -14,6 +14,7 @@ from legal_rag.config import Settings, load_settings
 from legal_rag.factory import build_hybrid_retriever, build_orchestrator, index_metadata_path
 
 from .routes import router
+from .security import BodyLimitMiddleware, RequestSecurity
 
 logger = logging.getLogger(__name__)
 WARMUP_QUERY = "임대차 보증금 반환"
@@ -39,9 +40,12 @@ async def _warmup_lifespan(app: FastAPI):
 
 def create_app(settings: Settings | None = None, orchestrator=None, retriever=None) -> FastAPI:
     settings = settings or load_settings()
-    app = FastAPI(title="Korean Legal RAG", version=__version__, lifespan=_warmup_lifespan)
+    app = FastAPI(title="Korean Legal RAG", version=__version__, lifespan=_warmup_lifespan,
+                  docs_url=None, redoc_url=None, openapi_url=None)
+    app.add_middleware(BodyLimitMiddleware)
     state = app.state
     state.settings = settings
+    state.security = RequestSecurity(settings.api)
     state.retriever = retriever
     state.orchestrator = orchestrator
     lock = Lock()

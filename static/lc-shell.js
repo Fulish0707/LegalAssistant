@@ -7,6 +7,22 @@ window.LC = window.LC || {};
 (function () {
   const a = LC.ACCENT;
 
+  let csrfPromise;
+  LC.secureFetch = async function (url, options = {}) {
+    if (!csrfPromise) {
+      csrfPromise = fetch('/get_initial_state', { credentials: 'same-origin', cache: 'no-store' })
+        .then(async response => {
+          if (!response.ok) throw new Error('세션을 확인하지 못했습니다.');
+          const state = await response.json();
+          if (!state.csrf_token) throw new Error('세션을 확인하지 못했습니다.');
+          return state.csrf_token;
+        }).catch(error => { csrfPromise = null; throw error; });
+    }
+    const headers = new Headers(options.headers || {});
+    headers.set('X-CSRF-Token', await csrfPromise);
+    return fetch(url, { ...options, headers, credentials: 'same-origin', cache: 'no-store' });
+  };
+
   /* ---------- 공통 상태 ---------- */
 
   LC.S = {
@@ -314,7 +330,7 @@ ${LC.S.traceOpen ? `
   LC.clearKnowledgeBase = async function () {
     if (!confirm('지식베이스에 저장된 모든 자료를 삭제하시겠습니까?')) return;
     try {
-      const r = await fetch('/knowledge_base/clear', { method: 'POST' });
+      const r = await LC.secureFetch('/knowledge_base/clear', { method: 'POST' });
       const res = await r.json().catch(() => ({}));
       if (!r.ok || !res.ok) throw new Error(res.message || r.statusText);
       LC.DOCS = [];
@@ -329,7 +345,7 @@ ${LC.S.traceOpen ? `
     if (!d) return;
     if (!confirm('"' + d.name + '" 자료와 색인을 지식베이스에서 삭제할까요?')) return;
     try {
-      const r = await fetch('/knowledge_base/source', {
+      const r = await LC.secureFetch('/knowledge_base/source', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source: d.name })
@@ -344,7 +360,7 @@ ${LC.S.traceOpen ? `
   };
 
   LC.searchKnowledgeBase = async function (query, k) {
-    const r = await fetch('/knowledge_base/search', {
+    const r = await LC.secureFetch('/knowledge_base/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: query, k: k || 6 })
@@ -355,14 +371,9 @@ ${LC.S.traceOpen ? `
   };
 
   LC.clearChatHistory = async function () {
-    try {
-      const r = await fetch('/clear_chat_history_endpoint', { method: 'POST' });
-      if (!r.ok) throw new Error(r.statusText);
-    } catch (err) {
-      console.error('Chat history clear error:', err);
-    }
+    const response = await LC.secureFetch('/clear_chat_history_endpoint', { method: 'POST' });
+    if (!response.ok) throw new Error('상담 기록을 삭제하지 못했습니다. 다시 시도해 주세요.');
   };
-
 
   /* 자료 업로드 — 사건 자료·상담 페이지가 공유 */
   LC.uploadFile = function (file, onDone) {
@@ -378,7 +389,7 @@ ${LC.S.traceOpen ? `
     fd.append('question', '');
     fd.append('add_to_knowledge_base', 'true');
 
-    fetch('/process_document_ocr', { method: 'POST', body: fd })
+    LC.secureFetch('/process_document_ocr', { method: 'POST', body: fd })
       .then(r => r.json().catch(() => ({})))
       .then(res => {
         const kb = (res && res.knowledge_base) || {};

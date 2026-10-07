@@ -6,6 +6,9 @@ into the chat text and source cards the front end shows.
 """
 
 import re
+import os
+import ipaddress
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -39,18 +42,51 @@ class LegalBackendUnavailable(Exception):
     """The service could not be reached or did not return a chat response."""
 
 
-def ask(base_url, message, conversation_id, documents=()):
+def is_loopback_url(value):
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password or not parsed.hostname:
+        return False
+    if parsed.hostname == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(parsed.hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _headers(base_url, workspace):
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password or not parsed.hostname:
+        raise LegalBackendUnavailable("invalid_service_url")
+    if not is_loopback_url(base_url) and parsed.scheme != "https":
+        raise LegalBackendUnavailable("service_tls_required")
+    token = os.getenv("LEGAL_RAG__API__SERVICE_TOKEN", "")
+    if len(token) < 32 or token.startswith("replace-"):
+        raise LegalBackendUnavailable("service_auth_not_configured")
+    return {"Authorization": "Bearer " + token, "X-Workspace-ID": workspace}
+
+
+def forget(base_url, workspace):
+    try:
+        response = httpx.delete(base_url.rstrip("/") + "/v1/workspace/conversations",
+                                headers=_headers(base_url, workspace), timeout=TIMEOUT)
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        raise LegalBackendUnavailable("history_delete_failed") from error
+
+
+def ask(base_url, message, conversation_id, documents=(), *, workspace):
     """One chat turn. `documents` are passages of the user's own files: [{name, text, ...}]."""
     endpoint = base_url.rstrip("/") + "/v1/chat"
     payload = {"message": message, "conversation_id": conversation_id}
     if documents:
         payload["user_documents"] = [{"name": document["name"], "text": document["text"]} for document in documents]
     try:
-        response = httpx.post(endpoint, json=payload, timeout=TIMEOUT)
+        response = httpx.post(endpoint, json=payload, headers=_headers(base_url, workspace), timeout=TIMEOUT)
         response.raise_for_status()
         return response.json()
     except (httpx.HTTPError, ValueError) as error:
-        raise LegalBackendUnavailable(f"{type(error).__name__}: {error}") from error
+        raise LegalBackendUnavailable("chat_service_failed") from error
 
 
 def _numbered(text, numbers):

@@ -14,6 +14,7 @@ from legal_rag.schemas import StageTiming, Trace
 class TraceRecorder:
     def __init__(self, *, conversation_id: str, user_text: str, include_text: bool = False, path: Path | None = None, model: str | None = None) -> None:
         self.path = Path(path) if path else None
+        self.include_text = include_text
         self.trace = Trace(conversation_id=conversation_id, turn_id=uuid.uuid4().hex, model=model, user_text=user_text if include_text else None)
 
     @contextmanager
@@ -26,6 +27,10 @@ class TraceRecorder:
 
     def finish(self, *, policy_action: str) -> Trace:
         self.trace.policy_action = policy_action
+        if not self.include_text:
+            self.trace.analysis = None
+            self.trace.search_queries = []
+            self.trace.verification = None
         if self.path is not None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as handle:

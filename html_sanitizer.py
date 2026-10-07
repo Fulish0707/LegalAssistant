@@ -27,11 +27,6 @@ def sanitize_report_html(value):
             strip=True,
         )
 
-    # Minimal fallback for environments where bleach is unavailable.
+    # Fail closed: encoded markup must never become active HTML on this path.
     import html
-    import re
-
-    text = re.sub(r"<\s*(script|style)\b[^>]*>.*?<\s*/\s*\1\s*>", "", text, flags=re.IGNORECASE | re.DOTALL)
-    text = re.sub(r"<\s*[^>]+>", "", text)
-    text = html.unescape(text)
-    return text.strip()
+    return html.escape(text, quote=True)

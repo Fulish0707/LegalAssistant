@@ -134,6 +134,14 @@ class ApiSettings(_Section):
     # Run one search in the background at startup so BM25, the embedder and the
     # reranker load before the first user request (~18 s cold, 2.2 s warm).
     warmup: bool = False
+    service_token: SecretStr | None = None  # environment only
+    # Conversation writes and deletes require serialized admission.
+    # Increase this only after shared per-workspace locks are implemented.
+    max_concurrent_requests: int = Field(default=1, ge=1, le=1)
+    requests_per_minute: int = Field(default=20, ge=1, le=120)
+    allow_external_models: bool = False
+    allow_user_document_egress: bool = False
+    allow_trace: bool = False
 
 
 class TraceSettings(_Section):
@@ -186,6 +194,6 @@ class Settings(BaseSettings):
 
     def hash(self) -> str:
         """Stable digest of the non-secret configuration, recorded in corpus manifests."""
-        payload = self.model_dump(mode="json", exclude={"qdrant": {"api_key"}, "llm": {"api_key"}})
+        payload = self.model_dump(mode="json", exclude={"qdrant": {"api_key"}, "llm": {"api_key"}, "api": {"service_token"}})
         encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()[:16]

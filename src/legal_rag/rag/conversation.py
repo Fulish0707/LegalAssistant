@@ -23,16 +23,28 @@ class ConversationStore(Protocol):
 
     def append(self, conversation_id: str, turn: Turn) -> None: ...
 
+    def delete_prefix(self, prefix: str) -> None: ...
+
+    def has_capacity(self, prefix: str, needed: int = 2) -> bool: ...
+
 
 class InMemoryConversationStore:
     def __init__(self) -> None:
         self._turns: dict[str, list[Turn]] = {}
 
     def get(self, conversation_id: str) -> Conversation:
-        return Conversation(id=conversation_id, turns=list(self._turns.get(conversation_id, [])))
+        return Conversation(id=conversation_id, turns=list(self._turns.get(conversation_id, [])[-100:]))
 
     def append(self, conversation_id: str, turn: Turn) -> None:
         self._turns.setdefault(conversation_id, []).append(turn)
+
+    def delete_prefix(self, prefix: str) -> None:
+        for key in list(self._turns):
+            if key.startswith(prefix):
+                del self._turns[key]
+
+    def has_capacity(self, prefix: str, needed: int = 2) -> bool:
+        return sum(len(turns) for key, turns in self._turns.items() if key.startswith(prefix)) + needed <= 5000
 
 
 class SQLiteConversationStore:
@@ -49,10 +61,21 @@ class SQLiteConversationStore:
 
     def get(self, conversation_id: str) -> Conversation:
         with self._connect() as conn:
-            rows = conn.execute("SELECT payload FROM turns WHERE conversation_id=? ORDER BY seq", (conversation_id,)).fetchall()
+            rows = conn.execute("SELECT payload FROM turns WHERE conversation_id=? ORDER BY seq DESC LIMIT 100", (conversation_id,)).fetchall()[::-1]
         return Conversation(id=conversation_id, turns=[Turn.model_validate_json(row[0]) for row in rows])
 
     def append(self, conversation_id: str, turn: Turn) -> None:
         with self._connect() as conn:
             seq = conn.execute("SELECT COALESCE(MAX(seq), -1) + 1 FROM turns WHERE conversation_id=?", (conversation_id,)).fetchone()[0]
             conn.execute("INSERT INTO turns VALUES (?, ?, ?)", (conversation_id, seq, turn.model_dump_json()))
+
+    def delete_prefix(self, prefix: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM turns WHERE conversation_id>=? AND conversation_id<?",
+                         (prefix, prefix[:-1] + chr(ord(prefix[-1]) + 1)))
+
+    def has_capacity(self, prefix: str, needed: int = 2) -> bool:
+        with self._connect() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM turns WHERE conversation_id>=? AND conversation_id<?",
+                                 (prefix, prefix[:-1] + chr(ord(prefix[-1]) + 1))).fetchone()[0]
+        return count + needed <= 5000

@@ -53,87 +53,141 @@
 
 ## 3. 시스템 구조
 
-프로그램은 두 개입니다. Flask 앱은 화면과 대화 기록을 맡습니다. FastAPI 백엔드는 검색, 답변 생성, 인용 검증을 맡습니다.
+Flask 웹 앱과 FastAPI 백엔드는 별도 프로세스로 실행합니다. Flask는 채팅 화면, 웹 대화 기록, 사건 자료를 관리합니다. FastAPI는 검색 증강 생성(RAG)을 처리합니다. 웹 앱과 API·CLI는 같은 FastAPI 백엔드를 사용합니다.
 
 ~~~mermaid
-flowchart LR
-    User["사용자"] --> Web["Flask 웹 앱<br/>화면 · 대화 기록"]
-    Caller["API · CLI"] --> API
-    Web -->|"POST /v1/chat<br/>질문 + 사건 자료 조각"| API["FastAPI 백엔드<br/>법률 RAG"]
-    API -->|"답변 · 근거"| Web
-    Web -->|"SSE"| User
+%%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 22, "diagramPadding": 4}}}%%
+flowchart TB
+    User["사용자"]
+    Caller["API · CLI"]
 
-    API --> Qdrant[("Qdrant<br/>법령 · 판례 색인")]
-    API --> Embed["Ollama bge-m3<br/>임베딩"]
-    API --> Rerank["bge-reranker-v2-m3<br/>재정렬"]
-    API --> LLM["답변 모델<br/>Ollama qwen3:4b 또는 Gemini"]
+    subgraph Web["웹 앱 · Flask"]
+        UI["채팅 화면 · 세션"]
+        WebHistory[("SQLite<br/>웹 대화 기록")]
+        CaseSearch["사건 자료 검색"]
+        CaseIndex[("Chroma<br/>업로드 자료")]
+        UI --> WebHistory
+        UI --> CaseSearch
+        CaseSearch --> CaseIndex
+        CaseIndex --> CaseSearch
+    end
 
-    Web --> SQLite[("SQLite<br/>대화 기록")]
-    Web --> Chroma[("Chroma<br/>사건 자료")]
+    subgraph Backend["법률 RAG 백엔드 · FastAPI"]
+        ChatAPI["POST /v1/chat"]
+        SearchAPI["POST /v1/search"]
+        Orchestrator["답변 오케스트레이터"]
+        Retrieval["하이브리드 검색"]
+        RAGHistory[("SQLite<br/>백엔드 대화 상태")]
+        ChatAPI --> Orchestrator
+        Orchestrator --> Retrieval
+        Retrieval --> Orchestrator
+        Orchestrator --> RAGHistory
+        SearchAPI --> Retrieval
+    end
+
+    User --> UI
+    UI -->|"질문 · POST /v1/chat"| ChatAPI
+    CaseSearch -->|"관련 조각 최대 3개"| ChatAPI
+    Caller --> ChatAPI
+    Caller --> SearchAPI
+    Orchestrator -->|"답변 · 법률 근거"| ChatAPI
+    ChatAPI -->|"응답"| UI
+    ChatAPI -->|"JSON 응답"| Caller
+    SearchAPI -->|"검색 결과"| Caller
+    UI -->|"Server-Sent Events (SSE)"| User
+
+    subgraph Models["검색 · 모델 구성"]
+        Qdrant[("Qdrant<br/>법령 · 판례 색인")]
+        Embed["Ollama bge-m3<br/>임베딩"]
+        Rerank["Cross-encoder<br/>재정렬"]
+        LLM["Ollama qwen3:4b 또는 Gemini<br/>답변 모델"]
+    end
+    Retrieval --> Qdrant
+    Retrieval --> Embed
+    Retrieval --> Rerank
+    Orchestrator --> LLM
 ~~~
 
-| 구분 | 사용 기술 |
-| --- | --- |
-| 웹 앱 | Flask, Server-Sent Events (SSE), SQLite |
-| 법률 RAG 백엔드 | FastAPI, Uvicorn |
-| 답변 모델 | Ollama qwen3:4b 또는 Gemini. `LEGAL_RAG__LLM__BACKEND`로 고릅니다 |
-| 임베딩 | Ollama bge-m3 |
-| 검색과 재정렬 | Qdrant, BM25, RRF, BAAI/bge-reranker-v2-m3 |
-| 사건 자료 | Chroma, Tesseract OCR |
-| 설정 | `.env`, `configs/default.yaml`, `configs/local.yaml` |
+Flask는 질문과 관련된 사건 자료 조각을 최대 3개 찾습니다. Flask는 질문과 자료 조각을 `POST /v1/chat`으로 보냅니다. FastAPI는 답변과 법률 근거를 반환합니다. Flask는 완성된 답변을 Server-Sent Events(SSE)로 화면에 전달합니다.
 
-답변 모델을 바꾸면 FastAPI 서버를 다시 시작해야 합니다. 원문 데이터, 가공 데이터, Qdrant 색인은 저장소에 없습니다. 실행 전에 따로 준비해야 합니다.
+| 영역 | 구성 | 역할 |
+| --- | --- | --- |
+| 웹 앱 | Flask, SQLite, SSE | 화면, 웹 대화 기록, 답변 표시 |
+| 사건 자료 | Chroma, Tesseract OCR | 업로드 문서의 텍스트를 저장하고 검색 |
+| 법률 API | FastAPI, Uvicorn | `/v1/chat`은 답변을 만들고, `/v1/search`는 검색 결과를 반환 |
+| 백엔드 대화 상태 | SQLite | 답변 백엔드의 대화 문맥을 저장 |
+| 법률 색인 | Qdrant | 법령·판례의 dense 및 sparse 검색 |
+| 임베딩·재정렬 | Ollama bge-m3, BAAI/bge-reranker-v2-m3 | 질의 임베딩과 후보 재정렬 |
+| 답변 모델 | Ollama qwen3:4b 또는 Gemini | `LEGAL_RAG__LLM__BACKEND` 환경 변수로 선택 |
+| 설정 파일 | `.env`, `configs/default.yaml`, `configs/local.yaml` | 모델과 서비스 실행 설정 |
+
+답변 모델을 바꾸면 FastAPI 서버를 다시 시작해야 합니다. 원본 데이터, 가공 데이터, Qdrant 색인은 저장소에 없습니다. 실행 전에 따로 준비해야 합니다.
 
 ## 4. 한 턴의 흐름
 
-백엔드는 질문 하나를 아래 순서로 처리합니다.
+FastAPI는 답변 요청 하나를 아래 순서로 처리합니다.
 
 ~~~mermaid
+%%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 22, "diagramPadding": 4}}}%%
 flowchart TB
-    Q["사용자 메시지"] --> A["1. 분석<br/>법률 분야, 조문, 사건번호"]
-    A --> C{"법률 분야를<br/>알 수 있는가"}
-    C -->|"아니오"| Ask["되묻기<br/>필요한 사실을 질문"]
-    C -->|"예"| D["2. 질문 다시 쓰기<br/>앞 대화를 넣어 독립된 질문으로"]
-    D --> R["3. 검색<br/>법령 · 판례 5개 코퍼스"]
-    R --> E["4. 근거 구성<br/>상위 5개 조각"]
-    E --> G["5. 답변 생성<br/>근거만 사용"]
-    G --> V{"6. 인용 검증"}
-    V -->|"통과"| OK["답변 + 근거"]
-    V -->|"실패, 첫 번째"| G
-    V -->|"실패, 두 번째"| S["근거 없는 문장 삭제"]
-    S -->|"남은 내용이 있다"| OK
-    S -->|"남은 내용이 없다"| X["거절<br/>근거를 확인할 수 없음"]
+    Request["POST /v1/chat<br/>질문 · 사건 자료 조각"] --> Analyze["1. 질문 분석<br/>분야 · 인용 · 부족한 사실"]
+    Analyze --> ClarifyGate{"분야 미상 · 직접 인용 없음<br/>확인할 사실이 필요한가"}
+    ClarifyGate -->|"예"| Ask["추가 질문 반환"]
+    ClarifyGate -->|"아니오"| Condense["2. 질문 정리<br/>앞 대화를 넣어 독립 질문으로"]
+    Condense --> Rewrite["3. 검색 질의 작성<br/>검색어 · 필터"]
+    Rewrite --> Retrieve["4. 하이브리드 검색<br/>5개 코퍼스"]
+    Retrieve --> Context["5. 근거 구성<br/>법률 근거와 사건 자료 분리"]
+    Context --> Generate["6. 답변 생성<br/>근거에 따라 답변"]
+    Generate --> Verify{"7. 인용 검증"}
+    Verify -->|"통과"| Answer["답변 · 인용 근거"]
+    Verify -->|"실패 · 1회 재생성"| Retry["검증 의견을 반영해 재생성"]
+    Retry --> Verify
+    Verify -->|"재생성 후에도 실패"| Strip["근거 없는 문장 삭제"]
+    Strip --> Remaining{"유효한 내용이 남는가"}
+    Remaining -->|"예"| Answer
+    Remaining -->|"아니오"| Reject["답변 거절<br/>근거를 확인할 수 없음"]
+    Ask --> Response["API 응답"]
+    Answer --> Response
+    Reject --> Response
 ~~~
 
-- **1. 분석:** 모델이 질문에서 법률 분야와 사용자가 직접 적은 조문·사건번호를 뽑습니다.
-- **2. 질문 다시 쓰기:** 최근 4턴을 참고합니다. 사용자의 원래 문장은 그대로 보존합니다.
-- **3. 검색:** [5절](#5-검색-방법)의 방법으로 합니다.
-- **4. 근거 구성:** 조각 하나에서 앞 1,500자를 씁니다.
-- **5. 답변 생성:** 답변은 요약, 분석, 취할 수 있는 조치, 추가로 확인이 필요한 사실, 불확실한 점으로 구성됩니다. 모델은 분석을 먼저 쓰고 요약을 그다음에 씁니다. 화면은 요약을 먼저 보여 줍니다.
-- **6. 인용 검증:** 답변의 조문과 사건번호가 근거나 사용자의 문장에 있는지 확인합니다. 재생성은 한 번만 합니다. 같은 대화의 최근 답변이 인용한 조문은 후속 답변이 다시 말해도 통과합니다. 법령 이름과 조문 번호가 모두 같아야 합니다. 되묻기 턴에 적힌 조문은 통과시키지 않습니다.
+1. **질문 분석:** 분석기는 법률 분야, 사용자가 직접 적은 조문·사건번호, 부족한 사실을 찾습니다. 법률 분야를 알 수 없고 직접 인용도 없으며 추가 사실이 필요하면 먼저 질문을 반환합니다.
+2. **질문 정리:** 대화의 최근 4턴을 참고해 후속 질문을 독립된 질문으로 바꿉니다. 인용 검증에는 사용자의 원래 문장을 사용합니다.
+3. **검색 질의 작성:** 재작성기는 분석 결과에서 검색어와 필터를 만듭니다. 검색 방식은 [5절](#5-검색-방법)에 설명합니다.
+4. **근거 구성:** 검색 결과에서 최종 근거를 최대 5개 고릅니다. 각 법률 조각은 최대 1,500자입니다. 법령·판례와 사건 자료는 별도 정보로 유지합니다.
+5. **답변 생성:** 생성기는 근거를 바탕으로 요약, 분석, 대응 방안, 확인할 사실, 불확실성을 작성합니다. 법률 분야가 확인되면 아는 범위부터 답하고 부족한 사실을 함께 묻습니다. API는 분석 다음에 요약을 반환하고, 화면은 요약을 먼저 보여 줍니다.
+6. **인용 검증:** 검증기는 조문과 사건번호를 법률 근거와 사용자의 문장에 대조합니다. 최근 답변이 인용한 같은 법령·조문이나 사건번호는 후속 답변에서 다시 쓸 수 있습니다. 이전의 되묻기 메시지는 검증 근거로 쓰지 않습니다. 검증에 실패하면 한 번 다시 생성합니다. 다시 실패하면 근거 없는 문장을 지우거나 답변을 거절합니다.
+7. **화면 표시:** FastAPI는 완성된 응답을 반환합니다. Flask는 인용을 한 번 더 확인한 뒤 SSE 이벤트로 답변과 근거를 보냅니다. FastAPI는 답변 토큰을 직접 스트리밍하지 않습니다.
 
-**사건 자료가 있을 때:** Flask 앱은 질문으로 그 브라우저의 사건 자료를 검색합니다. 그리고 질문과 가까운 조각을 3개까지 질문과 함께 보냅니다. 질문과 먼 조각은 보내지 않습니다. 백엔드는 5번 단계에서 이 조각을 법령·판례 근거와 다른 블록으로 모델에 줍니다. 자료가 법령 이름과 함께 적은 조문과 사건번호는 사용자가 직접 적은 것으로 봅니다. 그래서 6번 단계는 이것을 지어낸 인용으로 세지 않습니다. 계약서 자체의 조항 번호("제5조")는 법령 이름 없이 쓴 경우에만 통과합니다. "주택임대차보호법 제5조"처럼 법령 이름이 붙으면 법령·판례 근거에 있어야 합니다. 화면은 답변이 쓴 자료만 "내 문서" 카드로 보여 줍니다. 자료가 없으면 요청과 프롬프트는 자료 기능이 없을 때와 같습니다.
+**사건 자료:** Flask는 현재 사용자의 Chroma 자료에서 질문과 가까운 조각을 최대 3개 찾습니다. FastAPI는 이 조각을 법령·판례 근거와 분리해 사실 자료로 사용합니다. 사건 자료 자체는 법적 근거가 아닙니다. 자료에 법령명과 조문, 사건번호가 있으면 사용자가 제공한 인용으로 처리합니다. 계약서의 조항 번호는 법령 이름 없이 쓴 경우에만 계약 조항으로 인정합니다. 답변에 법령 이름을 붙인 조문이 있으면 법률 근거나 사용자가 제공한 자료에서 확인해야 합니다. 화면은 답변에 사용한 자료만 "내 문서"로 표시합니다.
 
-Flask 앱은 받은 답변을 한 번 더 확인합니다. 근거에 없는 조문이나 사건번호가 답변에 있으면 확인 안내를 붙입니다. 짧은 인사말에는 백엔드를 부르지 않고 안내 문구로 답합니다.
+짧은 인사말에는 FastAPI를 호출하지 않습니다. Flask는 안내 문구를 바로 반환합니다.
 
 ## 5. 검색 방법
 
+Dense 검색은 뜻이 가까운 조각을 찾습니다. Sparse 검색은 질의와 같은 단어가 있는 조각을 찾습니다. 시스템은 가중 순위 결합(RRF)으로 두 검색 결과를 합칩니다.
+
 ~~~mermaid
-flowchart LR
-    Q["검색 질의"] --> D["Dense 검색<br/>bge-m3 · Qdrant<br/>코퍼스마다 100개"]
-    Q --> S["Sparse 검색<br/>BM25<br/>코퍼스마다 100개"]
-    D --> F["RRF 결합<br/>상위 100개"]
-    S --> F
-    F --> X["Cross-encoder 재정렬<br/>bge-reranker-v2-m3"]
-    X --> E["근거 5개"]
+%%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 22, "diagramPadding": 4}}}%%
+flowchart TB
+    Queries["재작성한 검색 질의<br/>5개 코퍼스에 적용"]
+    Queries --> Embed["Dense 경로<br/>bge-m3 임베딩"]
+    Embed --> DenseIndex[("Qdrant<br/>dense 색인")]
+    Queries --> BM25["Sparse 경로<br/>BM25 질의"]
+    BM25 --> SparseIndex[("Qdrant<br/>sparse 색인")]
+    DenseIndex --> RRF["가중 순위 결합 (RRF)<br/>상위 후보 100개"]
+    SparseIndex --> RRF
+    RRF --> Rerank["Cross-encoder 재정렬<br/>bge-reranker-v2-m3"]
+    Rerank --> Evidence["최종 법률 근거 5개"]
 ~~~
 
-- **코퍼스는 다섯 개입니다.** 형사, 민사, 행정, 지식재산권, 전체 법령입니다. 코퍼스마다 색인이 따로 있습니다.
-- **두 방법으로 찾습니다.** Dense 검색은 뜻이 가까운 조각을 찾습니다. Sparse 검색(BM25)은 같은 단어가 있는 조각을 찾습니다.
-- **RRF로 합칩니다.** Sparse 쪽 가중치는 0.75입니다. 각 검색 목록의 상위 3개는 항상 재정렬 단계로 갑니다.
-- **Cross-encoder가 순서를 다시 정합니다.** 이 모델은 질의와 조각을 함께 읽습니다. local 프로필은 CUDA와 float16으로 실행합니다.
-- **법령은 조 단위입니다.** 전체 법령 코퍼스는 한 조(항)가 한 조각입니다. 국가법령정보센터 Open API에서 받았습니다.
-
+- **코퍼스:** `criminal-v1`, `civil-v1`, `administrative-v1`, `ip-v1`, `statute-api-full-v1`을 각각 색인합니다.
+- **Dense 검색:** bge-m3가 질의를 벡터로 바꿉니다. Qdrant는 의미가 가까운 조각을 찾습니다.
+- **Sparse 검색:** BM25는 질의에 포함된 단어를 기준으로 조각을 찾습니다. Qdrant에는 sparse 색인도 저장합니다.
+- **RRF 결합:** 가중 순위 결합(RRF)은 두 검색 경로의 순위를 합칩니다. local 설정은 sparse 가중치 0.75를 사용합니다. RRF는 각 검색 목록의 상위 3개를 우선 넣습니다. 검색 목록이 많으면 이 단계는 융합 후보 100개의 절반에서 멈춥니다.
+- **재정렬:** Cross-encoder는 질의와 후보 조각을 함께 읽고 순서를 다시 정합니다. local 설정은 CUDA와 float16을 사용합니다.
+- **최종 근거:** 재정렬 결과에서 5개를 답변 생성기에 전달합니다.
+- **법령 조각:** 전체 법령 코퍼스는 조·항 단위로 나눕니다. 국가법령정보센터 Open API에서 자료를 받습니다.
 ## 6. 평가 결과
 
 모든 값은 참조 답변이나 정답 문서와의 일치도입니다. 법률적 정답률이 아닙니다.

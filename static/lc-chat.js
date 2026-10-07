@@ -10,6 +10,7 @@
     thinking: false,
     extra: [],
     questions: [],   /* 최신 답변이 사용자에게 묻는 질문 — /chat final_response.questions */
+    clearing: false,
     answering: ''    /* 사용자가 답하려고 고른 질문 */
   };
 
@@ -130,7 +131,7 @@
 
   function sendMessage(){
     const typed = (P.draft || '').trim();
-    if (!typed || P.thinking) return;
+    if (!typed || P.thinking || P.clearing) return;
     /* 고른 질문과 답을 한 메시지로 묶는다. 서버는 "두 달이요"가 어느 질문의 답인지 이 문장으로 안다. */
     const text = P.answering ? `상담의 질문: ${P.answering}\n답변: ${typed}` : typed;
 
@@ -143,43 +144,51 @@
     LC.pinThread = true;
     LC.render();
 
-    fetch('/chat', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ message: text })
-    }).then(() => {
-      if (sse) sse.close();
-      const qs = new URLSearchParams({ message: text });
-      sse = new EventSource('/chat?' + qs.toString());
-
-      sse.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'thought') { LC.S.traceLines.push(data.content); LC.render(); }
-          else if (data.type === 'final_response') {
-            P.extra.push({ role:'agent', text: data.chat_response });
-            P.questions = data.questions || [];
-            LC.SOURCES = (data.sources || []).map((h, i) => ({ id: String(i + 1), kind: h.kind || '내 문서', title: h.source, quote: h.quote, score: h.score }));
-            P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
-          }
-          else if (data.type === 'error') {
-            P.extra.push({ role:'agent', text:'오류: ' + data.content }); P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
-          }
-          else if (data.type === 'stream_end') { P.thinking = false; sse.close(); LC.render(); }
-        } catch (err) {
-          console.error('SSE parse error:', err);
-          P.extra.push({ role:'agent', text:'응답을 해석하는 중 오류가 발생했습니다.' });
-          P.thinking = false; LC.pinThread = true; LC.render();
+    if (sse) sse.close();
+    const controller = new AbortController();
+    sse = { close: () => controller.abort() };
+    let received = false;
+    const userError = message => Object.assign(new Error(message), { userMessage:message });
+    const handleEvent = data => {
+      if (data.type === 'thought') { LC.S.traceLines.push(data.content); LC.render(); }
+      else if (data.type === 'final_response') {
+        received = true;
+        P.extra.push({ role:'agent', text: data.chat_response });
+        P.questions = data.questions || [];
+        LC.SOURCES = (data.sources || []).map((h, i) => ({ id: String(i + 1), kind: h.kind || '내 문서', title: h.source, quote: h.quote, score: h.score }));
+        P.thinking = false; LC.pinThread = true; LC.render();
+      } else if (data.type === 'error') {
+        received = true;
+        P.extra.push({ role:'agent', text:'오류: ' + data.content });
+        P.thinking = false; LC.pinThread = true; LC.render();
+      }
+    };
+    (async () => {
+      const response = await LC.secureFetch('/chat', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ message:text, request_id:crypto.randomUUID() }), signal:controller.signal
+      });
+      if (!response.ok) {
+        throw userError(response.status === 429 ? '요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.' : '요청을 처리하지 못했습니다.');
+      }
+      if (!response.body) throw userError('응답 스트림을 사용할 수 없습니다.');
+      const reader = response.body.getReader(), decoder = new TextDecoder();
+      let pending = '';
+      while (true) {
+        const part = await reader.read();
+        pending += decoder.decode(part.value || new Uint8Array(), { stream:!part.done });
+        let boundary;
+        while ((boundary = pending.indexOf('\n\n')) !== -1) {
+          const event = pending.slice(0, boundary); pending = pending.slice(boundary + 2);
+          const data = event.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
+          if (data) handleEvent(JSON.parse(data));
         }
-      };
-
-      sse.onerror = () => {
-        P.extra.push({ role:'agent', text:'서버 연결이 끊어졌습니다.' });
-        P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
-      };
-    }).catch((err) => {
-      console.error('Message send error:', err);
-      P.extra.push({ role:'agent', text:'메시지를 보내는 중 오류가 발생했습니다.' });
+        if (part.done) break;
+      }
+      if (!received) throw userError('서버 연결이 끊어졌습니다.');
+    })().catch(error => {
+      if (controller.signal.aborted) return;
+      P.extra.push({ role:'agent', text:error.userMessage || '메시지를 보내는 중 오류가 발생했습니다.' });
       P.thinking = false; LC.pinThread = true; LC.render();
     });
   }
@@ -215,13 +224,20 @@
       answer: k => { P.answering = k; setTimeout(() => { const el = document.getElementById('userInput'); if (el) el.focus(); }, 0); },
       cancelAnswer: () => { P.answering = ''; },
       easier: () => { P.tone = '쉬운 말'; P.draft = '위 내용을 더 쉽게 설명해 주세요.'; },
-      newCase: () => {
+      newCase: async () => {
+        if (P.thinking || P.clearing) { alert('현재 요청이 끝난 뒤 새 상담을 시작해 주세요.'); return false; }
+        P.clearing = true;
+        try {
+          await LC.clearChatHistory();
+        } catch (error) { alert(error.message); return false; }
+        finally { P.clearing = false; }
         if (sse) { sse.close(); sse = null; }
         Object.assign(P, { extra: [], draft: '', thinking: false, railTab: '전체', questions: [], answering: '' });
         LC.S.traceLines = [];
         LC.SOURCES = [];
-        LC.clearChatHistory();
         if (location.search) history.replaceState(null, '', location.pathname);
+        LC.render();
+        return false;
       },
       send: () => { sendMessage(); return false; },
       voice: () => { alert('음성 입력은 준비 중입니다.'); return false; },

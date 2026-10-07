@@ -10,8 +10,8 @@ from legal_rag.schemas import RetrievalFilters, ScoredChunk, UserDocument
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    message: str = Field(min_length=1, max_length=4000)
-    conversation_id: str | None = Field(default=None, max_length=128)
+    message: str = Field(min_length=1, max_length=4000, pattern=r"\S")
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
     include_trace: bool = False
     # Passages of the caller's own files that bear on this message; the service holds no user files.
     user_documents: list[UserDocument] = Field(default_factory=list, max_length=3)
@@ -20,7 +20,7 @@ class ChatRequest(BaseModel):
 class SearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    query: str = Field(min_length=1, max_length=2000)
+    query: str = Field(min_length=1, max_length=2000, pattern=r"\S")
     k: int = Field(default=5, ge=1, le=50)
     filters: RetrievalFilters | None = None
 
@@ -33,10 +33,3 @@ class SearchResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
-    corpus_version: str
-    collection: str | None = None
-    chunks: int | None = None
-    embedder: str | None = None
-    llm: str
-    tokenizer: str | None = None
-    warm: bool = False  # the startup warm-up search has completed
