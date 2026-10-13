@@ -33,7 +33,7 @@ from pathlib import Path
 import typer
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))  # citation_guard lives at the repo root
+sys.path.insert(0, str(ROOT / "webapp"))  # citation_guard lives with the web app
 
 app = typer.Typer(add_completion=False)
 DOMAINS = ("administrative", "civil", "criminal")  # ip sits at the exact-gold floor (~1%)

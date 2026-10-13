@@ -289,7 +289,7 @@ LEGAL_RAG__LLM__MODEL=qwen3:4b
 
 ### 8.2 Flask 웹 앱
 
-필요한 것: Python 3.13, 루트의 `requirements.txt`. 백엔드와 다른 환경에서 실행합니다. `.env`에 백엔드 주소를 적습니다.
+필요한 것: Python 3.13, `webapp/requirements.txt`. 백엔드와 다른 환경에서 실행합니다. `.env`에 백엔드 주소를 적습니다.
 
 ~~~dotenv
 APP_ENV=local
@@ -297,8 +297,8 @@ LEGAL_RAG_URL=http://127.0.0.1:8000
 ~~~
 
 ~~~bash
-pip install -r requirements.txt
-python app.py
+pip install -r webapp/requirements.txt
+python webapp/app.py
 ~~~
 
 화면은 <http://localhost:5005>에서 열립니다. 배포 환경에서는 `SECRET_KEY`도 설정해야 합니다. `LLM_PROVIDER`는 상담 답변에 영향을 주지 않습니다. 이 값은 사건 자료의 문서 분석에만 쓰입니다.
@@ -323,7 +323,7 @@ uv run python scripts/build_index.py --corpus-version statute-api-full-v1
 
 ~~~bash
 uv run pytest tests/legal_rag -q
-python -m pytest tests --ignore=tests/legal_rag -k 'not Live' -q
+python -m pytest webapp/tests -k 'not Live' -q
 ~~~
 
 첫 명령은 백엔드 테스트입니다. 둘째 명령은 Flask 앱 테스트이며 Flask 환경에서 실행합니다.
@@ -332,12 +332,12 @@ python -m pytest tests --ignore=tests/legal_rag -k 'not Live' -q
 
 ### 웹 앱
 
-- [app.py](app.py): Flask 라우트, 웹 채팅 SSE, 대화 기록, 사건 자료 올리기.
-- [legal_backend.py](legal_backend.py): `/v1/chat` 호출과 답변·근거 표시 형식.
-- [citation_guard.py](citation_guard.py): 근거에 없는 조문과 사건번호 찾기.
-- [langchain_config.py](langchain_config.py): 사건 자료의 Chroma 저장과 검색.
-- [llm_ocr.py](llm_ocr.py): 문서 텍스트 추출과 분석.
-- [static/](static/), [templates/](templates/): 화면.
+- [webapp/app.py](webapp/app.py): Flask 라우트, 웹 채팅 SSE, 대화 기록, 사건 자료 올리기.
+- [webapp/legal_backend.py](webapp/legal_backend.py): `/v1/chat` 호출과 답변·근거 표시 형식.
+- [webapp/citation_guard.py](webapp/citation_guard.py): 근거에 없는 조문과 사건번호 찾기.
+- [webapp/langchain_config.py](webapp/langchain_config.py): 사건 자료의 Chroma 저장과 검색.
+- [webapp/llm_ocr.py](webapp/llm_ocr.py): 문서 텍스트 추출과 분석.
+- [static/](webapp/static/), [templates/](webapp/templates/): 화면.
 
 ### 백엔드
 
@@ -358,6 +358,7 @@ python -m pytest tests --ignore=tests/legal_rag -k 'not Live' -q
 
 ### 문서
 
+- [문서 목차](docs/README.md): 문서 폴더의 구성과 전체 목록.
 - [법률 RAG 개발 안내](docs/legal-rag-backend.md): 백엔드 설치, 자료 수집·색인, API.
 - [채점기 문서](docs/answer-grader-core.md): 현재 채점 방법과 이전 채점기를 바꾼 이유.
 - [검색 진단 문서](docs/retrieval-diagnostics.md): 검색 설정 비교와 결과 해석.

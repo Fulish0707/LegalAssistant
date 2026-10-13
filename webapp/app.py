@@ -81,7 +81,12 @@ def establish_anonymous_user():
     for key in ("authenticated_user_id", "account_email", "auth_next", "oidc_nonce"):
         session.pop(key, None)
 
+# Data folders stay at the repository root, whatever directory the app is started from:
+# a relative path, from .env or the default, is resolved there and not in the working directory.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_FILE = os.getenv("APP_STATE_DB", "sqlite_db/app_state.db") # Define DB_FILE before use
+if DB_FILE:
+    DB_FILE = os.path.join(REPO_ROOT, DB_FILE)
 db_dir = os.path.dirname(DB_FILE)
 if db_dir:
     os.makedirs(db_dir, exist_ok=True)
@@ -462,7 +467,7 @@ def delete_knowledge_base_source_route():
 #################################################
 # --- File Upload Configuration (for OCR) --- #
 #################################################
-UPLOAD_FOLDER = 'uploads'
+UPLOAD_FOLDER = os.path.join(REPO_ROOT, 'uploads')
 ALLOWED_EXTENSIONS_OCR = {'png', 'jpg', 'jpeg', 'txt', 'pdf', 'docx'}
 
 if not os.path.exists(UPLOAD_FOLDER):
