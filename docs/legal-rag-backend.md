@@ -695,8 +695,7 @@ qwen3:8b judged them as in the section above.
 
 ## Smaller structural civil chunks
 
-The prepared `civil-struct800-v1` corpus uses 800/1000-character structural
-chunks. The optional `structural-civil` profile expands adjacent civil passages
-after reranking under a rendered-context budget, with separate citations.
-See [indexing and comparison instructions](structural-civil.md). Quality gains
-remain unmeasured; the existing civil-v1 index remains the baseline.
+The `civil-struct800-v1` corpus used 800/1000-character structural chunks, with a
+profile that expanded adjacent civil passages after reranking. It was not adopted, and
+its Qdrant collection was deleted on 2026-10-14. The record and the way to rebuild it are in
+[the structural chunk pilot](experiments/structural-civil.md). The civil-v1 index is the one served.

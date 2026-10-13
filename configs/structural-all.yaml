@@ -1,3 +1,7 @@
+# The four *-struct800-v1 Qdrant collections this profile searches were deleted on 2026-10-14
+# (not adopted; docs/experiments/structural-civil.md). Kept as the profile for rebuilding them
+# with scripts/run_structural_all.sh, and because scripts/eval_golden_answers.py prepares and
+# generates with it.
 # All four corpora use the civil pilot's smaller structural chunks.
 # Build the three remaining structural indexes before serving this profile.
 corpus:
