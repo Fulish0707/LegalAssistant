@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from legal_rag.evaluation.reports import summarize_cases, write_diagnostic_reports
+from legal_rag.evaluation.diagnosis.reports import summarize_cases, write_diagnostic_reports
 
 
 def case(rank, *, missing=False):

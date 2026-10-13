@@ -23,12 +23,11 @@ from pathlib import Path
 import typer
 
 from legal_rag.cli import settings_from_options
-from legal_rag.evaluation.fusion_sweep import pair_ranks, pending_pairs, refuse
-from legal_rag.evaluation.judgment_store import JudgmentStore
-from legal_rag.evaluation.pool_extension import extend_pool, gold_document_ids
-from legal_rag.evaluation.relevance_judge import JUDGE_THINK, describe_key, judge_key
-from legal_rag.evaluation.relevance_pool import JUDGMENT_FILES, read_jsonl, write_pool
-from legal_rag.ingestion.corpus import Corpus
+from legal_rag.evaluation.relevance.fusion_sweep import pair_ranks, pending_pairs, refuse
+from legal_rag.evaluation.relevance.judgment_store import JudgmentStore
+from legal_rag.evaluation.relevance.pool_extension import extend_pool, gold_document_ids, needed_chunks
+from legal_rag.evaluation.relevance.relevance_judge import JUDGE_THINK, describe_key, judge_key
+from legal_rag.evaluation.relevance.relevance_pool import JUDGMENT_FILES, read_jsonl, write_pool
 
 app = typer.Typer(add_completion=False)
 LEGS = ('dense', 'sparse')
@@ -46,21 +45,6 @@ def variant_name(sparse_weight: float) -> str:
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
-def _needed_chunks(settings, chunk_ids: set[str]) -> dict:
-    """Stream the processed corpus once, keeping only the chunks the new pool rows need."""
-    found = {}
-    for chunk in Corpus.load(settings.processed_corpus_dir()).chunks():
-        if chunk.id in chunk_ids:
-            found[chunk.id] = chunk
-            if len(found) == len(chunk_ids):
-                break
-    missing = sorted(chunk_ids - set(found))
-    if missing:
-        raise ValueError(f'{len(missing)} newly surfaced chunks are not in the processed corpus '
-                         f'(e.g. {missing[0]}); the pool and the corpus disagree')
-    return found
 
 
 @app.command()
@@ -125,7 +109,7 @@ def main(
     known = {(row['case_id'], row['chunk_id']) for row in source_rows}
     new_chunk_ids = {chunk_id for pair, chunk_id in ((pair, pair[1]) for pair in ranks) if pair not in known}
     _progress(f'{len(new_chunk_ids)} newly surfaced chunks; scanning the processed corpus')
-    chunks = _needed_chunks(settings, new_chunk_ids) if new_chunk_ids else {}
+    chunks = needed_chunks(settings, new_chunk_ids) if new_chunk_ids else {}
     pool = extend_pool(source_rows, ranks, chunks, gold_documents=gold)
 
     copied = [name for name in JUDGMENT_FILES if (pool_dir / name).exists()]

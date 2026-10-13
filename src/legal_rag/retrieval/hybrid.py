@@ -7,6 +7,7 @@ from typing import Protocol
 from legal_rag.reranking import Reranker
 from legal_rag.schemas import Chunk, RetrievalFilters, ScoredChunk
 
+from .dense import DenseRetriever
 from .fusion import Fuser
 
 
@@ -41,9 +42,19 @@ class HybridRetriever:
     def retrieve_many(self, queries: list[str], k: int, filters: RetrievalFilters | None = None, rerank_query: str | None = None) -> list[ScoredChunk]:
         self.last_trace = {}
         ranked_lists: list[list[ScoredChunk]] = []
+        # All corpora built by the factory share an embedder. Reuse its query vector
+        # within this call only; other requests and other embedders remain independent.
+        query_vectors: dict[tuple[int, str], list[float]] = {}
         for query in queries:
             for leg in self.legs:
-                hits = leg.retrieve(query, self.k_leg, filters)
+                # A custom subclass may override retrieve(); keep its own behavior.
+                if type(leg) is DenseRetriever:
+                    key = (id(leg.embedder), query)
+                    if key not in query_vectors:
+                        query_vectors[key] = leg.embedder.embed_query(query)
+                    hits = leg.retrieve_vector(query_vectors[key], self.k_leg, filters)
+                else:
+                    hits = leg.retrieve(query, self.k_leg, filters)
                 self.last_trace[f"{leg.name}:{query}"] = [(hit.chunk.id, hit.score) for hit in hits]
                 ranked_lists.append(hits)
         fused = self.fuser.fuse(ranked_lists, self.k_fused)

@@ -146,7 +146,7 @@ def test_search_cli_accepts_preserved_external_ids(source, tmp_path):
     cfg = settings(tmp_path)
     importer.import_processed(root, cfg)
     build_index(cfg)
-    script = Path(__file__).resolve().parents[2] / 'scripts/search.py'
+    script = Path(__file__).resolve().parents[3] / 'scripts/search.py'
     result = subprocess.run([sys.executable, str(script), '특허권', '--root', str(tmp_path),
                              '--profile', 'default', '--corpus-version', 'imported',
                              '--embedding-backend', 'fake'], capture_output=True, text=True)

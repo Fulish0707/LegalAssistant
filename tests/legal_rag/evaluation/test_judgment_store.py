@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from legal_rag.evaluation.judgment_store import JudgeKey, JudgmentStore
+from legal_rag.evaluation.relevance.judgment_store import JudgeKey, JudgmentStore
 
 KEY = JudgeKey(model='ollama:qwen3:8b', prompt_sha256='p1')
 

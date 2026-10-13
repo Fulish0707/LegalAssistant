@@ -7,6 +7,7 @@ Example:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import typer
@@ -27,6 +28,14 @@ def main(
     port: int = typer.Option(None),
 ) -> None:
     settings = settings_from_options(profile=profile, root=root, corpus_version=corpus_version)
+    # This namespace emits timing counters only; leave other libraries' log levels alone.
+    timing_logger = logging.getLogger("legal_rag.llm.ollama")
+    if not timing_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        timing_logger.addHandler(handler)
+    timing_logger.setLevel(logging.INFO)
+    timing_logger.propagate = False
     uvicorn.run(create_app(settings), host=host or settings.api.host, port=port or settings.api.port)
 
 

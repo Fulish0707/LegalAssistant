@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 from legal_rag.cli import settings_from_options
-from legal_rag.evaluation.diagnostic_runner import run_retrieval_diagnostics
+from legal_rag.evaluation.diagnosis.diagnostic_runner import run_retrieval_diagnostics
 
 app = typer.Typer(add_completion=False)
 

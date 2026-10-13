@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from legal_rag.llm import Message, StructuredOutputError
 
-from .answer_judge import _spans
+from .spans import spans
 
 RUBRIC_VERSION = "answer-core-v1"
 TIMEOUT_STOP_AFTER = 2
@@ -98,7 +98,7 @@ def _conclusion(chat, pair: dict, cache_path: Path) -> dict:
 
 def grade_answer(chat, pair: dict, cache_path: Path) -> dict:
     conclusion = _conclusion(chat, pair, cache_path)
-    sentences = _spans(pair["answer"], include_whole=False)
+    sentences = spans(pair["answer"], include_whole=False)
     content = json.dumps({"question": pair["question"], "core": conclusion["core"], "condition": conclusion["condition"],
                           "answer_sentences": [{"n": n, "text": text} for n, text in enumerate(sentences, 1)]}, ensure_ascii=False)
     response = chat.generate([Message(role="system", content=CHECK_SYSTEM), Message(role="user", content=content)],

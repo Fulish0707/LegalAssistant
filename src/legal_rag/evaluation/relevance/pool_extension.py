@@ -7,6 +7,7 @@ difference between an original row and an extended one.
 """
 from __future__ import annotations
 
+from legal_rag.ingestion.corpus import Corpus
 from legal_rag.schemas import Chunk
 
 from .relevance_pool import _pair
@@ -65,3 +66,18 @@ def extend_pool(pool_rows: list[dict], needed_pairs: dict[tuple[str, str], dict[
         row['is_gold_chunk'] = chunk.document_id in gold_documents.get(case_id, set())
         extended.append(row)
     return extended
+
+
+def needed_chunks(settings, chunk_ids: set[str]) -> dict[str, Chunk]:
+    """Stream the processed corpus once, keeping only the chunks named in ``chunk_ids``."""
+    found = {}
+    for chunk in Corpus.load(settings.processed_corpus_dir()).chunks():
+        if chunk.id in chunk_ids:
+            found[chunk.id] = chunk
+            if len(found) == len(chunk_ids):
+                break
+    missing = sorted(chunk_ids - set(found))
+    if missing:
+        raise ValueError(f'{len(missing)} needed chunks are not in the processed corpus (e.g. {missing[0]}); '
+                         'the pool and the corpus disagree')
+    return found

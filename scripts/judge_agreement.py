@@ -22,14 +22,14 @@ from pathlib import Path
 
 import typer
 
-from legal_rag.evaluation.calibration import (
+from legal_rag.evaluation.relevance.calibration import (
     BOUNDARY_KEYS, PASS_KAPPA, agreement, agreement_paths, calibration_fingerprint, disagreement_rows,
     judge_passes, missing_llm_message, model_grades, quote_downgrades, read_reference_grades, require_reference_grades,
     write_review)
-from legal_rag.evaluation.judgment_store import JudgmentStore
-from legal_rag.evaluation.relevance_judge import (
+from legal_rag.evaluation.relevance.judgment_store import JudgmentStore
+from legal_rag.evaluation.relevance.relevance_judge import (
     JUDGE_THINK, QUOTE_RULE_VERSION, describe_key, generation_settings, judge_key)
-from legal_rag.evaluation.relevance_pool import read_jsonl
+from legal_rag.evaluation.relevance.relevance_pool import read_jsonl
 
 app = typer.Typer(add_completion=False)
 

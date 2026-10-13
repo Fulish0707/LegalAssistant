@@ -1,5 +1,5 @@
 """Frozen turns: retrieval and analysis are recorded once, then replayed so only generation varies."""
-from legal_rag.evaluation.frozen import FrozenAnalyzer, FrozenRetriever, capture_turn, load_frozen, save_frozen
+from legal_rag.evaluation.answers.frozen import FrozenAnalyzer, FrozenRetriever, capture_turn, load_frozen, save_frozen
 from legal_rag.llm import FakeChatModel
 from legal_rag.rag.conversation import InMemoryConversationStore
 from legal_rag.rag.orchestrator import Orchestrator

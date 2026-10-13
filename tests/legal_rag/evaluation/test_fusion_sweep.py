@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from legal_rag.evaluation.fusion_sweep import pair_ranks, pending_pairs, refuse
-from legal_rag.evaluation.relevance_pool import read_jsonl
+from legal_rag.evaluation.relevance.fusion_sweep import pair_ranks, pending_pairs, refuse
+from legal_rag.evaluation.relevance.relevance_pool import read_jsonl
 
 REAL_POOL = Path('data/eval/relevance/ip-v1-pilot-200-top10')
 
