@@ -69,6 +69,12 @@ rerank:
   # on 50 civil judgments (2026-09-27). The 8 GB card also holds qwen3:4b and bge-m3.
   dtype: float16
 
+rag:
+  # Keep the existing expression: the concise experiment has a scope error in a summary.
+  # Both modes preserve the complete schema, token budget, and verification.
+  # Experimental opt-in: LEGAL_RAG__RAG__ANSWER_STYLE=concise.
+  answer_style: full
+
 api:
   # Load BM25, bge-m3 and the reranker at startup instead of on the first request.
   warmup: true

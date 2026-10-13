@@ -28,6 +28,7 @@ class Verifier:
         alone is excused when the answer names that law with an excused reference.
         """
         own_clauses, prior = set(own_clauses), set(prior_refs)
+        prior.update(case for reference in list(prior) for case in extract_case_refs(reference))
         by_id = bundle.by_id()
         exempt: set[str] = set()
         for user_ref in user_refs:
@@ -44,6 +45,7 @@ class Verifier:
                     evidence_statutes.add(f"{law} {article}")
             if case := item.header.get("Case number"):
                 evidence_cases.add(case)
+                evidence_cases.update(extract_case_refs(case))
             for ref in extract_statute_refs(item.text):
                 evidence_statutes.update({ref.render(), ref.article})
             evidence_cases.update(extract_case_refs(item.text))

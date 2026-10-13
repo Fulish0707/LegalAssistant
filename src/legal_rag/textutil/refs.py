@@ -24,6 +24,10 @@ CASE_TYPES = (
 )
 CASE_PATTERN = rf"(?<![0-9])\d{{2,4}}(?:{CASE_TYPES})\d{{1,7}}(?![0-9])"
 CASE_RE = re.compile(CASE_PATTERN)
+# Preserve the public compact regex used by existing retrieval tokenization and
+# evaluation. Reference extraction additionally accepts horizontal spacing.
+_CASE_SPACE = r"[ \t\u00a0\u3000]*"
+_SPACED_CASE_RE = re.compile(rf"(?<![0-9])\d{{2,4}}{_CASE_SPACE}(?:{CASE_TYPES}){_CASE_SPACE}\d{{1,7}}(?![0-9])")
 
 
 @dataclass(frozen=True)
@@ -77,7 +81,8 @@ def extract_statute_refs(text: str) -> list[StatuteRef]:
 
 def extract_case_refs(text: str) -> list[str]:
     seen: list[str] = []
-    for match in CASE_RE.finditer(text):
-        if match.group(0) not in seen:
-            seen.append(match.group(0))
+    for match in _SPACED_CASE_RE.finditer(text):
+        case = re.sub(r"[ \t\u00a0\u3000]+", "", match.group(0))
+        if case not in seen:
+            seen.append(case)
     return seen
