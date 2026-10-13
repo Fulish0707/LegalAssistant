@@ -62,12 +62,19 @@ class VectorStore:
             sparse_vectors_config={self.SPARSE: models.SparseVectorParams()},
             hnsw_config=models.HnswConfigDiff(on_disk=True) if on_disk else None,
         )
-        if self._server:  # payload indexes are a no-op in embedded mode
-            for key in ("document_type", "metadata.law_name", "metadata.court", "metadata.legal_domain",
-                        "document_id", "metadata.corpus_version"):
-                self.client.create_payload_index(self.collection, key, models.PayloadSchemaType.KEYWORD)
-            for key in (*_DERIVED_KEYS, "order"):
-                self.client.create_payload_index(self.collection, key, models.PayloadSchemaType.INTEGER)
+        self.create_payload_indexes()
+
+    def create_payload_indexes(self) -> None:
+        """Index the payload keys that filters use. Safe to repeat: a collection built before a key
+        was added here gets it, and reading a document by `document_id` no longer scans every point
+        (0.5 s against 0.01 s on 160,000 points)."""
+        if not self._server:  # payload indexes are a no-op in embedded mode
+            return
+        for key in ("document_type", "metadata.law_name", "metadata.court", "metadata.legal_domain",
+                    "document_id", "metadata.corpus_version"):
+            self.client.create_payload_index(self.collection, key, models.PayloadSchemaType.KEYWORD)
+        for key in (*_DERIVED_KEYS, "order"):
+            self.client.create_payload_index(self.collection, key, models.PayloadSchemaType.INTEGER)
 
     def count(self) -> int:
         return self.client.count(self.collection).count if self.exists() else 0
@@ -135,6 +142,21 @@ class VectorStore:
             models.FieldCondition(key="metadata.corpus_version",
                                   match=models.MatchValue(value=chunk.metadata.corpus_version)),
         ]))
+
+    # Statutes stored article by article name their article; the windowed corpora do not.
+    _BY_ARTICLE = [models.IsEmptyCondition(is_empty=models.PayloadField(key="metadata.article"))]
+
+    def law_names(self) -> list[str]:
+        """The laws this store holds article by article."""
+        found = self.client.facet(self.collection, key="metadata.law_name", limit=100_000,
+                                  facet_filter=models.Filter(must_not=self._BY_ARTICLE))
+        return [hit.value for hit in found.hits]
+
+    def law_chunks(self, law_name: str) -> list[Chunk]:
+        """Every article chunk of one law, in original order."""
+        return self._all(models.Filter(
+            must=[models.FieldCondition(key="metadata.law_name", match=models.MatchValue(value=law_name))],
+            must_not=self._BY_ARTICLE))
 
     def _all(self, matching: models.Filter) -> list[Chunk]:
         chunks, offset = [], None

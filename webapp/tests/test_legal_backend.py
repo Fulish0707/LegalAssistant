@@ -6,6 +6,8 @@ The service is stubbed with an httpx transport; nothing here starts a server or 
 import unittest
 from unittest import mock
 
+import json
+
 import httpx
 
 import legal_backend
@@ -108,6 +110,79 @@ class DocumentTests(unittest.TestCase):
         for handler in (refused, lambda request: httpx.Response(500, text="boom"), lambda request: httpx.Response(200, json={})):
             with self.subTest(handler=handler), self.fetched(handler), self.assertRaises(legal_backend.LegalBackendUnavailable):
                 legal_backend.document("http://legal:8000", "c1")
+
+
+class LawTests(unittest.TestCase):
+    def fetched(self, handler):
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        return mock.patch.object(legal_backend.httpx, "get", client.get)
+
+    def test_a_law_is_read_as_its_articles_and_an_unknown_law_is_none(self):
+        article = {"article": "제3조", "title": "대항력 등", "text": "제①항 ...", "chunk_id": "law#art:제3조"}
+
+        def handler(request):
+            if request.url.params["name"] != "주택임대차보호법":
+                return httpx.Response(404, json={"detail": "none"})
+            return httpx.Response(200, json={"name": "주택임대차보호법", "articles": [article]})
+
+        with self.fetched(handler):
+            self.assertEqual(legal_backend.law("http://legal:8000", "주택임대차보호법"), {"name": "주택임대차보호법", "articles": [article]})
+            self.assertIsNone(legal_backend.law("http://legal:8000", "없는법"))
+
+
+def hit(document_id, score, text="본문", chunk=0, title="", **metadata):
+    return {"score": score, "chunk": {"id": f"{document_id}_chunk_{chunk:04d}", "document_id": document_id,
+                                      "document_type": "judgment", "title": title, "text": text, "metadata": metadata}}
+
+
+class CaseSearchTests(unittest.TestCase):
+    def search(self, hits, labels=None, statutes=None):
+        def handler(request):
+            self.path, self.sent = request.url.path, json.loads(request.content)
+            return httpx.Response(200, json={"hits": hits, "labels": labels or {}, "statutes": statutes or {}})
+
+        with served(handler):
+            return legal_backend.search_cases("http://legal:8000", "임차권등기명령 보증금 반환")
+
+    def test_the_case_search_of_the_service_is_asked(self):
+        self.search([])
+
+        self.assertEqual((self.path, self.sent), ("/v1/cases", {"query": "임차권등기명령 보증금 반환", "k": 20}))
+
+    def test_a_card_carries_the_articles_its_case_cites(self):
+        cited = [{"law": "주택임대차보호법", "article": "제3조의3", "paragraph": "제1항"},
+                 {"law": "민사집행법", "article": "제283조", "paragraph": None}]
+
+        cards = self.search([hit("대법원-2019다1", 0.9), hit("서울고등법원-2020나2", 0.8)], statutes={"대법원-2019다1": cited})
+
+        self.assertEqual([card["statutes"] for card in cards], [cited, []])
+
+    def test_a_case_named_only_in_its_document_id_shows_court_number_and_date(self):
+        """The civil corpus keeps no case number in its metadata (광주고등법원-2014나2029)."""
+        card = self.search([hit("광주고등법원-2014나2029", 0.91, text="피고는 원고에게 지급하라.", title="공사대금",
+                                court="광주고등법원", original={"date": "2015-04-17T09:00:00.000+09:00"})])[0]
+
+        self.assertEqual(card, {"title": "광주고등법원 2014나2029", "subject": "공사대금", "date": "2015.04.17", "kind": "판례",
+                                "quote": "피고는 원고에게 지급하라.", "score": 0.91,
+                                "chunk_id": "광주고등법원-2014나2029_chunk_0000", "statutes": []})
+
+    def test_metadata_names_a_case_before_its_id_does(self):
+        card = self.search([hit("criminal::judgment::100029", 0.8, court="대법원", case_number="84도2229",
+                                original={"date": "1984.12.26"})])[0]
+
+        self.assertEqual((card["title"], card["date"]), ("대법원 84도2229", "1984.12.26"))
+
+    def test_a_case_with_no_name_uses_the_services_label_or_says_so(self):
+        cards = self.search([hit("administrative::judgment::1", 0.7), hit("administrative::judgment::2", 0.6)],
+                            labels={"administrative::judgment::1": "서울행정법원 2019구합1234"})
+
+        self.assertEqual([card["title"] for card in cards], ["서울행정법원 2019구합1234", "판례 (법원·사건번호 미기재)"])
+        self.assertEqual(cards[0]["date"], "")
+
+    def test_a_broken_reply_is_reported_as_unavailable(self):
+        with served(lambda request: httpx.Response(200, json={"results": []})), \
+                self.assertRaises(legal_backend.LegalBackendUnavailable):
+            legal_backend.search_cases("http://legal:8000", "x")
 
 
 class RenderTests(unittest.TestCase):

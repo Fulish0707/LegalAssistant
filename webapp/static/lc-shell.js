@@ -31,10 +31,6 @@ window.LC = window.LC || {};
     'display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 10px;border-radius:9px;border:0;background:' +
     (on ? '#e6f0f0' : 'transparent') + ';color:' + (on ? a : '#3d4348') + ';font-size:12.5px;font-weight:' + (on ? '500' : '400') + ';cursor:pointer';
 
-  LC.sortPill = on =>
-    'padding:6px 12px;border-radius:999px;border:1px solid ' + (on ? a : '#e6e3dd') + ';background:' +
-    (on ? '#e6f0f0' : '#fff') + ';color:' + (on ? a : '#767d83') + ';font-size:11.5px;cursor:pointer';
-
   LC.bar = (score, w, h) =>
     '<span style="width:' + w + 'px;height:' + h + 'px;border-radius:3px;background:#eeeae2;overflow:hidden;display:block">' +
     '<span style="display:block;height:100%;width:' + LC.pct(score) + ';background:' + a + '"></span></span>';
@@ -440,61 +436,5 @@ ${LC.reader()}
       });
   };
 
-  /* 조문 계층 필터 — 판례 검색 페이지가 사용, 다른 페이지에서도 재사용 가능 */
-  LC.drill = function (st) {
-    const law = LC.LAWS[st.lawIdx] || LC.LAWS[0];
-    const joOrder = [];
-    law.jangs.forEach(j => j.jos.forEach(jo => joOrder.push(jo.no)));
-    const match = c => (c.refs || []).some(r => r.law === law.name &&
-      (!st.joSel || r.jo === st.joSel) && (!st.hangSel || r.hang === st.hangSel) && (!st.hoSel || r.ho === st.hoSel));
-    const count = joNo => LC.CASES.filter(c => (c.refs || []).some(r => r.law === law.name && r.jo === joNo)).length;
 
-    let list = LC.CASES.filter(match);
-    if (st.sort === '조문순') list = list.slice().sort((x, y) => {
-      const k = c => Math.min.apply(null, c.refs.filter(r => r.law === law.name).map(r => joOrder.indexOf(r.jo)).concat([99]));
-      return k(x) - k(y);
-    });
-    else if (st.sort === '최신순') list = list.slice().sort((x, y) => (y.name.match(/\d{4}/) || [0])[0] - (x.name.match(/\d{4}/) || [0])[0]);
-    else list = list.slice().sort((x, y) => y.score - x.score);
-
-    const selJo = law.jangs.reduce((acc, j) => acc || j.jos.find(jo => jo.no === st.joSel), null);
-    const selJang = selJo ? (law.jangs.find(j => j.jos.indexOf(selJo) > -1) || {}).name : null;
-    const selHang = selJo && st.hangSel ? selJo.hangs.find(h => h.no === st.hangSel) : null;
-    const hos = selHang ? (st.hoSel ? selHang.hos.filter(h => h.no === st.hoSel) : selHang.hos) : [];
-    return { law, list, count, selJo, selJang, selHang, hos };
-  };
-
-  /* 판례 상세 패널 — 판례 검색 페이지 */
-  LC.caseDetailRail = function (det) {
-    return `
-<aside style="min-height:0;width:356px;flex:none;overflow:hidden;background:#fff;border-left:1px solid #e6e3dd;display:flex;flex-direction:column">
-  <div style="display:flex;flex-direction:column;height:100%;min-height:0">
-    <div style="flex:none;padding:16px 20px 14px;border-bottom:1px solid #f0ede7;display:flex;flex-direction:column;gap:8px">
-      <button class="lc-link" data-act="closeDetail" style="align-self:flex-start;padding:0;border:0;background:transparent;font-size:11.5px;color:#9aa0a5;cursor:pointer">← 근거 목록</button>
-      <div style="font-family:'Noto Serif KR',serif;font-size:16px;font-weight:700;line-height:1.45">${LC.esc(det.name)}</div>
-      <div style="display:flex;align-items:center;gap:8px">
-        ${LC.bar(det.score, 64, 5)}
-        <span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:${a}">유사도 ${LC.pct(det.score)}</span>
-      </div>
-    </div>
-    <div style="flex:1;min-height:0;overflow-y:auto;padding:18px 20px;display:flex;flex-direction:column;gap:18px">
-      <div style="display:flex;flex-direction:column;gap:6px">
-        ${LC.sectionLabel('사건 요지')}
-        <div style="font-size:13px;line-height:1.85;text-wrap:pretty">${LC.esc(det.summary)}</div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        ${LC.sectionLabel('판시 사항')}
-        <div style="font-family:'Noto Serif KR',serif;font-size:13px;line-height:1.9;text-wrap:pretty">${LC.esc(det.holding)}</div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        ${LC.sectionLabel('내 사건과 다른 점')}
-        <div style="padding:13px 15px;border-radius:12px;background:#fdf4e8;border:1px solid #f2e2c9;font-size:12.5px;line-height:1.8;color:#8a5215;text-wrap:pretty">${LC.esc(det.diff)}</div>
-      </div>
-    </div>
-    <div style="flex:none;border-top:1px solid #f0ede7;padding:14px 18px">
-      <a class="lc-primary" href="chatbot.html?ask=${encodeURIComponent(det.name)}" style="display:block;text-align:center;width:100%;padding:11px;border:0;border-radius:10px;background:${a};color:#fff;font-size:13px;font-weight:500;cursor:pointer;text-decoration:none">이 판례로 상담 이어가기</a>
-    </div>
-  </div>
-</aside>`;
-  };
 })();
