@@ -115,10 +115,10 @@ root, 이전 `answer-recovery` worktree 및 새 worktree의 기준 파일을 해
 
 ## 6. 근거 파일
 
-- [사전 설계](superpowers/specs/2026-10-11-recovery-fixed-failure-design.md), [실행 계획](superpowers/plans/2026-10-11-recovery-fixed-failure.md)
-- [사전 판정 규칙](../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/PREREG.json), [고정 manifest](../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/manifest.json)
-- [측정 집계](../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/metrics.json), [실행 모델 정보](../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/runtime.json)
-- [32턴 기록](../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/results.jsonl), [제외한 워밍업](../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/warmup.jsonl)
-- [16쌍 AI 검토와 사유](../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/codex-review.jsonl), [보존 감사](../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/audit.json)
+- [사전 설계](../superpowers/specs/2026-10-11-recovery-fixed-failure-design.md), [실행 계획](../superpowers/plans/2026-10-11-recovery-fixed-failure.md)
+- [사전 판정 규칙](../../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/PREREG.json), [고정 manifest](../../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/manifest.json)
+- [측정 집계](../../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/metrics.json), [실행 모델 정보](../../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/runtime.json)
+- [32턴 기록](../../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/results.jsonl), [제외한 워밍업](../../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/warmup.jsonl)
+- [16쌍 AI 검토와 사유](../../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/codex-review.jsonl), [보존 감사](../../data/eval/reports/chat_pipeline/recovery-fixed-failure-2026-10-11/audit.json)
 
 원문·payload를 포함한 실험 기록은 private 파일이다. 결과 문서에 질문과 근거 전체를 복제하지 않았다.

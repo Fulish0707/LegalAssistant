@@ -123,10 +123,10 @@ pass 6쌍은 **같은 답변을 만든 전체 재생성 fallback**이다. 실제
 
 ## 8. 근거 파일
 
-[설계](superpowers/specs/2026-10-12-partial-repair-design.md) · [계획](superpowers/plans/2026-10-12-partial-repair.md)
+[설계](../superpowers/specs/2026-10-12-partial-repair-design.md) · [계획](../superpowers/plans/2026-10-12-partial-repair.md)
 
-[고정 조건](../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/PREREG.json) · [manifest](../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/manifest.json) · [전체 시간·호출](../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/metrics.json)
+[고정 조건](../../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/PREREG.json) · [manifest](../../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/manifest.json) · [전체 시간·호출](../../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/metrics.json)
 
-[22쌍 검토](../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/review.jsonl) · [품질 결정](../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/quality.json) · [요청·정책 재생](../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/replay.json) · [캐시 대응](../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/cache-usage.json)
+[22쌍 검토](../../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/review.jsonl) · [품질 결정](../../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/quality.json) · [요청·정책 재생](../../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/replay.json) · [캐시 대응](../../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/cache-usage.json)
 
-[새 회귀](../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/regression.json) · [샌드박스 미완료 기록](../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/sandbox-check.json) · [최종 보존 감사](../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/final-audit.json)
+[새 회귀](../../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/regression.json) · [샌드박스 미완료 기록](../../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/sandbox-check.json) · [최종 보존 감사](../../data/eval/reports/chat_pipeline/partial-repair-2026-10-12/final-audit.json)

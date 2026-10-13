@@ -26,7 +26,7 @@
 
 ## T3. 문서와 보존
 
-- [x] 결과 문서 `docs/first-pass-budget-2026-10-11.md`에 원인·호출·시간·품질·판정·한계를 기록한다.
+- [x] 결과 문서 `docs/experiments/first-pass-budget-2026-10-11.md`에 원인·호출·시간·품질·판정·한계를 기록한다.
 - [x] 전체 최초 payload, seed, 실행 순서, 후속 한도, 기존 검증 정책, manifest 해시를 감사한다.
 - [x] root 422개 기준 파일과 이전 8개 상태 해시, HEAD, stage 없음과 문서 링크·코드 블록을 확인한다.
 - [x] `audit_diff.py --target .worktrees/first-pass-budget`의 새 경로를 검토한다. 새 작업의 상태만 순서대로 완료한다.
