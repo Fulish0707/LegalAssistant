@@ -283,7 +283,7 @@
     },
     init: () => {
       const params = new URLSearchParams(location.search);
-      const ask = params.get('ask'), chosen = params.get('case');
+      const ask = params.get('ask'), chosen = params.get('case'), own = params.get('doc');
       if (ask) P.draft = ask + ' 판례가 제 사건에도 적용될 수 있나요?';
       if (own) P.draft = `올린 자료 "${own}"에 대해 묻습니다. `;   /* 내 자료는 서버가 질문에 맞는 대목을 찾아 함께 보낸다 */
 
