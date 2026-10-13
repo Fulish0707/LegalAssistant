@@ -12,7 +12,7 @@ from pathlib import Path
 
 import typer
 
-from legal_rag.evaluation.mode_comparison import compare_mode_runs, write_mode_comparison
+from legal_rag.evaluation.diagnosis.mode_comparison import compare_mode_runs, write_mode_comparison
 
 app = typer.Typer(add_completion=False)
 

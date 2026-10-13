@@ -23,11 +23,11 @@ from pathlib import Path
 import typer
 
 from legal_rag.cli import settings_from_options
-from legal_rag.evaluation.diagnostic_runner import gold_chunks_across_corpora, load_diagnostic_rows
-from legal_rag.evaluation.fusion_sweep import pending_pairs
-from legal_rag.evaluation.judgment_store import JudgmentStore
-from legal_rag.evaluation.relevance_judge import JUDGE_THINK, describe_key, judge_key
-from legal_rag.evaluation.relevance_pool import (
+from legal_rag.evaluation.diagnosis.diagnostic_runner import gold_chunks_across_corpora, load_diagnostic_rows
+from legal_rag.evaluation.relevance.fusion_sweep import pending_pairs
+from legal_rag.evaluation.relevance.judgment_store import JudgmentStore
+from legal_rag.evaluation.relevance.relevance_judge import JUDGE_THINK, describe_key, judge_key
+from legal_rag.evaluation.relevance.relevance_pool import (
     JUDGMENT_FILES, adopt_run, build_pool, domain_filters, no_filters, read_jsonl, write_pool)
 from legal_rag.factory import build_embedder, build_hybrid_retriever, build_reranker, close_legs, corpus_settings
 from legal_rag.ingestion.corpus import Corpus

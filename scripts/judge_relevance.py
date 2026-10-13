@@ -16,13 +16,13 @@ from pathlib import Path
 
 import typer
 
-from legal_rag.evaluation.calibration import calibration_fingerprint, require_reference_grades
-from legal_rag.evaluation.judgment_store import JudgmentStore
-from legal_rag.evaluation.relevance_judge import (
+from legal_rag.evaluation.relevance.calibration import calibration_fingerprint, require_reference_grades
+from legal_rag.evaluation.relevance.judgment_store import JudgmentStore
+from legal_rag.evaluation.relevance.relevance_judge import (
     JUDGE_THINK, append_judge_run, describe_key, generation_settings, judge_key, judge_pool, judge_run_record,
     ollama_model_digest)
-from legal_rag.evaluation.relevance_pool import read_jsonl
-from legal_rag.evaluation.relevance_prompts import attach_question_domains, guidance_domain, question_domain, validate_profile
+from legal_rag.evaluation.relevance.relevance_pool import read_jsonl
+from legal_rag.evaluation.relevance.relevance_prompts import attach_question_domains, guidance_domain, question_domain, validate_profile
 
 app = typer.Typer(add_completion=False)
 

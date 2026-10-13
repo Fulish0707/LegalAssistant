@@ -97,7 +97,7 @@ def prepare(out):
 
 
 def generate(out):
-    from legal_rag.evaluation.answer_replay import AnswerReplay
+    from legal_rag.evaluation.answers.answer_replay import AnswerReplay
     from legal_rag.schemas import EvidenceBundle
     config = settings()
     if config.llm.backend != 'gemini':
@@ -169,7 +169,7 @@ def judge(out):
 
 
 def report(out):
-    from legal_rag.evaluation.answer_reporting import write_golden_report
+    from legal_rag.evaluation.answers.answer_reporting import write_golden_report
     write_golden_report(out)
 
 

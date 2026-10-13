@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -11,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 from .base import ModelResponse, StructuredOutputError
 
 _FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
+logger = logging.getLogger(__name__)
 
 
 class OllamaChatModel:
@@ -33,9 +36,23 @@ class OllamaChatModel:
             payload["format"] = response_schema.model_json_schema()
         if self.num_ctx is not None:
             payload["options"]["num_ctx"] = self.num_ctx
+        started = time.perf_counter()
         response = self._client.post("/api/chat", json=payload)
         response.raise_for_status()
         body = response.json()
+        # Counters only: legal documents, questions, and model output stay out of logs.
+        logger.info(
+            "ollama_generation model=%s schema=%s wall_ms=%.1f total_ms=%.1f "
+            "load_ms=%.1f prompt_ms=%.1f generation_ms=%.1f "
+            "prompt_tokens=%s output_tokens=%s stop=%s",
+            self.model, response_schema.__name__ if response_schema else "text",
+            (time.perf_counter() - started) * 1000,
+            (body.get("total_duration") or 0) / 1_000_000,
+            (body.get("load_duration") or 0) / 1_000_000,
+            (body.get("prompt_eval_duration") or 0) / 1_000_000,
+            (body.get("eval_duration") or 0) / 1_000_000,
+            body.get("prompt_eval_count"), body.get("eval_count"), body.get("done_reason"),
+        )
         text = (body.get("message") or {}).get("content", "")
         if response_schema is None:
             return ModelResponse(text=text, raw=body)

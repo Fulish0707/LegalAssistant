@@ -30,7 +30,7 @@ def _statute_block(bundle: EvidenceBundle, law_name: str | None, article: str) -
 
 def _case_block(bundle: EvidenceBundle, case_number: str) -> Evidence | None:
     for item in bundle.items:
-        if item.header.get("Case number") == case_number:
+        if case_number in extract_case_refs(item.header.get("Case number", "")):
             return item
     for item in bundle.items:
         if case_number in extract_case_refs(item.text):
@@ -41,6 +41,7 @@ def _case_block(bundle: EvidenceBundle, case_number: str) -> Evidence | None:
 def backfill_citations(answer: LegalAnswer, bundle: EvidenceBundle) -> LegalAnswer:
     existing = {(c.source_id, c.reference) for c in answer.citations}
     cited_refs = {c.reference for c in answer.citations}
+    cited_refs.update(case for citation in answer.citations for case in extract_case_refs(citation.reference))
     added: list[Citation] = []
     text = answer_text(answer)
     for ref in extract_statute_refs(text):

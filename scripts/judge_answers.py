@@ -59,12 +59,12 @@ class AnswerGrade(BaseModel):
 
 
 def _jsonl(path: Path) -> list[dict]:
-    from legal_rag.evaluation.answer_run import read_jsonl
+    from legal_rag.evaluation.answers.answer_run import read_jsonl
     return read_jsonl(path)
 
 
 def _evidence_by_key(run: Path) -> dict[str, list[str]]:
-    from legal_rag.evaluation.answer_run import evidence_by_key
+    from legal_rag.evaluation.answers.answer_run import evidence_by_key
     try:
         return evidence_by_key(run)
     except ValueError as exc:
@@ -78,7 +78,7 @@ def _version(rubric: str) -> str:
 
 
 def _retry_manifest_hashes(run: Path) -> dict[str, str]:
-    from legal_rag.evaluation.answer_run import retry_manifest_hashes
+    from legal_rag.evaluation.answers.answer_run import retry_manifest_hashes
     return retry_manifest_hashes(run)
 
 
@@ -141,7 +141,7 @@ def judge(run: Path = typer.Option(..., exists=True, file_okay=False),
     _version(rubric)
     think = rubric == "legacy" if think is None else think
     if rubric == "core":
-        from legal_rag.evaluation.answer_judge_core import JudgeStopped, judge_core_answers
+        from legal_rag.evaluation.answers.answer_judge_core import JudgeStopped, judge_core_answers
 
         chat = OllamaChatModel(model=model, base_url=base_url, timeout=240.0, think=think, num_ctx=num_ctx or 8192)
         try:
@@ -179,10 +179,10 @@ def judge(run: Path = typer.Option(..., exists=True, file_okay=False),
 
 def _judge_versioned(run: Path, model: str, base_url: str, think: bool, num_ctx: int,
                      max_tokens: int, rubric: str = "v2") -> None:
-    from legal_rag.evaluation.answer_judge_runner import (
+    from legal_rag.evaluation.answers.answer_judge_runner import (
         JudgeOptions, JudgeConfigurationError, JudgeStoppedError, judge_saved_answers,
     )
-    from legal_rag.evaluation.answer_rubrics import get_answer_rubric
+    from legal_rag.evaluation.answers.answer_rubrics import get_answer_rubric
 
     options = JudgeOptions(model, base_url, think, num_ctx, max_tokens)
     try:
@@ -205,7 +205,7 @@ def _ci(k: int, n: int) -> str:
 
 
 def _ac1(a: list[int], b: list[int]) -> float | None:
-    from legal_rag.evaluation.calibration import _gwet_ac1
+    from legal_rag.evaluation.relevance.calibration import _gwet_ac1
     return _gwet_ac1(a, b)
 
 
@@ -250,8 +250,8 @@ def report(run: Path = typer.Option(..., exists=True, file_okay=False),
 
 
 def _report_versioned(run: Path, manual: Path | None, rubric: str = "v2") -> None:
-    from legal_rag.evaluation.answer_run import load_answer_run
-    from legal_rag.evaluation.answer_rubrics import get_answer_rubric
+    from legal_rag.evaluation.answers.answer_run import load_answer_run
+    from legal_rag.evaluation.answers.answer_rubrics import get_answer_rubric
 
     rules = get_answer_rubric(rubric).module
     input_fingerprint, metrics = rules.input_fingerprint, rules.metrics
@@ -335,7 +335,7 @@ def review(run: Path = typer.Option(..., exists=True, file_okay=False),
     """Export saved inputs with empty manual labels, without provider identity or AI grades."""
     evidence = _evidence_by_key(run)
     pairs = _jsonl(run / "answer_pairs.jsonl")
-    from legal_rag.evaluation.answer_judge import input_fingerprint
+    from legal_rag.evaluation.answers.answer_judge import input_fingerprint
     rows = [{"key": p["key"], "kind": p["kind"], "question": p["question"], "reference": p["reference"],
              "answer": p["answer"], "evidence": evidence.get(p["key"], p.get("evidence")),
              "input_sha256": input_fingerprint(p, evidence.get(p["key"], p.get("evidence"))),

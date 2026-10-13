@@ -1,6 +1,6 @@
 import pytest
 
-from legal_rag.evaluation.crossdomain_target import (
+from legal_rag.evaluation.diagnosis.crossdomain_target import (
     corpus_document_ids, drop_ambiguous_pairs, sample_cases, sidecar_rows, target_rows)
 
 

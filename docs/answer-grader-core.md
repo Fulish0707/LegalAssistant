@@ -1,7 +1,7 @@
 # Answer grader: core conclusion (default since 2026-10-06)
 
 `scripts/judge_answers.py judge --run <dir>` now grades with the `core` rubric
-(`src/legal_rag/evaluation/answer_judge_core.py`). `--rubric v2`, `v3` and `legacy` still run as before.
+(`src/legal_rag/evaluation/answers/answer_judge_core.py`). `--rubric v2`, `v3` and `legacy` still run as before.
 
 ## What it asks
 

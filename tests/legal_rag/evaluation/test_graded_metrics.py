@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from legal_rag.evaluation.graded_metrics import case_metrics, per_case_metrics, summarize_runs
+from legal_rag.evaluation.relevance.graded_metrics import case_metrics, per_case_metrics, summarize_runs
 
 
 def ranked(*pairs):
@@ -190,7 +190,7 @@ def test_summary_skips_undefined_binary_ndcg_and_counts_those_cases():
 
 
 def test_restrict_to_pool_drops_out_of_pool_judgments_and_counts_them():
-    from legal_rag.evaluation.graded_metrics import restrict_to_pool
+    from legal_rag.evaluation.relevance.graded_metrics import restrict_to_pool
     grades = {('c1', 'a'): 1, ('c1', 'z'): 2, ('c2', 'b'): 0}
     documents = {('c1', 'a'): 'A', ('c1', 'z'): 'Z', ('c2', 'b'): 'B', ('c1', 'f'): 'F', ('c1', 'g'): 'G'}
     failures = {('c1', 'f'), ('c1', 'g')}
@@ -202,7 +202,7 @@ def test_restrict_to_pool_drops_out_of_pool_judgments_and_counts_them():
 
 
 def test_out_of_pool_grade2_judgment_no_longer_lowers_ndcg():
-    from legal_rag.evaluation.graded_metrics import restrict_to_pool
+    from legal_rag.evaluation.relevance.graded_metrics import restrict_to_pool
     runs = {'dense': [{'case_id': 'c1', 'ranked': ranked(('a', 'A'), ('b', 'B'))}]}
     grades = {('c1', 'a'): 1, ('c1', 'b'): 0, ('c1', 'deep'): 2}     # 'deep' was judged for a deeper pool
     documents = {('c1', 'a'): 'A', ('c1', 'b'): 'B', ('c1', 'deep'): 'D'}

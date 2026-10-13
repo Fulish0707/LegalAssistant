@@ -21,9 +21,9 @@ from pathlib import Path
 import typer
 
 from legal_rag.cli import settings_from_options
-from legal_rag.evaluation.crossdomain_target import (
+from legal_rag.evaluation.diagnosis.crossdomain_target import (
     corpus_document_ids, drop_ambiguous_pairs, sample_cases, sidecar_rows, target_rows)
-from legal_rag.evaluation.diagnostic_runner import load_diagnostic_rows
+from legal_rag.evaluation.diagnosis.diagnostic_runner import load_diagnostic_rows
 from legal_rag.factory import corpus_settings
 
 app = typer.Typer(add_completion=False)

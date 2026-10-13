@@ -14,9 +14,9 @@ from pathlib import Path
 
 import typer
 
-from legal_rag.evaluation.calibration import (
+from legal_rag.evaluation.relevance.calibration import (
     STRATA, calibration_pair_ids, parse_quotas, sample_calibration, write_calibration)
-from legal_rag.evaluation.relevance_pool import read_jsonl
+from legal_rag.evaluation.relevance.relevance_pool import read_jsonl
 
 app = typer.Typer(add_completion=False)
 

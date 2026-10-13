@@ -15,8 +15,8 @@ from pathlib import Path
 import typer
 
 from legal_rag.cli import settings_from_options
-from legal_rag.evaluation.diagnostic_runner import _gold_chunk_index, _qa_path, deepen_retrieval, load_diagnostic_rows
-from legal_rag.evaluation.relevance_pool import build_pool, read_jsonl, write_pool
+from legal_rag.evaluation.diagnosis.diagnostic_runner import _gold_chunk_index, _qa_path, deepen_retrieval, load_diagnostic_rows
+from legal_rag.evaluation.relevance.relevance_pool import build_pool, read_jsonl, write_pool
 from legal_rag.factory import build_hybrid_retriever, close_legs, select_legs
 from legal_rag.ingestion.corpus import Corpus
 

@@ -1,6 +1,6 @@
 # Corpus-specific relevance grading
 
-The main relevance evaluation commands now default to `--prompt-profile corpus`. The 0/1/2 grading rubric is shared; known question corpora add guidance from `src/legal_rag/evaluation/relevance_prompts.py`. Civil, administrative and IP guidance matches the 2026-10-03 pilot. Criminal uses the shared rubric by default because both criminal guidance variants regressed. `--prompt-profile corpus-experimental` enables the revised criminal candidate as well as the other three blocks.
+The main relevance evaluation commands now default to `--prompt-profile corpus`. The 0/1/2 grading rubric is shared; known question corpora add guidance from `src/legal_rag/evaluation/relevance/relevance_prompts.py`. Civil, administrative and IP guidance matches the 2026-10-03 pilot. Criminal uses the shared rubric by default because both criminal guidance variants regressed. `--prompt-profile corpus-experimental` enables the revised criminal candidate as well as the other three blocks.
 
 This changes relevance grading. Chat answer generation uses its existing separate prompt.
 

@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
+from .spans import spans
+
 RUBRIC_VERSION = "answer-v2"
 QUOTE_RULE_VERSION = 1
 RETRY_POLICY_VERSION = "quote-selection-v3"
@@ -15,7 +17,6 @@ MAX_EVIDENCE_SELECTIONS = 8
 JUDGE_TIMEOUT_SECONDS = 180.0
 TIMEOUT_STOP_AFTER = 2
 SPAN_CATALOG_VERSION = 1
-SPAN_MAX_CHARS = 600
 SELECTION_INSTRUCTION = """인용문을 직접 생성하지 말고 아래 목록의 구절 ID만 선택하세요.
 채점 기준은 위와 동일합니다. 이 출력에서는 reference_point 대신 reference_span_id,
 answer_point 대신 answer_span_id, evidence_quotes 대신 evidence_span_ids를 반환하세요.
@@ -107,28 +108,17 @@ class SelectionGrade(BaseModel):
         return identifiers
 
 
-def _spans(text: str, *, include_whole: bool) -> list[str]:
-    """Every returned span is an unchanged contiguous slice of the original."""
-    spans = [text.strip()] if include_whole and text.strip() else []
-    for part in re.split(r"(?<=[.!?])\s+|\n+", text):
-        for start in range(0, len(part), SPAN_MAX_CHARS):
-            span = part[start:start + SPAN_MAX_CHARS].strip()
-            if span:
-                spans.append(span)
-    return list(dict.fromkeys(spans))
-
-
 def selection_request(pair: dict, evidence: list[str] | None) -> tuple[type[BaseModel], dict, str]:
     """Constrain quote choices to IDs for literal spans; leave semantic grades independent."""
     catalog = {"reference": [{"id": f"R{i}", "text": text} for i, text in
-                             enumerate(_spans(pair["reference"], include_whole=True))],
+                             enumerate(spans(pair["reference"], include_whole=True))],
                "answer": [{"id": f"A{i}", "text": text} for i, text in
-                          enumerate(_spans(pair["answer"], include_whole=True))], "evidence": []}
+                          enumerate(spans(pair["answer"], include_whole=True))], "evidence": []}
     if not catalog["reference"] or not catalog["answer"]:
         raise ValueError("Passage selection requires nonempty reference and answer text.")
     for source_index, source in enumerate(evidence or [], 1):
         catalog["evidence"].extend({"id": f"E{source_index}_{i}", "source_index": source_index, "text": text}
-                                   for i, text in enumerate(_spans(source, include_whole=False)))
+                                   for i, text in enumerate(spans(source, include_whole=False)))
     reference_ids = tuple(item["id"] for item in catalog["reference"])
     answer_ids = tuple(item["id"] for item in catalog["answer"]) + ("A_NONE",)
     evidence_ids = tuple(item["id"] for item in catalog["evidence"])

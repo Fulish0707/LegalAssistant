@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from legal_rag.evaluation.rerank_run import rerank_run
+from legal_rag.evaluation.relevance.rerank_run import rerank_run
 from legal_rag.schemas import Chunk, ChunkMetadata, DocumentType
+from test_calibration import _load_script
 
 
 def _chunks():
@@ -66,18 +67,8 @@ def test_reports_progress_per_case():
     assert seen and '1/1' in seen[-1]
 
 
-def _load_script():
-    import importlib.util
-    from pathlib import Path
-    path = Path(__file__).resolve().parents[3] / 'scripts' / 'rerank_relevance_pool.py'
-    spec = importlib.util.spec_from_file_location('script_rerank_relevance_pool', path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def test_baseline_map_accepts_plain_names_and_output_equals_source():
-    script = _load_script()
+    script = _load_script('rerank_relevance_pool')
     assert script._baseline_map(['dense', 'reranked_512=reranked']) == {
         'dense': 'dense', 'reranked_512': 'reranked'}
     with pytest.raises(Exception, match='NAME or OUTPUT=SOURCE'):
@@ -95,7 +86,7 @@ class _Settings:
 
 def _source_dir(tmp_path):
     """A one-case source pool whose runs rank three chunks, the fused run last-best."""
-    from legal_rag.evaluation.relevance_pool import write_pool
+    from legal_rag.evaluation.relevance.relevance_pool import write_pool
     chunks = {chunk.id: chunk for chunk in _chunks()}
     ids = list(chunks)
     ranked = [{'chunk_id': cid, 'document_id': chunks[cid].document_id} for cid in ids]
@@ -110,7 +101,7 @@ def _source_dir(tmp_path):
 def test_script_passes_max_length_and_batch_size_to_the_reranker_and_renames_a_baseline(tmp_path, monkeypatch):
     import json
     from typer.testing import CliRunner
-    script = _load_script()
+    script = _load_script('rerank_relevance_pool')
     source, chunks = _source_dir(tmp_path)
     built = {}
 
@@ -119,7 +110,7 @@ def test_script_passes_max_length_and_batch_size_to_the_reranker_and_renames_a_b
         return _Reranker({})
 
     monkeypatch.setattr(script, 'settings_from_options', lambda **_: _Settings())
-    monkeypatch.setattr(script, '_needed_chunks', lambda settings, ids: chunks)
+    monkeypatch.setattr(script, 'needed_chunks', lambda settings, ids: chunks)
     monkeypatch.setattr(script, 'CrossEncoderReranker',
                         lambda model, device, batch_size, max_length: _reranker(model, device, batch_size, max_length))
     out = tmp_path / 'out'
@@ -140,7 +131,7 @@ def test_script_passes_max_length_and_batch_size_to_the_reranker_and_renames_a_b
 
 def test_script_refuses_a_run_name_that_collides_with_a_baseline(tmp_path, monkeypatch):
     from typer.testing import CliRunner
-    script = _load_script()
+    script = _load_script('rerank_relevance_pool')
     source, chunks = _source_dir(tmp_path)
     monkeypatch.setattr(script, 'settings_from_options', lambda **_: _Settings())
     result = CliRunner().invoke(script.app, [
