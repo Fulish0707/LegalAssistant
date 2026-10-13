@@ -8,9 +8,8 @@
 | 목적 | 안내 | 유지되는 구현 |
 | --- | --- | --- |
 | 검색 설정 비교·실패 분석 | [검색 진단](retrieval-diagnostics.md) | `src/legal_rag/evaluation/`의 retrieval 모듈과 `diagnosis/` |
-| 작은 구조 청크 색인·검색 비교 | [구조 청크](structural-civil.md) | chunking/index CLI와 structural 설정 |
 | corpus별 관련성 채점 | [Corpus relevance prompts](corpus-relevance-prompts.md) | `relevance/relevance_prompts.py`, `judge_relevance.py`, `judge_agreement.py` |
-| 원본/구조 청크 답변 비교 | [Golden-answer comparison](golden-answer-comparison.md) | `eval_golden_answers.py`, `answers/answer_replay.py`, `answers/answer_reporting.py` |
+| 원본/구조 청크 답변 비교 (저장 결과의 채점·보고만 실행 가능) | [Golden-answer comparison](golden-answer-comparison.md) | `eval_golden_answers.py`, `answers/answer_replay.py`, `answers/answer_reporting.py` |
 | 저장 답변의 v2/v3 채점 비교 | [Answer grader calibration](answer-grader-v3-calibration.md) | `calibrate_golden_answers.py`, `answers/answer_rubrics.py`, `answers/answer_judge_runner.py` |
 
 `src/legal_rag/evaluation/`은 세 폴더로 나뉜다. `relevance/`는 관련성 pool·채점·calibration, `answers/`는 답변 채점·replay·보고, `diagnosis/`는 검색 진단이다. 검색 지표와 dataset 모듈은 패키지 최상위에 있다.
@@ -31,6 +30,7 @@ Golden-answer 점수는 참고 답변과 제공 근거에 대한 일치를 측�
 
 전체 시험 기록과 정리 기록은 [문서 목차](README.md)에 있다.
 
+- [구조 청크 시험](experiments/structural-civil.md): 작은 구조 청크의 색인·검색 비교. 채택하지 않았다. Qdrant 컬렉션은 2026-10-14에 삭제했다.
 - [관련성 채점 prompt v3](experiments/relevance-judge-prompt-v3.md), [v3 검토](experiments/relevance-judge-v3-review.md): prompt 변경 근거. 현재 routing과 명령은 corpus prompt 안내를 따른다.
 - `data/eval/reports/`: manifest, frozen input, 저장 답변·판단, 실험 당시 실행본. 현재 구현에서 실행하지 않는 snapshot도 재현 근거로 보관한다.
 - `docs/superpowers/specs/`, `docs/superpowers/plans/`: 설계와 실행 이력. 현재 명령은 위 안내를 우선한다.
