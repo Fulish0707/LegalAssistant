@@ -141,11 +141,11 @@ backend 테스트는 샌드박스에서 같은 위치에 진행이 멈춰 중단
 
 ## 7. 재현 자료와 보존
 
-- [사전 설계](superpowers/specs/2026-10-11-first-pass-budget-design.md), [실행 계획](superpowers/plans/2026-10-11-first-pass-budget.md)
-- [기준 상태](../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/baseline.json), [원인 분류](../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/diagnosis.json)
-- [사전 판정 규칙](../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/pilot-PREREG.json), [고정 manifest](../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/pilot-manifest.json), [실행 환경](../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/pilot-runtime.json)
-- [16턴 기록](../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/pilot-results.jsonl), [준비 4턴](../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/pilot-warmup.jsonl), [지표](../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/pilot-metrics.json)
-- [8쌍의 AI 검토 사유](../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/review.jsonl), [첫 본문 비교](../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/first-output-comparison.json), [최종 판정](../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/quality.json)
-- [요청·정책 재실행 확인](../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/measurement-verification.json), [보존 감사](../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/final-audit.json)
+- [사전 설계](../superpowers/specs/2026-10-11-first-pass-budget-design.md), [실행 계획](../superpowers/plans/2026-10-11-first-pass-budget.md)
+- [기준 상태](../../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/baseline.json), [원인 분류](../../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/diagnosis.json)
+- [사전 판정 규칙](../../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/pilot-PREREG.json), [고정 manifest](../../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/pilot-manifest.json), [실행 환경](../../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/pilot-runtime.json)
+- [16턴 기록](../../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/pilot-results.jsonl), [준비 4턴](../../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/pilot-warmup.jsonl), [지표](../../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/pilot-metrics.json)
+- [8쌍의 AI 검토 사유](../../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/review.jsonl), [첫 본문 비교](../../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/first-output-comparison.json), [최종 판정](../../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/quality.json)
+- [요청·정책 재실행 확인](../../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/measurement-verification.json), [보존 감사](../../data/eval/reports/chat_pipeline/first-pass-budget-2026-10-11/final-audit.json)
 
 원문·payload는 private 실험 폴더에 보관한다. root의 기준 파일 422개, 이전 실행 상태 8개와 HEAD·stage를 보존한다. 격리 worktree는 `.worktrees/first-pass-budget`이다. root에는 결과·설계·계획 문서만 추가한다. 서비스 코드·설정·응답 계약은 변경하지 않으며 commit하지 않는다.

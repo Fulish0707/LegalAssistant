@@ -42,7 +42,7 @@ flowchart TB
   D --> E[최종 시간 · 토큰 속도 · 전문 검토]
 ```
 
-[설계](superpowers/specs/2026-10-11-context-budget-design.md), [계획](superpowers/plans/2026-10-11-context-budget.md), [사전 판정 기준](../data/eval/reports/chat_pipeline/context-budget-2026-10-11/PREREG.json)을 실행 전에 기록했다. 측정 코드와 입력은 [manifest](../data/eval/reports/chat_pipeline/context-budget-2026-10-11/manifest.json)으로 고정했다.
+[설계](../superpowers/specs/2026-10-11-context-budget-design.md), [계획](../superpowers/plans/2026-10-11-context-budget.md), [사전 판정 기준](../../data/eval/reports/chat_pipeline/context-budget-2026-10-11/PREREG.json)을 실행 전에 기록했다. 측정 코드와 입력은 [manifest](../../data/eval/reports/chat_pipeline/context-budget-2026-10-11/manifest.json)으로 고정했다.
 
 ## 3. 시간과 출력 속도
 
@@ -83,7 +83,7 @@ Ollama는 큰 컨텍스트가 더 많은 메모리를 요구한다고 설명한�
 
 ## 5. 전체 답변 검토
 
-**11/12쌍은 최종 8필드, 모든 완성 초안과 검사 결과가 같다.** 같은 내용은 필드 전체의 동일성을 확인한 뒤 한 번 읽었다. 나머지 2회차 2번 문항은 두 방식의 전문과 모든 완성 초안 차이를 각각 읽었다. 모든 문항의 질문·참고 답변·전체 제공 근거 5개도 확인했다. 이유는 [review.jsonl](../data/eval/reports/chat_pipeline/context-budget-2026-10-11/review.jsonl)에 `AI reviewed (Codex)`로 기록했다.
+**11/12쌍은 최종 8필드, 모든 완성 초안과 검사 결과가 같다.** 같은 내용은 필드 전체의 동일성을 확인한 뒤 한 번 읽었다. 나머지 2회차 2번 문항은 두 방식의 전문과 모든 완성 초안 차이를 각각 읽었다. 모든 문항의 질문·참고 답변·전체 제공 근거 5개도 확인했다. 이유는 [review.jsonl](../../data/eval/reports/chat_pipeline/context-budget-2026-10-11/review.jsonl)에 `AI reviewed (Codex)`로 기록했다.
 
 | 상대 품질 판정 | 쌍 수 | 해석 |
 |---|---:|---|
@@ -109,13 +109,13 @@ Ollama는 큰 컨텍스트가 더 많은 메모리를 요구한다고 설명한�
 
 ## 7. 검증과 보존
 
-실제 32호출의 요청·seed·순서·스키마·출력 예산을 확인하고 기존 코드로 28턴의 정책을 재생했다. 모든 최종 답변·근거·검사·정책 결과가 일치했다. [재생 결과](../data/eval/reports/chat_pipeline/context-budget-2026-10-11/measurement-verification.json)
+실제 32호출의 요청·seed·순서·스키마·출력 예산을 확인하고 기존 코드로 28턴의 정책을 재생했다. 모든 최종 답변·근거·검사·정책 결과가 일치했다. [재생 결과](../../data/eval/reports/chat_pipeline/context-budget-2026-10-11/measurement-verification.json)
 
-전체 백엔드의 **630 passed, 3 skipped** 기록은 직전 시험의 결과를 재사용했다. 이번에 전체 테스트를 다시 실행한 결과가 아니다. 현재 source/config/test 248개 파일의 바이트가 그 기록의 기준과 같음을 확인했다. 새 실행기 동작은 이번 요청 감사와 정책 재생으로 별도 확인했다. [회귀 근거](../data/eval/reports/chat_pipeline/context-budget-2026-10-11/regression.json)
+전체 백엔드의 **630 passed, 3 skipped** 기록은 직전 시험의 결과를 재사용했다. 이번에 전체 테스트를 다시 실행한 결과가 아니다. 현재 source/config/test 248개 파일의 바이트가 그 기록의 기준과 같음을 확인했다. 새 실행기 동작은 이번 요청 감사와 정책 재생으로 별도 확인했다. [회귀 근거](../../data/eval/reports/chat_pipeline/context-budget-2026-10-11/regression.json)
 
 첫 샌드박스 실행은 `/api/tags` 접근에서 `Operation not permitted`로 끝났다. 추론은 시작되지 않았다. 같은 고정 명령을 정상 승인 절차로 샌드박스 밖에서 실행했다. 실패 기록을 속도 표에 혼합하지 않았다.
 
-기존 root/worktree 파일 425개와 기존 실행 상태 9개를 보존했다. root에는 설계·계획·이 결과 문서만 추가했다. HEAD·index·기존 변경·원자료 해시·문서 링크를 감사한다. [최종 감사](../data/eval/reports/chat_pipeline/context-budget-2026-10-11/final-audit.json)
+기존 root/worktree 파일 425개와 기존 실행 상태 9개를 보존했다. root에는 설계·계획·이 결과 문서만 추가했다. HEAD·index·기존 변경·원자료 해시·문서 링크를 감사한다. [최종 감사](../../data/eval/reports/chat_pipeline/context-budget-2026-10-11/final-audit.json)
 
 ## 8. 다음 판단
 

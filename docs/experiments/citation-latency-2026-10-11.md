@@ -157,13 +157,13 @@ flowchart TB
 
 평가 디렉터리: `data/eval/reports/chat_pipeline/citation-latency-2026-10-11/`
 
-- [P1 검사 및 변경 검토](../data/eval/reports/chat_pipeline/citation-latency-2026-10-11/p1-gate.json)
-- [P2 사전 기준](../data/eval/reports/chat_pipeline/citation-latency-2026-10-11/pilot-PREREG.json)
-- [P2 측정 집계](../data/eval/reports/chat_pipeline/citation-latency-2026-10-11/pilot-metrics.json)
-- [16쌍 전체 검토](../data/eval/reports/chat_pipeline/citation-latency-2026-10-11/pilot-review.jsonl)
-- [통합 백엔드 검증](../data/eval/reports/chat_pipeline/citation-latency-2026-10-11/integrated-backend.txt)
-- [최종 보존 감사](../data/eval/reports/chat_pipeline/citation-latency-2026-10-11/final-audit.json)
-- [설계](superpowers/specs/2026-10-11-citation-latency-design.md) · [실행 계획](superpowers/plans/2026-10-11-citation-latency.md)
+- [P1 검사 및 변경 검토](../../data/eval/reports/chat_pipeline/citation-latency-2026-10-11/p1-gate.json)
+- [P2 사전 기준](../../data/eval/reports/chat_pipeline/citation-latency-2026-10-11/pilot-PREREG.json)
+- [P2 측정 집계](../../data/eval/reports/chat_pipeline/citation-latency-2026-10-11/pilot-metrics.json)
+- [16쌍 전체 검토](../../data/eval/reports/chat_pipeline/citation-latency-2026-10-11/pilot-review.jsonl)
+- [통합 백엔드 검증](../../data/eval/reports/chat_pipeline/citation-latency-2026-10-11/integrated-backend.txt)
+- [최종 보존 감사](../../data/eval/reports/chat_pipeline/citation-latency-2026-10-11/final-audit.json)
+- [설계](../superpowers/specs/2026-10-11-citation-latency-design.md) · [실행 계획](../superpowers/plans/2026-10-11-citation-latency.md)
 
 평가 기록은 로컬의 ignored 파일이다. 문서만 커밋하면 다른 환경에 원본 기록이 포함되지는 않는다.
 

@@ -29,12 +29,14 @@ Golden-answer 점수는 참고 답변과 제공 근거에 대한 일치를 측�
 
 ## 과거 실험·결정 기록
 
-- [관련성 채점 prompt v3](relevance-judge-prompt-v3.md), [v3 검토](relevance-judge-v3-review.md): prompt 변경 근거. 현재 routing과 명령은 corpus prompt 안내를 따른다.
+전체 시험 기록과 정리 기록은 [문서 목차](README.md)에 있다.
+
+- [관련성 채점 prompt v3](experiments/relevance-judge-prompt-v3.md), [v3 검토](experiments/relevance-judge-v3-review.md): prompt 변경 근거. 현재 routing과 명령은 corpus prompt 안내를 따른다.
 - `data/eval/reports/`: manifest, frozen input, 저장 답변·판단, 실험 당시 실행본. 현재 구현에서 실행하지 않는 snapshot도 재현 근거로 보관한다.
 - `docs/superpowers/specs/`, `docs/superpowers/plans/`: 설계와 실행 이력. 현재 명령은 위 안내를 우선한다.
-- [정리 조사](codebase-cleanup-audit-2026-10-04.md), [정리 실행 기록](codebase-cleanup-2026-10-05.md): 통합 후보와 실제 변경 내역.
-- [정리 기록 2026-10-13](codebase-cleanup-2026-10-13.md): 테스트 위치, 낱개 결과 파일과 evaluation 폴더 분리.
-- [Dead code 정리](dead-code-cleanup-2026-10-05.md): 제거한 코드와 dynamic caller·export 때문에 보존한 후보.
+- [정리 조사](cleanup/codebase-cleanup-audit-2026-10-04.md), [정리 실행 기록](cleanup/codebase-cleanup-2026-10-05.md): 통합 후보와 실제 변경 내역.
+- [정리 기록 2026-10-13](cleanup/codebase-cleanup-2026-10-13.md): 테스트 위치, 낱개 결과 파일과 evaluation 폴더 분리.
+- [Dead code 정리](cleanup/dead-code-cleanup-2026-10-05.md): 제거한 코드와 dynamic caller·export 때문에 보존한 후보.
 
 새 생성 실험에는 별도 `--out`을 사용한다. 코드나 평가 조건이 바뀐 상태에서
 기존 manifest를 덮어써 재개하지 않는다. 저장 결과의 report 생성은 별도로 수행할 수 있다.

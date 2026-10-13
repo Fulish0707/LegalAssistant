@@ -143,6 +143,6 @@ User request: “move onto measuring that”. This authorizes benchmarks and foc
 - [x] Finish the 20-question repeated timing comparison. Full median 15.89s, concise 15.39s; neither primary nor repeat supports the 15% improvement target. The repeat order deviation is recorded in `AMENDMENTS.md`.
 - [x] Finish both reference-conclusion grading rubrics and review changed cases. Core 50/80 vs 49/80; strict 38/80 vs 41/80. All 14 changed-verdict questions reviewed; 27 distinct questions reviewed including the original 20.
 - [x] Finish scratch Flask/API timing for warm, follow-up, document, unloaded-model and concurrent requests. 80 measured turns plus 5 warmups; all final responses recorded. Keep the 2 upload analyses separate.
-- [x] Write a self-contained [measurement report](../../verified-chat-latency-2026-10-10.md), with limitations and the adoption decision. Warm baseline/reuse/concise medians: 21.44s / 18.66s / 23.69s. Do not attribute the entire web reduction to embedding reuse.
+- [x] Write a self-contained [measurement report](../../experiments/verified-chat-latency-2026-10-10.md), with limitations and the adoption decision. Warm baseline/reuse/concise medians: 21.44s / 18.66s / 23.69s. Do not attribute the entire web reduction to embedding reuse.
 
 The concise prompt remains an experimental opt-in. It did not meet the primary timing or condition-preservation criteria. No user service restart, commit, corpus change, or index rebuild is part of this measurement.

@@ -59,6 +59,12 @@ class HealthReportingTests(unittest.TestCase):
         self.assertEqual(response.json["collection"], "docs_ollama_bge_m3")
         self.assertNotEqual(response.json["collection"], "langchain")
 
+    def test_static_assets_are_served_from_beside_the_app(self):
+        response = self.client.get("/static/lc-chat.js")
+
+        self.assertEqual(response.status_code, 200)
+        response.close()
+
     def test_health_does_not_probe_the_llm_by_default(self):
         """get_chat_model() returns a ChatOllama unconditionally, so
         llm_configured says nothing about whether Ollama is up. Reachability is a

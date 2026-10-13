@@ -23,7 +23,7 @@
 
 ## T3. 기록과 감사
 
-- [x] 결과를 docs/context-budget-2026-10-11.md에 한국어로 정리한다.
+- [x] 결과를 docs/experiments/context-budget-2026-10-11.md에 한국어로 정리한다.
 - [x] 백엔드 전체 회귀 확인과 최종 파일·기존 실행 상태·원자료·문서 링크 감사를 수행한다.
 - [x] canonical state의 각 task gate와 최종 완료 상태를 검증하고 closure.json을 저장한다.
 

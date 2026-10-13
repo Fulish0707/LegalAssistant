@@ -19,7 +19,7 @@
 
 ## T3 — 보고와 보존 감사
 
-- [x] `docs/temperature-zero-2026-10-11.md`에 수치·상대 오류·제한·채택 여부를 기록한다.
+- [x] `docs/experiments/temperature-zero-2026-10-11.md`에 수치·상대 오류·제한·채택 여부를 기록한다.
 - [x] `audit_study.py`로 baseline, 이전 상태, 외부 모델/키, manifest, 재생, 검토 해시, 지표 재계산, 엔진과 서버 종료, root 추가3문서·링크를 확인한다.
 - [x] GPU 정리 상태와 canonical T1–T3 완료를 검증한다. 시험 수행 완료와 후보 채택을 구분한다.
 

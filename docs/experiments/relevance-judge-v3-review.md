@@ -1,8 +1,8 @@
 # 관련성 Judge 1·2차 비교와 3차 수정 근거
 
 당시 검토 결과를 보관한 기록이다. 현재 채점 설정과 명령은
-[Corpus relevance prompts](corpus-relevance-prompts.md), 전체 안내는
-[평가 문서 목차](evaluation-index.md)를 참고한다.
+[Corpus relevance prompts](../corpus-relevance-prompts.md), 전체 안내는
+[평가 문서 목차](../evaluation-index.md)를 참고한다.
 
 대상은 ip-v1-pilot-200의 동일 50쌍이다. calibration.csv의 기준 등급은 AI가 작성했으며 독립적인 사람 검증이 아니다. 기준 라벨과 기존 실행 결과는 변경하지 않았다.
 

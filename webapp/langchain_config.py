@@ -10,12 +10,16 @@ from llm_model import get_collection_name, get_embedding_model
 
 # Define directories. Resolved at call time, never at import: importing this
 # module must not touch disk or construct a client.
-PERSIST_DIRECTORY = "./chroma_db"
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PERSIST_DIRECTORY = "chroma_db"
 
 
 def get_persist_directory():
-    """Where Chroma lives. RAG_PERSIST_DIR points tests at a temporary directory."""
-    return os.getenv("RAG_PERSIST_DIR", PERSIST_DIRECTORY)
+    """Where Chroma lives. RAG_PERSIST_DIR points tests at a temporary directory.
+
+    A relative path is resolved at the repository root, not in the working directory."""
+    directory = os.getenv("RAG_PERSIST_DIR", PERSIST_DIRECTORY)
+    return os.path.join(REPO_ROOT, directory) if directory else directory
 
 # --- LangSmith tracing ---------------------------------------------------
 #
