@@ -20,25 +20,14 @@
 
   /* ---------- 화면 ---------- */
 
-  function when(started){
-    const d = new Date(String(started).replace(' ', 'T') + 'Z');   // 서버 시각은 UTC
-    return isNaN(d) || d.toDateString() === new Date().toDateString() ? '오늘' : `${d.getMonth() + 1}월 ${d.getDate()}일`;
-  }
-
-  /* 사이드바의 상담 목록. 아직 질문이 없는 새 상담은 서버 목록에 없으므로 맨 위에 넣는다 */
-  function matters(){
-    const list = P.conversations.map(c => ({ id: c.id, title: c.title, kind: '상담', when: when(c.started), live: c.id === P.conversation }));
-    if (!list.some(c => c.live)) list.unshift({ id: P.conversation, title: title(), kind: '상담', when: '오늘', live: true });
-    return list;
-  }
-
   function side(){
-    LC.MATTERS = matters();
+    LC.MATTERS = LC.consultations({ conversations: P.conversations, conversation: P.conversation }, title());
     LC.S.activeMatter = LC.MATTERS.findIndex(c => c.live);
     return `
 <div style="display:flex;flex-direction:column;gap:18px;height:100%;min-height:0">
   <button class="lc-primary" data-act="newCase" style="display:flex;align-items:center;justify-content:center;gap:7px;padding:11px;border:0;border-radius:10px;background:${a};color:#fff;font-size:13.5px;font-weight:500;cursor:pointer">${LC.icon('plus', 14, '#fff')} 새 상담</button>
   ${LC.matterList()}
+  ${P.extra.length ? `<button class="lc-link" data-act="deleteCase" style="align-self:flex-start;margin:-10px 8px 0;padding:0;border:0;background:transparent;font-size:11.5px;color:#9aa0a5;text-decoration:underline;cursor:pointer">이 상담 삭제</button>` : ''}
   <div style="display:flex;flex-direction:column;gap:3px">
     <div style="padding:0 8px 7px;font-size:10px;letter-spacing:.16em;color:#9aa0a5">도구</div>
     <a class="lc-ghost" href="documents.html" style="display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border-radius:10px;font-size:12.5px;color:#3d4348;text-decoration:none">${LC.icon('search', 15, '#9aa0a5')}계약서 검토</a>
@@ -279,6 +268,10 @@
         if (location.search) history.replaceState(null, '', location.pathname);
         return false;
       },
+      deleteCase: () => {
+        if (confirm('이 상담의 대화를 지웁니다. 되돌릴 수 없습니다.')) openConversation('/conversations/delete');
+        return false;
+      },
       pickMatter: k => {
         const c = LC.MATTERS[Number(k)];
         if (c && !c.live) openConversation('/conversations/select', { id: c.id });
@@ -292,6 +285,7 @@
       const params = new URLSearchParams(location.search);
       const ask = params.get('ask'), chosen = params.get('case');
       if (ask) P.draft = ask + ' 판례가 제 사건에도 적용될 수 있나요?';
+      if (own) P.draft = `올린 자료 "${own}"에 대해 묻습니다. `;   /* 내 자료는 서버가 질문에 맞는 대목을 찾아 함께 보낸다 */
 
       document.addEventListener('input', (e) => {
         if (e.target.id === 'userInput') {

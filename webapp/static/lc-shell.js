@@ -65,9 +65,21 @@ window.LC = window.LC || {};
 
   /* ---------- 사이드바 공통 블록 ---------- */
 
-  LC.matterList = () => `
+  /* 서버의 상담 상태(/get_initial_state)를 사이드바 목록으로. 아직 질문이 없는 열린 상담은
+     서버 목록에 없으므로 맨 위에 넣는다. 서버 시각은 UTC다 */
+  LC.consultations = (st, openTitle) => {
+    const when = started => {
+      const d = new Date(String(started).replace(' ', 'T') + 'Z');
+      return isNaN(d) || d.toDateString() === new Date().toDateString() ? '오늘' : `${d.getMonth() + 1}월 ${d.getDate()}일`;
+    };
+    const list = (st.conversations || []).map(c => ({ id: c.id, title: c.title, kind: '상담', when: when(c.started), live: c.id === st.conversation }));
+    if (!list.some(c => c.live)) list.unshift({ id: st.conversation, title: openTitle || '새 상담', kind: '상담', when: '오늘', live: true });
+    return list;
+  };
+
+  LC.matterList = () => !LC.MATTERS.length ? '' : `
 <div style="display:flex;flex-direction:column;gap:3px">
-  ${LC.sectionLabel('진행 중').replace('font-size:10px', 'padding:0 8px 7px;font-size:10px')}
+  ${LC.sectionLabel('상담').replace('font-size:10px', 'padding:0 8px 7px;font-size:10px')}
   ${LC.MATTERS.map((c, i) => `
   <button class="lc-ghost" data-act="pickMatter" data-key="${i}" style="display:flex;flex-direction:column;gap:3px;width:100%;text-align:left;padding:10px;border:0;border-radius:10px;background:${LC.S.activeMatter === i ? '#f2efe9' : 'transparent'};color:#14171a;cursor:pointer">
     <div style="display:flex;align-items:center;gap:7px;min-width:0">

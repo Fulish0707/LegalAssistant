@@ -17,10 +17,8 @@ LC.TRACE_FALLBACK = [
   "최종 답변 생성"
 ];
 
-/* 진행 중 상담 — 여러 페이지가 공유. 상담 페이지에서는 현재 대화 제목으로 바뀝니다 */
-LC.MATTERS = [
-  {title:"전세 보증금 반환 지연", kind:"임대차", when:"오늘", live:true}
-];
+/* 상담 목록 — 서버의 /get_initial_state 로부터 채워짐 (LC.consultations) */
+LC.MATTERS = [];
 
 /* 탭 정의 — 페이지를 추가할 때 여기에 한 줄만 넣으면 모든 페이지의 탭에 반영됩니다 */
 LC.TABS = [

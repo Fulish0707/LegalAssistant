@@ -614,6 +614,20 @@ def attach_case():
     return jsonify(_chat_state())
 
 
+@app.route('/conversations/delete', methods=['POST'])
+def delete_conversation():
+    """Delete the open consultation with its messages, sources and attached case, and open an empty one."""
+    user_id, conversation = session["user_id"], _conversation()
+    held = [item["id"] for item in get_conversations_from_db(user_id)]
+    conn = get_db()
+    conn.execute('DELETE FROM chat_history WHERE user_id=? AND conversation=?', (user_id, conversation))
+    conn.commit()
+    session["cases"] = {key: value for key, value in (session.get("cases") or {}).items() if key != _case_key()}
+    # A number is never used twice: legal_rag still remembers the turns of the deleted one.
+    session["conversation_epoch"] = max([conversation, *held]) + 1
+    return jsonify(_chat_state())
+
+
 @app.route('/conversations/select', methods=['POST'])
 def select_conversation():
     """Reopen one of this browser's consultations."""
