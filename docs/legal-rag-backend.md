@@ -98,6 +98,8 @@ uv run python scripts/serve.py --corpus-version v1 --port 8000
 | `GET /health` | – | corpus version, collection, chunk count, embedder, LLM |
 | `POST /v1/search` | `{"query", "k", "filters"}` | ranked chunks with scores |
 | `GET /v1/document` | `?chunk_id=` | the whole document that holds the chunk (`text`), and where the chunk lies in it (`cited_start`, `cited_end`); 404 if no searched corpus holds it |
+| `POST /v1/cases` | `{"query", "k"}` | the best passage of each case (`hits`, `labels`) and `statutes`: per document, the articles its whole text cites, limited to laws in `retrieval.law_corpus` |
+| `GET /v1/law` | `?name=` | the law's articles in order: `article`, `title`, `text`, `chunk_id`; 404 for an unknown name |
 | `POST /v1/chat` | `{"message", "conversation_id", "include_trace"}` | `ChatResponse` (`kind` = `answer`, `clarification`, or `rejected`) |
 
 Conversation history is stored in `data/indexes/<corpus_version>/conversations.db`. Only

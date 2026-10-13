@@ -39,6 +39,38 @@ class DocumentResponse(BaseModel):
     cited_end: int
 
 
+class CasesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=2000)
+    k: int = Field(default=20, ge=1, le=50)
+
+
+class CitedArticle(BaseModel):
+    law: str
+    article: str  # "제3조의3"
+    paragraph: str | None = None  # "제1항"
+
+
+class CasesResponse(BaseModel):
+    hits: list[ScoredChunk]  # the best passage of each case, best case first
+    labels: dict[str, str] = Field(default_factory=dict)  # as in SearchResponse
+    # document_id -> the statute articles that case's whole text cites, in the order first cited.
+    statutes: dict[str, list[CitedArticle]] = Field(default_factory=dict)
+
+
+class Article(BaseModel):
+    article: str  # "제3조의2"
+    title: str  # "보증금의 회수"; empty when the article has none
+    text: str
+    chunk_id: str  # the article's first chunk, for /v1/document
+
+
+class LawResponse(BaseModel):
+    name: str
+    articles: list[Article]
+
+
 class HealthResponse(BaseModel):
     status: str
     corpus_version: str

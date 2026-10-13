@@ -6,6 +6,7 @@ A real call would need the service, its indexes and a model.
 """
 
 import importlib
+import contextlib
 import json
 import os
 import sys
@@ -242,6 +243,52 @@ class LegalSourceTests(ChatStreamBase):
         self.assertEqual(self.read(query="").status_code, 400)
         self.assertEqual(self.read(url="").status_code, 503)
         self.lookup.assert_not_called()
+
+
+class CaseSearchPageTests(ChatStreamBase):
+    """The case-search page searches cases and reads the article a filter names through these routes."""
+
+    def backend(self, **stubs):
+        patches = [mock.patch.dict(os.environ, {"LEGAL_RAG_URL": stubs.pop("url", "http://legal:8000")})]
+        self.calls = {name: mock.Mock(side_effect=value if isinstance(value, Exception) else None, return_value=value)
+                      for name, value in stubs.items()}
+        patches += [mock.patch.object(self.app_module.legal_backend, name, call) for name, call in self.calls.items()]
+        return patches
+
+    def get(self, path, **stubs):
+        with contextlib.ExitStack() as stack:
+            for patch in self.backend(**stubs):
+                stack.enter_context(patch)
+            return self.client.post(path[0], json=path[1]) if isinstance(path, tuple) else self.client.get(path)
+
+    def test_a_law_is_returned_with_its_articles(self):
+        law = {"name": "주택임대차보호법", "articles": [{"article": "제3조", "title": "대항력 등", "text": "...", "chunk_id": "c"}]}
+
+        self.assertEqual(self.get("/law?name=주택임대차보호법", law=law).json, law)
+        self.assertEqual(self.get("/law?name=없는법", law=None).status_code, 404)
+
+    def test_cases_are_searched_with_the_query_the_page_built(self):
+        cards = [{"title": "대법원 2019다1", "subject": "임대차보증금", "date": "2019.05.30", "kind": "판례",
+                  "quote": "...", "score": 0.9, "chunk_id": "c",
+                  "statutes": [{"law": "주택임대차보호법", "article": "제3조의3", "paragraph": "제1항"}]}]
+
+        response = self.get(("/case_search", {"query": "임차권등기명령 보증금 반환"}), search_cases=cards)
+
+        self.assertEqual((response.status_code, response.json), (200, {"results": cards}))
+        self.calls["search_cases"].assert_called_once_with("http://legal:8000", "임차권등기명령 보증금 반환")
+
+    def test_an_empty_request_or_a_missing_backend_does_not_call_out(self):
+        self.assertEqual(self.get("/law?name=", law={}).status_code, 400)
+        self.assertEqual(self.get(("/case_search", {"query": "  "}), search_cases=[]).status_code, 400)
+        self.assertEqual(self.get(("/case_search", {"query": ["x"]}), search_cases=[]).status_code, 400)
+        self.assertEqual(self.get("/law?name=민법", law={}, url="").status_code, 503)
+        self.calls["law"].assert_not_called()
+
+    def test_an_unavailable_backend_is_a_gateway_error(self):
+        down = self.app_module.legal_backend.LegalBackendUnavailable("ConnectError")
+
+        self.assertEqual(self.get(("/case_search", {"query": "보증금"}), search_cases=down).status_code, 502)
+        self.assertEqual(self.get("/law?name=민법", law=down).status_code, 502)
 
 
 if __name__ == "__main__":

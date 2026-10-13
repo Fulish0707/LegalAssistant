@@ -78,6 +78,51 @@ def document(base_url, chunk_id):
     return _read(base_url, "/v1/document", cut, chunk_id=chunk_id)
 
 
+def law(base_url, name):
+    """One law's articles in order, or None if no such law: {name, articles: [{article, title, text, chunk_id}]}."""
+    return _read(base_url, "/v1/law", lambda body: {"name": body["name"], "articles": body["articles"]}, name=name)
+
+
+# The reranker scores 20 passages; the service keeps the best one of each case.
+CASE_SEARCH_K = 20
+# "광주고등법원-2014나2029": the civil and IP corpora name a case only in its document id.
+_COURT_ID = re.compile(r"^(?P<court>[^-\d]+)-(?P<number>\d+[가-힣]+\d+)(?:-\d+)?$")
+_DATE = re.compile(r"(\d{4})\D{1,3}(\d{1,2})\D{1,3}(\d{1,2})")
+
+
+def _case_card(hit, labels, statutes):
+    chunk = hit["chunk"]
+    metadata = chunk.get("metadata") or {}
+    named = _COURT_ID.match(chunk["document_id"])
+    court = metadata.get("court") or metadata.get("authority") or (named and named["court"])
+    number = metadata.get("case_number") or (named and named["number"])
+    decided = _DATE.search(str(metadata.get("decision_date") or (metadata.get("original") or {}).get("date") or ""))
+    return {
+        "title": " ".join(part for part in (court, number) if part) or labels.get(chunk["document_id"])
+                 or f"{_kind(chunk)} (법원·사건번호 미기재)",
+        "subject": (chunk.get("title") or "").strip(),
+        "date": "{}.{:0>2}.{:0>2}".format(*decided.groups()) if decided else "",
+        "kind": _kind(chunk),
+        "quote": (chunk.get("text") or "").strip()[:QUOTE_CHARS],
+        "score": hit.get("score"),
+        "chunk_id": chunk["id"],
+        # The articles this case's text cites; the page groups the results by them.
+        "statutes": [{"law": ref["law"], "article": ref["article"], "paragraph": ref.get("paragraph")}
+                     for ref in statutes.get(chunk["document_id"], [])],
+    }
+
+
+def search_cases(base_url, query):
+    """Cases closest to `query`, one card per case, best first, each with the articles it cites."""
+    try:
+        response = httpx.post(base_url.rstrip("/") + "/v1/cases", json={"query": query, "k": CASE_SEARCH_K}, timeout=TIMEOUT)
+        response.raise_for_status()
+        body = response.json()
+        return [_case_card(hit, body.get("labels") or {}, body.get("statutes") or {}) for hit in body["hits"]]
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+        raise LegalBackendUnavailable(f"{type(error).__name__}: {error}") from error
+
+
 def _numbered(text, numbers):
     """Replace the model's source ids (S1, S2) with the sources panel's numbers."""
     def one(match):

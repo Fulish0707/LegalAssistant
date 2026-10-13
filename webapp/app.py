@@ -493,6 +493,20 @@ def legal_source():
     return _from_legal_backend(legal_backend.document, request.args.get('chunk_id'), "이 근거의 전문을 찾을 수 없습니다.")
 
 
+@app.route('/law', methods=['GET'])
+def law():
+    """One law's articles, each with its heading and text, for showing the article a filter names."""
+    return _from_legal_backend(legal_backend.law, request.args.get('name'), "이 법령을 찾을 수 없습니다.")
+
+
+@app.route('/case_search', methods=['POST'])
+def case_search():
+    """Cases closest to what the user described, each with the statute articles it cites."""
+    query = (request.get_json(silent=True) or {}).get('query')
+    return _from_legal_backend(lambda url, asked: {"results": legal_backend.search_cases(url, asked)},
+                               query if isinstance(query, str) else '', "")
+
+
 @app.route('/get_initial_state', methods=['GET'])
 def get_initial_state():
     return jsonify(_chat_state())

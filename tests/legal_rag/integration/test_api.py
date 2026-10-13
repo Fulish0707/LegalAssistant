@@ -48,6 +48,33 @@ def test_document_endpoint_returns_the_whole_document_and_where_the_chunk_lies(i
     assert client.get("/v1/document", params={"chunk_id": "no-such-chunk"}).status_code == 404
 
 
+def test_a_law_is_read_article_by_article(indexed):
+    client = _client(indexed, FakeChatModel({}))
+
+    law = client.get("/v1/law", params={"name": "주택임대차보호법"}).json()
+    by_number = {article["article"]: article for article in law["articles"]}
+    assert law["name"] == "주택임대차보호법" and by_number["제3조"]["title"] == "대항력 등"
+    assert "주민등록을 마친 때" in by_number["제3조"]["text"]
+    # The first chunk of an article opens the whole law in the reader.
+    whole = client.get("/v1/document", params={"chunk_id": by_number["제3조"]["chunk_id"]}).json()
+    assert by_number["제3조"]["text"].split("\n")[0] in whole["text"]
+    assert client.get("/v1/law", params={"name": "없는법"}).status_code == 404
+
+
+def test_cases_are_listed_once_each_with_the_articles_their_text_cites(indexed):
+    client = _client(indexed, FakeChatModel({}))
+
+    body = client.post("/v1/cases", json={"query": "임대차 보증금 반환", "k": 10}).json()
+
+    documents = [hit["chunk"]["document_id"] for hit in body["hits"]]
+    assert documents and len(documents) == len(set(documents))
+    assert {hit["chunk"]["document_type"] for hit in body["hits"]} <= {"court_decision", "judgment", "decision"}
+    assert set(body["statutes"]) == set(documents)
+    cited = {(ref["law"], ref["article"]) for refs in body["statutes"].values() for ref in refs}
+    assert cited and {law for law, _ in cited} <= {"주택임대차보호법", "민법"}
+    assert client.post("/v1/cases", json={"query": ""}).status_code == 422
+
+
 def test_chat_endpoint_round_trip(indexed):
     # A citation-free answer verifies against any evidence, so the script cannot run dry
     # whichever way the verifier decides on the grounded answer.

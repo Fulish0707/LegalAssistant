@@ -1,20 +1,88 @@
-/* 판례 검색 페이지 */
+/* 판례 검색 페이지
+   사건 내용으로 판례를 검색한다 (/case_search). 왼쪽 목록은 검색 결과의 판례들이 본문에서
+   인용한 조문을 법령 → 조 → 항으로 묶은 것이고, 고르면 그 조문을 인용한 판례만 남는다. */
 
 (function () {
   const a = LC.ACCENT, esc = LC.esc;
 
   const P = {
-    query: '임대차 보증금 반환 지연',
-    lawIdx: 0, joSel: null, hangSel: null, hoSel: null,
-    sort: '유사도순',
-    detail: null,
-    applied: '',
-    hits: [], hitsState: ''
+    query: '',               /* 검색창 입력 */
+    applied: '',             /* 검색에 쓴 입력 */
+    cases: [],               /* 검색 결과 — {title, subject, date, kind, quote, score, chunk_id, statutes: [{law, article, paragraph}]} */
+    caseState: '', searched: false,
+    law: null, art: null, para: null,   /* 왼쪽에서 고른 법령, 조, 항 */
+    laws: {},                /* 조문 본문을 보여주려고 읽은 법령 — 이름 → {articles} | '불러오는 중' | '없음' */
+    hits: [], hitsState: ''  /* 내 자료(업로드) 검색 결과 */
   };
+  let caseSeq = 0;           /* 늦게 도착한 이전 검색 결과를 버린다 */
+
+  /* ---------- 결과에서 조문 목록 만들기 ---------- */
+
+  const cites = (c, law, art, para) => c.statutes.some(s =>
+    s.law === law && (!art || s.article === art) && (!para || s.paragraph === para));
+
+  /* 값별로 그 값을 인용한 판례 수. 한 판례가 같은 값을 여러 번 인용해도 한 번만 센다 */
+  function counted(cases, valuesOf){
+    const counts = new Map();
+    cases.forEach(c => new Set(valuesOf(c)).forEach(v => counts.set(v, (counts.get(v) || 0) + 1)));
+    return [...counts].map(([key, count]) => ({ key, count }));
+  }
+  const number = label => (label.match(/\d+/g) || []).map(Number);          /* '제3조의2' → [3, 2] */
+  const byNumber = (x, y) => { const p = number(x.key), q = number(y.key); return (p[0] - q[0]) || ((p[1] || 0) - (q[1] || 0)); };
+
+  function drill(){
+    const laws = counted(P.cases, c => c.statutes.map(s => s.law)).sort((x, y) => y.count - x.count || x.key.localeCompare(y.key));
+    const inLaw = P.law ? P.cases.filter(c => cites(c, P.law)) : [];
+    const arts = counted(inLaw, c => c.statutes.filter(s => s.law === P.law).map(s => s.article)).sort(byNumber);
+    const inArt = P.art ? inLaw.filter(c => cites(c, P.law, P.art)) : [];
+    const paras = counted(inArt, c => c.statutes.filter(s => s.law === P.law && s.article === P.art && s.paragraph).map(s => s.paragraph)).sort(byNumber);
+    const list = P.law ? P.cases.filter(c => cites(c, P.law, P.art, P.para)) : P.cases;
+    return { laws, arts, paras, list };
+  }
+
+  /* ---------- 서버 호출 ---------- */
+
+  async function ask(url, options){
+    const r = await fetch(url, options);
+    const res = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(res.error || r.statusText);
+    return res;
+  }
+
+  async function searchCases(){
+    const q = P.applied;
+    const seq = ++caseSeq;
+    Object.assign(P, { law: null, art: null, para: null });
+    if (!q) { Object.assign(P, { cases: [], caseState: '', searched: false }); LC.render(); return; }
+    P.caseState = '검색 중'; LC.render();
+    try {
+      const res = await ask('/case_search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q }) });
+      if (seq !== caseSeq) return;
+      Object.assign(P, { cases: res.results || [], caseState: '', searched: true });
+    } catch (err) {
+      if (seq !== caseSeq) return;
+      console.error('Case search error:', err);
+      Object.assign(P, { cases: [], caseState: '검색 실패', searched: true });
+    }
+    LC.render();
+  }
+
+  /* 고른 조의 본문을 보여주려고 그 법령의 조문을 한 번 읽어 둔다 */
+  async function loadLaw(name){
+    if (P.laws[name]) return;
+    P.laws[name] = '불러오는 중';
+    try {
+      P.laws[name] = await ask('/law?name=' + encodeURIComponent(name));
+    } catch (err) {
+      console.error('Law load error:', err);
+      P.laws[name] = '없음';
+    }
+    LC.render();
+  }
 
   /* 지식베이스(업로드 자료) 유사도 검색 */
-  async function runSearch(){
-    const q = (P.applied || '').trim();
+  async function searchOwnDocuments(){
+    const q = P.applied;
     if (!q) { P.hits = []; P.hitsState = ''; return; }
     P.hitsState = '검색 중'; LC.render();
     try {
@@ -27,9 +95,17 @@
     LC.render();
   }
 
+  function applyQuery(){
+    P.applied = P.query.trim();
+    searchOwnDocuments();
+    searchCases();
+  }
+
+  /* ---------- 화면 ---------- */
+
   function hitsBlock(q){
     if (!q) return '';
-    const rows = P.hits.map((h, i) => `
+    const rows = P.hits.map(h => `
       <div style="display:flex;flex-direction:column;gap:8px;padding:14px 18px;border-bottom:1px solid #f5f3ee">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:14px">
           <span style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(h.source)}</span>
@@ -50,146 +126,149 @@
     </div>`;
   }
 
+  const note = text => `<div style="padding:0 8px;font-size:11.5px;line-height:1.7;color:#9aa0a5">${esc(text)}</div>`;
+
   function side(){
-    const { law, count, selJo, selHang } = LC.drill(P);
-    const rows = [
-      { label:'법령', items: LC.LAWS.map((l, i) => ({ label:l.name, on:P.lawIdx === i, act:'law', key:String(i) })) },
-      { label:'조', items: law.jangs.reduce((acc, j) => acc.concat(j.jos), []).map(jo => ({
-          label: jo.no + ' ' + jo.title, count: count(jo.no) || 0, on: P.joSel === jo.no, act:'jo', key: jo.no })) }
-    ];
-    if (selJo) rows.push({ label:'항', items: selJo.hangs.map(h => ({ label:h.no, on:P.hangSel === h.no, act:'hang', key:h.no })) });
-    if (selHang && selHang.hos.length) rows.push({ label:'호', items: selHang.hos.map(ho => ({ label:ho.no, on:P.hoSel === ho.no, act:'ho', key:ho.no })) });
+    const d = drill();
+    const rows = [{ label: '법령', act: 'law', on: P.law, items: d.laws }];
+    if (P.law) rows.push({ label: '조', act: 'article', on: P.art, items: d.arts });
+    if (P.art && d.paras.length) rows.push({ label: '항', act: 'paragraph', on: P.para, items: d.paras });
 
     return `
 <div style="display:flex;flex-direction:column;gap:16px">
   <div style="padding:0 8px;font-size:10px;letter-spacing:.16em;color:#9aa0a5">조문으로 좁히기</div>
-  ${rows.map(row => `
+  ${!P.searched ? note('판례를 검색하면 결과의 판례들이 인용한 조문이 여기에 나옵니다.')
+    : !d.laws.length ? note('검색 결과의 판례에서 읽어 낸 조문이 없습니다.')
+    : rows.map(row => `
   <div style="display:flex;flex-direction:column;gap:7px;padding:0 8px 14px;border-bottom:1px solid #f5f3ee">
     <span style="font-size:11px;color:#9aa0a5">${esc(row.label)}</span>
-    <div style="display:flex;flex-direction:column;gap:4px">
+    <div style="display:flex;flex-direction:column;gap:4px;max-height:38vh;overflow-y:auto">
       ${row.items.map(it => `
-      <button class="lc-ghost" data-act="${it.act}" data-key="${esc(it.key)}" style="${LC.chip(it.on)}">
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.label)}</span>
-        ${it.count == null ? '' : `<span style="margin-left:auto;flex:none;font-family:ui-monospace,Menlo,monospace;font-size:10px;color:${it.on ? a : '#9aa0a5'}">${it.count}</span>`}
+      <button class="lc-ghost" data-act="${row.act}" data-key="${esc(it.key)}" title="${esc(it.key)}" style="${LC.chip(row.on === it.key)}">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.key)}</span>
+        <span style="margin-left:auto;flex:none;font-family:ui-monospace,Menlo,monospace;font-size:10px;color:${row.on === it.key ? a : '#9aa0a5'}">${it.count}</span>
       </button>`).join('')}
     </div>
   </div>`).join('')}
-  <button class="lc-link" data-act="resetDrill" style="align-self:flex-start;margin:0 8px;padding:0;border:0;background:transparent;font-size:11.5px;color:#9aa0a5;text-decoration:underline;cursor:pointer">선택 모두 해제</button>
+  ${P.law ? `<button class="lc-link" data-act="resetDrill" style="align-self:flex-start;margin:0 8px;padding:0;border:0;background:transparent;font-size:11.5px;color:#9aa0a5;text-decoration:underline;cursor:pointer">선택 모두 해제</button>` : ''}
 </div>`;
   }
 
+  /* 고른 조의 본문. 색인의 현행 법령에서 읽으므로, 판결 당시의 조문과 다를 수 있다 */
+  function articleCard(){
+    if (!P.art) return '';
+    const law = P.laws[P.law];
+    const art = law && law.articles ? law.articles.find(x => x.article === P.art) : null;
+    const body = art ? esc(art.text)
+      : `<span style="color:#9aa0a5">${law === '불러오는 중' || !law ? '조문을 불러오는 중입니다' : '현행 법령에서 이 조문의 본문을 찾지 못했습니다'}</span>`;
+    return `
+    <div style="display:flex;flex-direction:column;gap:9px;padding:18px 20px;border:1px solid #e6e3dd;border-radius:14px;background:#fff">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px">
+        <div style="display:flex;align-items:baseline;gap:8px;min-width:0">
+          <span style="font-family:'Noto Serif KR',serif;font-size:14.5px;font-weight:700">${esc(P.law + ' ' + P.art)}</span>
+          ${art && art.title ? `<span style="font-size:12px;color:#767d83">(${esc(art.title)})</span>` : ''}
+        </div>
+        ${art ? `<button class="lc-link" data-act="viewLaw" data-key="${esc(art.chunk_id)}" style="flex:none;background:transparent;border:0;padding:0;font-size:11.5px;color:${a};cursor:pointer">법령 전문 보기</button>` : ''}
+      </div>
+      <div style="font-family:'Noto Serif KR',serif;font-size:13.5px;line-height:1.95;text-wrap:pretty;white-space:pre-wrap;max-height:36vh;overflow-y:auto">${body}</div>
+      ${art ? `<div style="font-size:11px;color:#9aa0a5">현행 법령의 조문입니다. 판결 당시의 조문과 다를 수 있습니다.</div>` : ''}
+    </div>`;
+  }
+
+  function caseCards(list){
+    if (P.caseState === '검색 중') return `<div style="padding:40px;border:1px dashed #ddd9d1;border-radius:14px;font-size:13px;color:#767d83;text-align:center"><span style="animation:lpb 1s infinite">●</span> 판례를 검색하고 있습니다</div>`;
+    if (!list.length) return `<div style="padding:40px;border:1px dashed #ddd9d1;border-radius:14px;font-size:13px;line-height:1.8;color:#767d83;text-align:center">${
+      P.caseState === '검색 실패' ? '판례를 검색하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+      : P.searched ? '검색어에 맞는 판례를 찾지 못했습니다.'
+      : '위 검색창에 사건 내용을 입력하세요. 결과가 나오면 왼쪽에서 조문으로 좁힐 수 있습니다.'}</div>`;
+    return list.map(c => `
+      <div style="display:flex;flex-direction:column;gap:9px;padding:18px 20px;border:1px solid #e6e3dd;border-radius:14px;background:#fff">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:14px">
+          <span style="font-family:'Noto Serif KR',serif;font-size:15px;font-weight:600">${esc(c.title)}</span>
+          ${c.score == null ? '' : `<span style="display:flex;align-items:center;gap:8px;flex:none">
+            ${LC.bar(c.score, 52, 5)}
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:${a}">${LC.pct(c.score)}</span>
+          </span>`}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:11.5px;color:#9aa0a5">${[c.subject, c.date, c.kind].filter(Boolean).map(esc).join('<span>·</span>')}</div>
+        ${c.statutes.length ? `
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${c.statutes.slice(0, 8).map(s => {
+            const on = s.law === P.law && (!P.art || s.article === P.art) && (!P.para || s.paragraph === P.para);
+            return `<span style="padding:3px 9px;border-radius:7px;background:${on ? '#e6f0f0' : '#faf9f6'};border:1px solid ${on ? '#c9dede' : '#eeeae2'};font-size:10.5px;color:${on ? a : '#767d83'}">${esc([s.law, s.article, s.paragraph].filter(Boolean).join(' '))}</span>`;
+          }).join('')}
+          ${c.statutes.length > 8 ? `<span style="padding:3px 2px;font-size:10.5px;color:#9aa0a5">외 ${c.statutes.length - 8}개</span>` : ''}
+        </div>` : ''}
+        <div style="font-size:13px;line-height:1.75;color:#3d4348;text-wrap:pretty;white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden">${esc(c.quote)}</div>
+        <div style="display:flex;gap:14px">
+          <button class="lc-link" data-act="viewCase" data-key="${esc(c.chunk_id)}" style="background:transparent;border:0;padding:0;font-size:11.5px;color:${a};cursor:pointer">전문 보기</button>
+          <a class="lc-link" href="chatbot.html?ask=${encodeURIComponent(c.title)}" style="font-size:11.5px;color:${a}">이 판례로 상담 이어가기</a>
+        </div>
+      </div>`).join('');
+  }
+
   function main(){
-    const d = LC.drill(P);
-    const { law, selJo, selJang, selHang, hos } = d;
-    const q = (P.applied || '').trim();
-    const pool = q && !P.joSel ? LC.CASES.slice().sort((x, y) => y.score - x.score) : d.list;
-    const list = q ? pool.filter(c => (c.name + c.summary + c.holding + c.refs.map(r => r.law + r.jo).join(' ')).indexOf(q) > -1 || q.split(/\s+/).some(w => w && (c.summary + c.holding).indexOf(w) > -1)) : d.list;
-    const crumbs = [{ label: law.name, sep:'›', act:'crumb', key:'law' }];
-    if (selJang) crumbs.push({ label: selJang, sep:'›', act:'crumb', key:'law' });
-    if (selJo) crumbs.push({ label: selJo.no + ' ' + selJo.title, sep: selHang ? '›' : '', act:'crumb', key:'jo' });
-    if (selHang) crumbs.push({ label: selHang.no, sep: P.hoSel ? '›' : '', act:'crumb', key:'hang' });
-    if (P.hoSel) crumbs.push({ label: P.hoSel, sep:'', act:'crumb', key:'ho' });
+    const { list } = drill();
+    const q = P.applied;
+    const crumbs = [[P.law, 'law'], [P.art, 'article'], [P.para, 'paragraph']].filter(c => c[0]);
 
     return `
 <div style="flex:1;min-height:0;overflow-y:auto;padding:24px 30px 30px">
   <div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:16px">
-    ${LC.pageHeader('판례 검색', '법령 → 조 → 항 → 호 순서로 범위를 좁히거나, 사건 내용을 문장으로 입력해 유사도로 검색합니다.')}
+    ${LC.pageHeader('판례 검색', '사건 내용을 문장으로 입력해 판례를 찾습니다. 결과가 나오면 왼쪽에서 판례가 인용한 법령 → 조 → 항으로 좁힐 수 있습니다.')}
 
+    ${crumbs.length ? `
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      ${crumbs.map(c => `
+      ${crumbs.map((c, i) => `
       <div style="display:flex;align-items:center;gap:8px">
-        <button class="lc-outline" data-act="${c.act}" data-key="${c.key}" style="padding:4px 10px;border:1px solid #e6e3dd;border-radius:999px;background:#fff;font-size:11.5px;color:#3d4348;cursor:pointer">${esc(c.label)}</button>
-        <span style="font-size:11px;color:#9aa0a5">${esc(c.sep)}</span>
+        <button class="lc-outline" data-act="crumb" data-key="${c[1]}" style="padding:4px 10px;border:1px solid #e6e3dd;border-radius:999px;background:#fff;font-size:11.5px;color:#3d4348;cursor:pointer">${esc(c[0])}</button>
+        <span style="font-size:11px;color:#9aa0a5">${i < crumbs.length - 1 ? '›' : ''}</span>
       </div>`).join('')}
-    </div>
+    </div>` : ''}
 
     <div style="display:flex;gap:10px;padding:11px 14px;border:1px solid #e6e3dd;border-radius:12px;background:#fff">
       ${LC.icon('search', 15, '#9aa0a5')}
       <input id="caseQuery" value="${esc(P.query)}" placeholder="예: 임대차 보증금 반환 지연" style="flex:1;min-width:0;border:0;background:transparent;font-size:13.5px;color:#14171a;outline:none">
-      ${P.joSel ? `<span style="flex:none;align-self:center;font-size:10.5px;color:#9aa0a5;white-space:nowrap">선택한 조문 안에서</span>` : ''}
-      ${P.applied ? `<button class="lc-link" data-act="clearQuery" style="flex:none;border:0;background:transparent;font-size:11.5px;color:#9aa0a5;cursor:pointer">지우기</button>` : ''}
+      ${q ? `<button class="lc-link" data-act="clearQuery" style="flex:none;border:0;background:transparent;font-size:11.5px;color:#9aa0a5;cursor:pointer">지우기</button>` : ''}
       <button class="lc-primary" data-act="search" style="flex:none;padding:8px 16px;border:0;border-radius:9px;background:${a};color:#fff;font-size:12.5px;cursor:pointer">검색</button>
     </div>
 
-    ${selJo ? `
-    <div style="display:flex;flex-direction:column;gap:9px;padding:18px 20px;border:1px solid #e6e3dd;border-radius:14px;background:#fff">
-      <div style="display:flex;align-items:baseline;gap:8px">
-        <span style="font-family:'Noto Serif KR',serif;font-size:14.5px;font-weight:700">${esc(law.name + ' ' + selJo.no + (selHang && selHang.no !== '본문' ? ' ' + selHang.no : '') + (P.hoSel ? ' ' + P.hoSel : ''))}</span>
-        <span style="font-size:12px;color:#767d83">(${esc(selJo.title)})</span>
-      </div>
-      <div style="font-family:'Noto Serif KR',serif;font-size:13.5px;line-height:1.95;text-wrap:pretty">${esc((selHang || selJo.hangs[0]).text)}</div>
-      ${hos.length ? `
-      <div style="display:flex;flex-direction:column;gap:5px;padding-top:9px;border-top:1px solid #f0ede7">
-        ${hos.map(h => `<div style="display:flex;gap:8px;font-size:12.5px;line-height:1.8;color:#767d83"><span style="flex:none;font-weight:600;color:#14171a">${esc(h.no)}</span><span style="text-wrap:pretty">${esc(h.text)}</span></div>`).join('')}
-      </div>` : ''}
-    </div>` : ''}
+    ${articleCard()}
 
     ${hitsBlock(q)}
 
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-      <div style="font-size:12px;color:#767d83">판례 ${list.length}건${P.joSel ? ' · 조문 필터 적용' : ''}${q ? ' · "' + esc(q) + '"' : ''}${!P.joSel && !q ? ' · 전체' : ''}</div>
-      <div style="display:flex;gap:5px">
-        ${['유사도순','조문순','최신순'].map(k => `<button class="lc-outline" data-act="sort" data-key="${esc(k)}" style="${LC.sortPill(P.sort === k)}">${esc(k)}</button>`).join('')}
-      </div>
-    </div>
+    ${P.searched && P.caseState !== '검색 실패' ? `
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:12px;color:#767d83">판례 ${list.length}건${P.law ? ` · 검색 결과 ${P.cases.length}건 중 ${esc(crumbs.map(c => c[0]).join(' '))}을(를) 인용한 판례` : ''}${q ? ' · "' + esc(q) + '"' : ''}</div>
+      ${P.cases.length ? `<div style="font-size:11.5px;line-height:1.6;color:#9aa0a5">조문은 판결문 본문에서 읽어 낸 것입니다. 법령 이름 없이 적힌 조문은 바로 앞에 나온 법령의 조문으로 보았으므로, 틀린 경우가 있을 수 있습니다.</div>` : ''}
+    </div>` : ''}
 
-    <div style="display:flex;flex-direction:column;gap:10px">
-      ${list.map(c => `
-      <button class="lc-card-btn" data-act="detail" data-key="${c.id}" style="display:flex;flex-direction:column;gap:10px;text-align:left;padding:18px 20px;border:1px solid ${P.detail === c.id ? a : '#e6e3dd'};border-radius:14px;background:#fff;cursor:pointer">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:14px">
-          <span style="font-family:'Noto Serif KR',serif;font-size:15px;font-weight:600">${esc(c.name)}</span>
-          <span style="display:flex;align-items:center;gap:8px;flex:none">
-            ${LC.bar(c.score, 52, 5)}
-            <span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:${a}">${LC.pct(c.score)}</span>
-          </span>
-        </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          ${c.refs.map(r => `<span style="padding:3px 9px;border-radius:7px;background:#faf9f6;border:1px solid #eeeae2;font-family:ui-monospace,Menlo,monospace;font-size:10.5px;color:#767d83">${esc(r.law + ' ' + r.jo + (r.hang && r.hang !== '본문' ? ' ' + r.hang : '') + (r.ho ? ' ' + r.ho : ''))}</span>`).join('')}
-        </div>
-        <div style="font-size:13px;line-height:1.75;color:#3d4348;text-wrap:pretty">${esc(c.summary)}</div>
-      </button>`).join('')}
-      ${list.length ? '' : `
-      <div style="display:flex;flex-direction:column;align-items:center;gap:9px;padding:40px;border:1px dashed #ddd9d1;border-radius:14px;color:#767d83">
-        <div style="font-size:13px">${q ? '검색어와 조문 조건에 맞는 판례가 없습니다' : '선택한 조문에 연결된 판례가 없습니다'}</div>
-        <button class="lc-outline" data-act="${q ? 'clearQuery' : 'widen'}" style="padding:8px 15px;border:1px solid #ddd9d1;border-radius:9px;background:#fff;font-size:12px;cursor:pointer">${q ? '검색어 지우기' : '한 단계 넓혀서 검색'}</button>
-      </div>`}
-    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">${caseCards(list)}</div>
   </div>
 </div>`;
   }
 
-  function rail(){
-    const det = LC.CASES.find(c => c.id === P.detail);
-    return det ? LC.caseDetailRail(det) : '';
-  }
-
   LC.definePage({
     id: '판례 검색',
-    side, main, rail,
+    side, main,
     acts: {
-      law: k => { P.lawIdx = Number(k); P.joSel = P.hangSel = P.hoSel = null; },
-      jo: k => { P.joSel = P.joSel === k ? null : k; P.hangSel = P.hoSel = null; },
-      hang: k => { P.hangSel = P.hangSel === k ? null : k; P.hoSel = null; },
-      ho: k => { P.hoSel = P.hoSel === k ? null : k; },
-      sort: k => { P.sort = k; },
-      resetDrill: () => { P.joSel = P.hangSel = P.hoSel = null; },
-      widen: () => { if (P.hoSel) P.hoSel = null; else if (P.hangSel) P.hangSel = null; else P.joSel = null; },
-      detail: k => { P.detail = P.detail === k ? null : k; },
-      closeDetail: () => { P.detail = null; },
-      search: () => { P.applied = P.query; P.detail = null; runSearch(); },
-      clearQuery: () => { P.applied = ''; P.query = ''; P.hits = []; P.hitsState = ''; },
-      crumb: k => {
-        if (k === 'law') { P.joSel = P.hangSel = P.hoSel = null; }
-        else if (k === 'jo') { P.hangSel = P.hoSel = null; }
-        else if (k === 'hang') { P.hoSel = null; }
-      }
+      law: k => { Object.assign(P, { law: P.law === k ? null : k, art: null, para: null }); },
+      article: k => { Object.assign(P, { art: P.art === k ? null : k, para: null }); if (P.art) loadLaw(P.law); },
+      paragraph: k => { P.para = P.para === k ? null : k; },
+      /* 경로의 한 칸을 누르면 그 아래 단계의 선택을 푼다 */
+      crumb: k => { if (k === 'law') P.art = P.para = null; else if (k === 'article') P.para = null; },
+      resetDrill: () => { Object.assign(P, { law: null, art: null, para: null }); },
+      search: () => { applyQuery(); return false; },
+      clearQuery: () => { Object.assign(P, { applied: '', query: '', hits: [], hitsState: '' }); searchCases(); return false; },
+      viewCase: k => { const c = P.cases.find(x => x.chunk_id === k); if (c) LC.openReader({ title: c.title, kind: c.kind, chunkId: k }); return false; },
+      viewLaw: k => { LC.openReader({ title: P.law + ' ' + P.art, kind: '법령', chunkId: k }); return false; }
     },
     init: () => {
       document.addEventListener('input', (e) => {
         if (e.target.id === 'caseQuery') P.query = e.target.value;
       });
       document.addEventListener('keydown', (e) => {
-        if (e.target.id === 'caseQuery' && e.key === 'Enter') { e.preventDefault(); P.applied = P.query; P.detail = null; runSearch(); LC.render(); }
+        if (e.target.id === 'caseQuery' && e.key === 'Enter') { e.preventDefault(); applyQuery(); }
       });
     }
   });
