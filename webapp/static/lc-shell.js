@@ -83,14 +83,6 @@ window.LC = window.LC || {};
 </div>`;
 
 
-  LC.helpCard = () => `
-<div style="margin-top:auto;display:flex;flex-direction:column;gap:9px;padding:14px;border-radius:12px;background:#f4faf9;border:1px solid #dbeae8">
-  <div style="font-size:12px;font-weight:600">혼자 하기 어려우신가요?</div>
-  <div style="font-size:11.5px;line-height:1.65;color:#3d4348">서류 작성과 접수까지 단계별로 함께 진행합니다. 비용은 들지 않습니다.</div>
-  <button class="lc-primary" data-act="guide" style="padding:9px;border:0;border-radius:9px;background:${a};color:#fff;font-size:12px;font-weight:500;cursor:pointer">단계별로 함께 하기</button>
-  <button class="lc-outline" data-act="lawyer" style="padding:8px;border:1px solid #d8d4cc;border-radius:9px;background:#fff;font-size:11.5px;color:#3d4348;cursor:pointer">복잡한 사건은 변호사 연결</button>
-</div>`;
-
   /* ---------- 셸 ---------- */
 
   function topBar(){
@@ -303,8 +295,6 @@ ${LC.reader()}
     refreshKb: () => { LC.fetchKnowledgeBaseStatus(); return false; },
     clearKb: () => { LC.clearKnowledgeBase(); return false; },
     print: () => { window.print(); return false; },
-    guide: () => { location.href = 'chatbot.html?ask=' + encodeURIComponent('단계별로 함께 진행해 주세요'); return false; },
-    lawyer: () => { alert('변호사 연결은 준비 중입니다. 상담 기록을 바탕으로 적합한 변호사를 안내할 예정입니다.'); return false; },
     viewSource: k => {
       const s = LC.SOURCES.find(x => x.id === k);
       if (!s) return false;
@@ -412,16 +402,6 @@ ${LC.reader()}
     const res = await r.json().catch(() => ({}));
     if (!r.ok || !res.ok) throw new Error(res.error || r.statusText);
     return res.results || [];
-  };
-
-
-  LC.clearChatHistory = async function () {
-    try {
-      const r = await fetch('/clear_chat_history_endpoint', { method: 'POST' });
-      if (!r.ok) throw new Error(r.statusText);
-    } catch (err) {
-      console.error('Chat history clear error:', err);
-    }
   };
 
 
