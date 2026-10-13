@@ -12,6 +12,7 @@ import os
 import sys
 import tempfile
 import unittest
+from urllib.parse import quote
 from unittest import mock
 
 
@@ -171,6 +172,51 @@ class ChatStreamingTests(ChatStreamBase):
         self.ask.assert_not_called()
         self.assertEqual(self.final(events)["sources"], [])
         self.assertEqual(events[-1]["type"], "stream_end")
+
+    def test_questions_about_the_service_are_answered_without_the_backend(self):
+        """Sent to the backend they came back as a legal analysis citing unrelated sources (2026-10-13)."""
+        expected = {"너는 뭘 할 수 있어?": "법률 상담을 돕는 AI", "넌 AI야?": "법률 상담을 돕는 AI", "변호사랑 뭐가 달라?": "변호사가 아니므로",
+                    "여기서 해 주는 답변 믿어도 돼?": "변호사가 검토한 답변이 아닙니다", "이 답변은 변호사가 확인한 거야?": "틀릴 수 있고",
+                    "내가 쓴 대화 내용은 저장돼?": "서버가 다시 시작되면", "여기 상담 기록은 누가 볼 수 있어?": "다른 브라우저에서는 열 수 없습니다",
+                    "이거 무료야?": "무료로 이용", "사람이랑 직접 얘기하고 싶어": "직접 연결해 드리는 기능이 없습니다"}
+        for message, part in expected.items():
+            with self.subTest(message=message):
+                final = self.final(self.collect(query="message=" + quote(message)))
+                self.ask.assert_not_called()
+                self.assertIn(part, final["chat_response"])
+                self.assertEqual((final["sources"], final["questions"]), ([], []))
+
+    def test_thanks_and_acknowledgements_get_their_own_short_reply(self):
+        for message, part in {"고마워요, 도움이 됐어요": "도움이 되었다니", "네 알겠습니다": "이어서 적어 주세요", "ㅋㅋ 알겠어": "이어서 적어 주세요",
+                              "안녕하세요, 처음 써봐요": "안녕하세요"}.items():
+            with self.subTest(message=message):
+                final = self.final(self.collect(query="message=" + quote(message)))
+                self.ask.assert_not_called()
+                self.assertIn(part, final["chat_response"])
+
+    def test_a_bare_yes_or_no_reaches_the_backend_once_the_consultation_has_an_answer(self):
+        """It answers what the consultation asked; before any answer it is only a short message."""
+        self.as_browser("yes-no-browser")
+        for message in ("네", "아니요"):
+            with self.subTest(first=message):
+                self.assertIn("안녕하세요", self.final(self.collect(query="message=" + quote(message)))["chat_response"])
+                self.ask.assert_not_called()
+        for message in ("계약서를 쓰긴 했어요", "네", "아니요", "응."):
+            with self.subTest(later=message):
+                self.client.post("/chat", json={"message": message})
+                self.collect(query="message=" + quote(message))
+                self.ask.assert_called_once()
+        self.client.post("/chat", json={"message": "ㅇㅇ"})
+        self.assertIn("이어서 적어 주세요", self.final(self.collect(query="message=" + quote("ㅇㅇ")))["chat_response"])
+        self.ask.assert_not_called()
+
+    def test_legal_questions_that_share_words_with_those_still_reach_the_backend(self):
+        for message in ("소송 비용은 누가 내?", "판결문은 믿어도 되는 증거야?", "녹음 파일은 저장해 둬야 해?", "변호사 없이 혼자 소송할 수 있어?",
+                        "법률구조공단은 어떻게 이용해?", "고마워. 근데 변호사 없이도 할 수 있어?", "감사합니다 근데 항소는요", "네, 근로계약서는 썼어요",
+                        "알겠어요 그럼 소장은요", "무료 법률 상담은 어디서 받아?", "요즘 집주인 때문에 너무 스트레스 받아"):
+            with self.subTest(message=message):
+                self.collect(query="message=" + quote(message))
+                self.ask.assert_called_once()
 
     def test_a_clarification_shows_the_backends_questions(self):
         final = self.final(self.collect({"kind": "clarification", "questions": ["언제 해고되었나요?"]}))
