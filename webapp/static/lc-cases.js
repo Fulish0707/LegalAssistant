@@ -12,14 +12,15 @@
     caseState: '', searched: false,
     law: null, art: null, para: null,   /* 왼쪽에서 고른 법령, 조, 항 */
     laws: {},                /* 조문 본문을 보여주려고 읽은 법령 — 이름 → {articles} | '불러오는 중' | '없음' */
-    hits: [], hitsState: ''  /* 내 자료(업로드) 검색 결과 */
+    hits: [], hitsState: '', /* 내 자료(업로드) 검색 결과 */
+    scroll: 0                /* 결과 목록의 스크롤 위치. 화면을 다시 그리거나 탭에 다녀와도 유지한다 */
   };
   let caseSeq = 0;           /* 늦게 도착한 이전 검색 결과를 버린다 */
 
   /* 상담 탭에 다녀와도 검색과 선택이 남도록 이 브라우저 탭에 적어 둔다. 탭을 닫으면 사라진다.
      진행 중 표시와 조문 본문(법령 하나가 수십만 자일 수 있다)은 적지 않고 다시 구한다 */
   const KEPT = 'lc.caseSearch';
-  const KEPT_FIELDS = ['query', 'applied', 'cases', 'searched', 'law', 'art', 'para', 'hits'];
+  const KEPT_FIELDS = ['query', 'applied', 'cases', 'searched', 'law', 'art', 'para', 'hits', 'scroll'];
   function keep(){
     try { sessionStorage.setItem(KEPT, JSON.stringify(Object.fromEntries(KEPT_FIELDS.map(k => [k, P[k]])))); } catch (err) { /* 저장소를 못 쓰면 유지하지 않을 뿐이다 */ }
   }
@@ -64,7 +65,7 @@
   async function searchCases(){
     const q = P.applied;
     const seq = ++caseSeq;
-    Object.assign(P, { law: null, art: null, para: null, searched: false });
+    Object.assign(P, { law: null, art: null, para: null, searched: false, scroll: 0 });
     if (!q) { Object.assign(P, { cases: [], caseState: '', searched: false }); LC.render(); return; }
     P.caseState = '검색 중'; LC.render();
     try {
@@ -115,8 +116,9 @@
 
   /* ---------- 화면 ---------- */
 
+  /* 내 자료에서 찾은 것이 있을 때만 보인다. 올린 자료가 없는 사용자에게 빈 상자를 보이지 않는다 */
   function hitsBlock(q){
-    if (!q) return '';
+    if (!q || (!P.hits.length && P.hitsState !== '검색 실패')) return '';
     const rows = P.hits.map(h => `
       <div style="display:flex;flex-direction:column;gap:8px;padding:14px 18px;border-bottom:1px solid #f5f3ee">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:14px">
@@ -124,11 +126,9 @@
           <span style="display:flex;align-items:center;gap:8px;flex:none">${LC.bar(h.score, 52, 5)}<span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:${a}">${LC.pct(h.score)}</span></span>
         </div>
         <div style="font-size:12.5px;line-height:1.75;color:#3d4348;text-wrap:pretty;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden">${esc(h.quote)}</div>
-        <a class="lc-link" href="chatbot.html?ask=${encodeURIComponent(h.source)}" style="align-self:flex-start;font-size:11.5px;color:${a}">이 자료로 상담 이어가기</a>
+        <a class="lc-link" href="chatbot.html?doc=${encodeURIComponent(h.source)}" style="align-self:flex-start;font-size:11.5px;color:${a}">이 자료로 상담 이어가기</a>
       </div>`).join('');
-    const empty = P.hitsState === '검색 중' ? '<span style="animation:lpb 1s infinite">●</span> 내 자료를 검색하고 있습니다'
-      : P.hitsState === '검색 실패' ? '내 자료 검색에 실패했습니다'
-      : '검색어와 관련된 업로드 자료가 없습니다';
+    const empty = '내 자료 검색에 실패했습니다';
     return `
     <div style="border:1px solid #dbeae8;border-radius:14px;background:#fff;overflow:hidden">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 18px;background:#f4faf9;font-size:10px;letter-spacing:.14em;color:#767d83">
@@ -225,7 +225,7 @@
     const crumbs = [[P.law, 'law'], [P.art, 'article'], [P.para, 'paragraph']].filter(c => c[0]);
 
     return `
-<div style="flex:1;min-height:0;overflow-y:auto;padding:24px 30px 30px">
+<div id="caseScroll" style="flex:1;min-height:0;overflow-y:auto;padding:24px 30px 30px">
   <div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:16px">
     ${LC.pageHeader('판례 검색', '사건 내용을 문장으로 입력해 판례를 찾습니다. 결과가 나오면 왼쪽에서 판례가 인용한 법령 → 조 → 항으로 좁힐 수 있습니다.')}
 
@@ -263,14 +263,18 @@
   LC.definePage({
     id: '판례 검색',
     side, main,
-    afterRender: keep,
+    afterRender: () => {
+      const list = document.getElementById('caseScroll');
+      if (list) list.scrollTop = P.scroll;   /* 전문 보기를 열고 닫아도 읽던 자리로 */
+      keep();
+    },
     acts: {
-      law: k => { Object.assign(P, { law: P.law === k ? null : k, art: null, para: null }); },
-      article: k => { Object.assign(P, { art: P.art === k ? null : k, para: null }); if (P.art) loadLaw(P.law); },
-      paragraph: k => { P.para = P.para === k ? null : k; },
+      law: k => { Object.assign(P, { law: P.law === k ? null : k, art: null, para: null, scroll: 0 }); },
+      article: k => { Object.assign(P, { art: P.art === k ? null : k, para: null, scroll: 0 }); if (P.art) loadLaw(P.law); },
+      paragraph: k => { P.para = P.para === k ? null : k; P.scroll = 0; },
       /* 경로의 한 칸을 누르면 그 아래 단계의 선택을 푼다 */
       crumb: k => { if (k === 'law') P.art = P.para = null; else if (k === 'article') P.para = null; },
-      resetDrill: () => { Object.assign(P, { law: null, art: null, para: null }); },
+      resetDrill: () => { Object.assign(P, { law: null, art: null, para: null, scroll: 0 }); },
       search: () => { applyQuery(); return false; },
       clearQuery: () => { Object.assign(P, { applied: '', query: '', hits: [], hitsState: '' }); searchCases(); return false; },
       viewCase: k => { const c = P.cases.find(x => x.chunk_id === k); if (c) LC.openReader({ title: c.title, kind: c.kind, chunkId: k }); return false; },
@@ -285,6 +289,10 @@
       document.addEventListener('keydown', (e) => {
         if (e.target.id === 'caseQuery' && e.key === 'Enter') { e.preventDefault(); applyQuery(); }
       });
+      /* scroll은 위로 전파되지 않으므로 capture 단계에서 듣는다 */
+      document.addEventListener('scroll', (e) => {
+        if (e.target.id === 'caseScroll') { P.scroll = e.target.scrollTop; keep(); }
+      }, true);
     }
   });
 })();
