@@ -2,13 +2,9 @@ import json
 
 import httpx
 import pytest
-from pydantic import BaseModel
 
 from legal_rag.llm import Message, StructuredOutputError
-
-
-class Out(BaseModel):
-    answer: str
+from tests.legal_rag.unit.test_llm import Out
 
 
 def test_gemini_maps_messages_and_validates_schema():

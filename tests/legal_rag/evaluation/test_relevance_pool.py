@@ -3,8 +3,8 @@ import json
 import pytest
 
 from legal_rag.config import Settings
-from legal_rag.evaluation.diagnostic_runner import deepen_retrieval
-from legal_rag.evaluation.relevance_pool import build_pool, no_filters, read_jsonl, write_pool
+from legal_rag.evaluation.diagnosis.diagnostic_runner import deepen_retrieval
+from legal_rag.evaluation.relevance.relevance_pool import build_pool, no_filters, read_jsonl, write_pool
 from legal_rag.schemas import Chunk, ChunkMetadata, DocumentType, ScoredChunk
 
 
@@ -123,7 +123,7 @@ def _source_pool(tmp_path):
 
 
 def test_derive_pool_keeps_rows_within_depth_and_trims_ranks(tmp_path):
-    from legal_rag.evaluation.relevance_pool import derive_pool
+    from legal_rag.evaluation.relevance.relevance_pool import derive_pool
     _, pool, runs = _source_pool(tmp_path)
     rows = {row['chunk_id']: row for row in derive_pool(pool, runs, pool_depth=2, include_unretrieved_gold=False)}
     assert set(rows) == {'a#0', 'gold#0', 'b#0', 'e#0'}
@@ -136,7 +136,7 @@ def test_derive_pool_keeps_rows_within_depth_and_trims_ranks(tmp_path):
 
 
 def test_derive_pool_can_keep_unretrieved_gold_with_empty_ranks(tmp_path):
-    from legal_rag.evaluation.relevance_pool import derive_pool
+    from legal_rag.evaluation.relevance.relevance_pool import derive_pool
     _, pool, runs = _source_pool(tmp_path)
     rows = {row['chunk_id']: row for row in derive_pool(pool, runs, pool_depth=2, include_unretrieved_gold=True)}
     assert set(rows) == {'a#0', 'gold#0', 'b#0', 'e#0', 'gold#1', 'gold#2'}
@@ -145,7 +145,7 @@ def test_derive_pool_can_keep_unretrieved_gold_with_empty_ranks(tmp_path):
 
 
 def test_derive_pool_refuses_ranks_missing_from_the_pool(tmp_path):
-    from legal_rag.evaluation.relevance_pool import derive_pool
+    from legal_rag.evaluation.relevance.relevance_pool import derive_pool
     _, pool, runs = _source_pool(tmp_path)
     with pytest.raises(ValueError, match='not in the source pool'):
         derive_pool(pool, runs, pool_depth=4, include_unretrieved_gold=False)
@@ -155,7 +155,7 @@ def test_derive_pool_refuses_ranks_missing_from_the_pool(tmp_path):
 
 def test_derive_pool_dir_writes_provenance_and_copies_runs_and_judgments(tmp_path):
     import hashlib
-    from legal_rag.evaluation.relevance_pool import derive_pool_dir
+    from legal_rag.evaluation.relevance.relevance_pool import derive_pool_dir
     source, _, runs = _source_pool(tmp_path)
     before = {p.name: p.read_bytes() for p in source.rglob('*') if p.is_file()}
     out = derive_pool_dir(source, tmp_path / 'out', pool_depth=2, include_unretrieved_gold=False)
@@ -177,7 +177,7 @@ def test_derive_pool_dir_writes_provenance_and_copies_runs_and_judgments(tmp_pat
 
 
 def test_derive_pool_dir_refuses_to_deepen(tmp_path):
-    from legal_rag.evaluation.relevance_pool import derive_pool_dir
+    from legal_rag.evaluation.relevance.relevance_pool import derive_pool_dir
     source, _, _ = _source_pool(tmp_path)
     with pytest.raises(ValueError, match='deepen'):
         derive_pool_dir(source, tmp_path / 'out', pool_depth=4, include_unretrieved_gold=False)
@@ -185,7 +185,7 @@ def test_derive_pool_dir_refuses_to_deepen(tmp_path):
 
 
 def test_derive_pool_dir_without_judgments_records_none(tmp_path):
-    from legal_rag.evaluation.relevance_pool import derive_pool_dir
+    from legal_rag.evaluation.relevance.relevance_pool import derive_pool_dir
     source, _, _ = _source_pool(tmp_path)
     (source / 'judgments.jsonl').unlink()
     (source / 'judge_runs.jsonl').unlink()
@@ -195,13 +195,9 @@ def test_derive_pool_dir_without_judgments_records_none(tmp_path):
 
 
 def test_derive_script_writes_pool_and_refuses_existing_output(tmp_path):
-    import importlib.util
-    from pathlib import Path
     from typer.testing import CliRunner
-    path = Path(__file__).resolve().parents[3] / 'scripts' / 'derive_relevance_pool.py'
-    spec = importlib.util.spec_from_file_location('script_derive_relevance_pool', path)
-    script = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(script)
+    from test_calibration import _load_script
+    script = _load_script('derive_relevance_pool')
     source, _, _ = _source_pool(tmp_path)
     args = ['--from', str(source), '--output', str(tmp_path / 'out'), '--pool-depth', '2']
     result = CliRunner().invoke(script.app, args)
@@ -212,7 +208,7 @@ def test_derive_script_writes_pool_and_refuses_existing_output(tmp_path):
 
 
 def _adopt_fixture():
-    from legal_rag.evaluation.relevance_pool import adopt_run
+    from legal_rag.evaluation.relevance.relevance_pool import adopt_run
     pool, runs = build_pool(CASES, {'fanout': ListRetriever(['a#0', 'b#0'])}, gold_chunks={},
                             pool_depth=2, run_depth=2, case_filters=no_filters)
     source_pool = [dict(row, ranks={'old': 1}) for row in

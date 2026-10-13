@@ -1,4 +1,4 @@
-from legal_rag.evaluation.case_labels import case_label
+from legal_rag.evaluation.relevance.case_labels import case_label
 
 
 def chunk(document_id, document_type, *, title='', text='본문', authority=None, date=None):

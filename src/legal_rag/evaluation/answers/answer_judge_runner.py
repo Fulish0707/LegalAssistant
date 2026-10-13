@@ -12,11 +12,12 @@ import uuid
 import httpx
 
 from legal_rag.llm import Message, OllamaChatModel, StructuredOutputError
-from .answer_judge import (SPAN_CATALOG_VERSION, SPAN_MAX_CHARS, MAX_EVIDENCE_SELECTIONS,
+from .answer_judge import (SPAN_CATALOG_VERSION, MAX_EVIDENCE_SELECTIONS,
                            JUDGE_TIMEOUT_SECONDS, TIMEOUT_STOP_AFTER, QuoteValidationError)
 from .answer_rubrics import AnswerRubric
 from .answer_run import evidence_by_key, read_jsonl, retry_manifest_hashes, validate_saved_record
-from .relevance_judge import ollama_model_digest
+from .spans import SPAN_MAX_CHARS
+from ..relevance.relevance_judge import ollama_model_digest
 
 
 @dataclass(frozen=True)

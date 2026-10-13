@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from legal_rag.evaluation.mode_comparison import compare_mode_runs, write_mode_comparison
+from legal_rag.evaluation.diagnosis.mode_comparison import compare_mode_runs, write_mode_comparison
 
 TARGET = [{'id': 'qa:a', 'query': '질문 A', 'relevant_document_ids': ['doc-a']},
           {'id': 'qa:b', 'query': '질문 B', 'relevant_document_ids': ['doc-b']},

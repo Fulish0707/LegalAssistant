@@ -1,13 +1,7 @@
 import pytest
 
-from legal_rag.evaluation.pool_extension import extend_pool, gold_document_ids
-from legal_rag.schemas import Chunk, ChunkMetadata, DocumentType
-
-
-def make_chunk(chunk_id, document_id=None, text='본문'):
-    return Chunk(id=chunk_id, document_id=document_id or chunk_id.split('#')[0], document_type=DocumentType.judgment,
-                 path='p', order=0, text=text, title='제목',
-                 metadata=ChunkMetadata(dataset='d', corpus_version='ip-v1', authority='특허법원'))
+from legal_rag.evaluation.relevance.pool_extension import extend_pool, gold_document_ids
+from test_relevance_pool import make_chunk
 
 SOURCE = [
     {'case_id': 'c1', 'chunk_id': 'a#0', 'question': '질문', 'question_domain': None, 'reference_answer': '답변', 'document_id': 'a',

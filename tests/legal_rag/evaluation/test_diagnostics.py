@@ -3,7 +3,7 @@ from datetime import date
 
 import pytest
 
-from legal_rag.evaluation.diagnostics import build_duplicate_question_index, diagnose_case, normalize_question
+from legal_rag.evaluation.diagnosis.diagnostics import build_duplicate_question_index, diagnose_case, normalize_question
 from legal_rag.schemas import Chunk, ChunkMetadata, ScoredChunk
 
 

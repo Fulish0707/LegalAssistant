@@ -79,7 +79,7 @@ cases and checking the grader's reasoning against the saved source evidence.
 
 ## Maintained reporting code
 
-The `report` phase now calls `legal_rag.evaluation.answer_reporting` directly.
+The `report` phase now calls `legal_rag.evaluation.answers.answer_reporting` directly.
 Saved pairs, evidence, manifest fingerprints and retry-policy provenance are
 validated by `answer_run`. Report generation no longer executes Python stored
 inside a historical experiment directory or modifies source text with replacements.
@@ -93,7 +93,7 @@ generation with changed sources requires a separate run with fresh provenance.
 
 ## Maintained generation code (2026-10-05)
 
-The `generate` phase uses `legal_rag.evaluation.answer_replay.AnswerReplay` with
+The `generate` phase uses `legal_rag.evaluation.answers.answer_replay.AnswerReplay` with
 explicit settings and a request limiter shared across both arms. It no longer
 loads the historical replay with `runpy` or changes that script's globals. Four
 HTTP attempts, quota/backoff handling, verification and regeneration policy,

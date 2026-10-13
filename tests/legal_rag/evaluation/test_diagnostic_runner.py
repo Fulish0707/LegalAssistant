@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from legal_rag.config import Settings
-from legal_rag.evaluation.diagnostic_runner import load_diagnostic_rows, select_review_cases, validate_index_metadata
+from legal_rag.evaluation.diagnosis.diagnostic_runner import load_diagnostic_rows, select_review_cases, validate_index_metadata
 
 
 def jsonl(path, rows):
@@ -67,7 +67,7 @@ def test_live_service_and_cli_with_embedded_fixture(tmp_path):
     from legal_rag.factory import build_embedder
     from legal_rag.retrieval.index_builder import build_index
     from legal_rag.schemas import Chunk, ChunkMetadata
-    from legal_rag.evaluation.diagnostic_runner import run_retrieval_diagnostics
+    from legal_rag.evaluation.diagnosis.diagnostic_runner import run_retrieval_diagnostics
     from legal_rag.cli import settings_from_options
 
     settings = settings_from_options(profile='default', root=tmp_path, corpus_version='v1',
@@ -147,7 +147,7 @@ def _mini_chunk(chunk_id, document_id, text='본문'):
 
 
 def test_gold_chunks_are_found_in_whichever_corpus_holds_the_document(tmp_path):
-    from legal_rag.evaluation.diagnostic_runner import gold_chunks_across_corpora
+    from legal_rag.evaluation.diagnosis.diagnostic_runner import gold_chunks_across_corpora
     corpora = {'criminal-v1': _mini_corpus(tmp_path / 'c', [_mini_chunk('c#0', 'crime', '형사 본문'),
                                                             _mini_chunk('c#1', 'other')]),
                'civil-v1': _mini_corpus(tmp_path / 'v', [_mini_chunk('v#0', 'civil', '민사 본문')])}
@@ -158,7 +158,7 @@ def test_gold_chunks_are_found_in_whichever_corpus_holds_the_document(tmp_path):
 
 
 def test_a_gold_document_in_two_corpora_is_refused(tmp_path):
-    from legal_rag.evaluation.diagnostic_runner import gold_chunks_across_corpora
+    from legal_rag.evaluation.diagnosis.diagnostic_runner import gold_chunks_across_corpora
     corpora = {'a-v1': _mini_corpus(tmp_path / 'a', [_mini_chunk('a#0', 'shared')]),
                'b-v1': _mini_corpus(tmp_path / 'b', [_mini_chunk('b#0', 'shared')])}
     with pytest.raises(ValueError, match='ambiguous'):

@@ -1,6 +1,6 @@
 """Draw a reproducible evaluation target from domains other than the one already measured.
 
-Case ids come from :func:`legal_rag.evaluation.diagnostic_runner.load_diagnostic_rows`, so a
+Case ids come from :func:`legal_rag.evaluation.diagnosis.diagnostic_runner.load_diagnostic_rows`, so a
 written ``target.jsonl`` reproduces exactly the drawn cases when it is loaded back with that
 domain's ``qa.jsonl``. That only holds when each drawn row owns its (normalized question,
 document_id) pair outright, because the dataset match is by pair and not by case id, hence

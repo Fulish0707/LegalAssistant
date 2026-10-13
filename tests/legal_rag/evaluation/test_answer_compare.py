@@ -1,6 +1,6 @@
 import pytest
 
-from legal_rag.evaluation.answer_compare import (
+from legal_rag.evaluation.answers.answer_compare import (
     CSV_FIELDS, CSV_FIELDS_WITH_REFERENCE, pairwise_rows, sample_cases, win_rate)
 
 

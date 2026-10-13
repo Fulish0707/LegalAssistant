@@ -12,7 +12,7 @@ from pathlib import Path
 
 import typer
 
-from legal_rag.evaluation.answer_compare import win_rate
+from legal_rag.evaluation.answers.answer_compare import win_rate
 
 app = typer.Typer(add_completion=False)
 

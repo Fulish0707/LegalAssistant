@@ -1,7 +1,7 @@
-from legal_rag.evaluation.judgment_store import JudgmentStore
+from legal_rag.evaluation.relevance.judgment_store import JudgmentStore
 import pytest
 
-from legal_rag.evaluation.relevance_judge import (JUDGE_TEMPERATURE, RelevanceGrade, generation_settings, judge_key,
+from legal_rag.evaluation.relevance.relevance_judge import (JUDGE_TEMPERATURE, RelevanceGrade, generation_settings, judge_key,
                                                   judge_pool, verify_quote)
 from legal_rag.llm.base import ModelResponse, StructuredOutputError
 
@@ -109,7 +109,7 @@ def test_retry_failed_rejudges_only_failed_pairs(tmp_path):
 
 
 def test_think_is_part_of_the_key_and_generation_settings():
-    from legal_rag.evaluation.relevance_judge import JUDGE_THINK, prompt_sha256
+    from legal_rag.evaluation.relevance.relevance_judge import JUDGE_THINK, prompt_sha256
     assert JUDGE_THINK is False
     assert prompt_sha256(think=False) != prompt_sha256(think=True)
     model = ScriptedModel([])
@@ -126,8 +126,8 @@ def test_judge_pool_refuses_a_model_whose_think_mode_differs(tmp_path):
 
 def test_judge_run_record_and_append(tmp_path):
     import json
-    from legal_rag.evaluation.judgment_store import JudgeKey
-    from legal_rag.evaluation.relevance_judge import append_judge_run, judge_run_record
+    from legal_rag.evaluation.relevance.judgment_store import JudgeKey
+    from legal_rag.evaluation.relevance.relevance_judge import append_judge_run, judge_run_record
     record = judge_run_record(JudgeKey('ollama:qwen3:8b', 'p1'), calibration_csv_sha256='abc',
                               calibration_only=True, retry_failed=False, pairs=50, think=True,
                               counts={'judged': 49, 'skipped': 0, 'failed': 1}, model_digest=None)
@@ -144,7 +144,7 @@ def test_judge_run_record_and_append(tmp_path):
 
 def test_ollama_model_digest_is_best_effort():
     import httpx
-    from legal_rag.evaluation.relevance_judge import ollama_model_digest
+    from legal_rag.evaluation.relevance.relevance_judge import ollama_model_digest
     tags = {'models': [{'name': 'llama3:8b', 'digest': 'x'}, {'name': 'qwen3:8b', 'digest': 'sha-q'}]}
     ok = httpx.MockTransport(lambda request: httpx.Response(200, json=tags))
     assert ollama_model_digest('http://ollama', 'qwen3:8b', transport=ok) == 'sha-q'

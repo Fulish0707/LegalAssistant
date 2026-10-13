@@ -23,13 +23,12 @@ from pathlib import Path
 import typer
 
 from legal_rag.cli import settings_from_options
-from legal_rag.evaluation.fusion_sweep import pair_ranks, pending_pairs
-from legal_rag.evaluation.judgment_store import JudgmentStore
-from legal_rag.evaluation.pool_extension import extend_pool, gold_document_ids
-from legal_rag.evaluation.relevance_judge import JUDGE_THINK, describe_key, judge_key
-from legal_rag.evaluation.relevance_pool import JUDGMENT_FILES, read_jsonl, write_pool
-from legal_rag.evaluation.rerank_run import rerank_run
-from legal_rag.ingestion.corpus import Corpus
+from legal_rag.evaluation.relevance.fusion_sweep import pair_ranks, pending_pairs
+from legal_rag.evaluation.relevance.judgment_store import JudgmentStore
+from legal_rag.evaluation.relevance.pool_extension import extend_pool, gold_document_ids, needed_chunks
+from legal_rag.evaluation.relevance.relevance_judge import JUDGE_THINK, describe_key, judge_key
+from legal_rag.evaluation.relevance.relevance_pool import JUDGMENT_FILES, read_jsonl, write_pool
+from legal_rag.evaluation.relevance.rerank_run import rerank_run
 from legal_rag.reranking.cross_encoder import CrossEncoderReranker
 
 app = typer.Typer(add_completion=False)
@@ -58,21 +57,6 @@ def _baseline_map(entries: list[str]) -> dict[str, str]:
             raise typer.BadParameter(f'--baseline {entry!r}: expected NAME or OUTPUT=SOURCE')
         mapping[output_name] = source_name or output_name
     return mapping
-
-
-def _needed_chunks(settings, chunk_ids: set[str]) -> dict:
-    """Stream the processed corpus once, keeping the chunks the reranker and the pool need."""
-    found = {}
-    for chunk in Corpus.load(settings.processed_corpus_dir()).chunks():
-        if chunk.id in chunk_ids:
-            found[chunk.id] = chunk
-            if len(found) == len(chunk_ids):
-                break
-    missing = sorted(chunk_ids - set(found))
-    if missing:
-        raise ValueError(f'{len(missing)} ranked chunks are not in the processed corpus (e.g. {missing[0]}); '
-                         'the pool and the corpus disagree')
-    return found
 
 
 @app.command()
@@ -119,7 +103,7 @@ def main(
     questions = {row['case_id']: row['question'] for row in source_rows}
     ranked_ids = {hit['chunk_id'] for row in fused_rows for hit in row['ranked'][:run_depth]}
     _progress(f'{len(ranked_ids)} distinct candidate chunks; scanning the processed corpus')
-    chunks = _needed_chunks(settings, ranked_ids)
+    chunks = needed_chunks(settings, ranked_ids)
 
     reranker = CrossEncoderReranker(model=rerank_model, device=device, batch_size=batch_size,
                                     max_length=max_length)
