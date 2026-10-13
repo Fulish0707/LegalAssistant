@@ -93,7 +93,7 @@ def _orchestrator(overrides: str | None = None, *, frozen: bool = False):
     settings = settings_from_options(profile="local", extra=extra)
     if not frozen:
         return build_orchestrator(settings)
-    from legal_rag.evaluation.frozen import FrozenAnalyzer, FrozenRetriever
+    from legal_rag.evaluation.answers.frozen import FrozenAnalyzer, FrozenRetriever
 
     orch = build_orchestrator(settings, retriever=FrozenRetriever())
     orch.analyzer = FrozenAnalyzer()
@@ -108,7 +108,7 @@ def freeze(
     overrides: str = typer.Option(None, help="Settings JSON for the retrieval being frozen."),
 ) -> None:
     """Record each question's analysis and retrieved chunks, without generating an answer."""
-    from legal_rag.evaluation.frozen import capture_turn
+    from legal_rag.evaluation.answers.frozen import capture_turn
 
     out.mkdir(parents=True, exist_ok=True)
     path = out / "frozen.jsonl"
@@ -193,7 +193,7 @@ def verify(
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     turns: dict = {}
     if frozen is not None:
-        from legal_rag.evaluation.frozen import load_frozen
+        from legal_rag.evaluation.answers.frozen import load_frozen
 
         turns = load_frozen(frozen)
     log: dict = {}
@@ -302,7 +302,7 @@ def overlap(
     chars: int = typer.Option(700, help="Compare the first N characters of every answer; recall grows with length."),
 ) -> None:
     """Compare two runs' answers with their references without the grader (overlap, not correctness)."""
-    from legal_rag.evaluation.reference_overlap import bigram_recall, fact_recall, paired_difference
+    from legal_rag.evaluation.answers.reference_overlap import bigram_recall, fact_recall, paired_difference
 
     runs = [{row["key"]: row for row in map(json.loads, open(run / "answer_pairs.jsonl"))} for run in (base, new)]
     keys = sorted(set(runs[0]) & set(runs[1]))

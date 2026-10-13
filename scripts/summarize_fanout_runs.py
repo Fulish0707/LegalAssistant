@@ -17,9 +17,9 @@ from pathlib import Path
 import typer
 
 from legal_rag.cli import settings_from_options
-from legal_rag.evaluation.crossdomain_target import corpus_document_ids
-from legal_rag.evaluation.fanout_summary import corpus_mix, gold_document_metrics
-from legal_rag.evaluation.relevance_pool import read_jsonl
+from legal_rag.evaluation.diagnosis.crossdomain_target import corpus_document_ids
+from legal_rag.evaluation.relevance.fanout_summary import corpus_mix, gold_document_metrics
+from legal_rag.evaluation.relevance.relevance_pool import read_jsonl
 from legal_rag.factory import corpus_settings
 
 app = typer.Typer(add_completion=False)

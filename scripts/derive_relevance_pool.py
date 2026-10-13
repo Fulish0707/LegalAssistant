@@ -15,7 +15,7 @@ from pathlib import Path
 
 import typer
 
-from legal_rag.evaluation.relevance_pool import derive_pool_dir
+from legal_rag.evaluation.relevance.relevance_pool import derive_pool_dir
 
 app = typer.Typer(add_completion=False)
 

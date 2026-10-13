@@ -8,7 +8,7 @@ fan-out still lets the right corpus answer.
 """
 from __future__ import annotations
 
-from .retrieval_metrics import mrr
+from ..retrieval_metrics import mrr
 
 SUCCESS_DEPTHS = (1, 5, 10)
 

@@ -2,8 +2,8 @@ import csv
 
 import pytest
 
-from legal_rag.evaluation.graded_metrics import per_case_metrics, summarize_runs
-from legal_rag.evaluation.graded_report import (
+from legal_rag.evaluation.relevance.graded_metrics import per_case_metrics, summarize_runs
+from legal_rag.evaluation.relevance.graded_report import (
     case_rows, failed_top10_total, min_chunk_coverage, render_markdown, write_cases_csv)
 
 RUNS = {'dense': [{'case_id': 'c1', 'ranked': [{'chunk_id': 'k1', 'document_id': 'd1'},
@@ -102,8 +102,8 @@ def test_eval_graded_script_threshold_is_recorded_in_every_output(tmp_path):
     import json
     from pathlib import Path
     from typer.testing import CliRunner
-    from legal_rag.evaluation.judgment_store import JudgmentStore
-    from legal_rag.evaluation.relevance_judge import judge_key
+    from legal_rag.evaluation.relevance.judgment_store import JudgmentStore
+    from legal_rag.evaluation.relevance.relevance_judge import judge_key
     pool_dir = tmp_path / 'pool'
     (pool_dir / 'runs').mkdir(parents=True)
     for mode, rows in RUNS.items():
@@ -138,7 +138,7 @@ def test_eval_graded_script_threshold_is_recorded_in_every_output(tmp_path):
 
 
 def test_the_scope_line_describes_a_fan_out_when_the_pool_records_one():
-    from legal_rag.evaluation.graded_report import _scope
+    from legal_rag.evaluation.relevance.graded_report import _scope
     assert _scope({'corpus_version': 'ip-v1', 'filters': {'legal_domain': 'intellectual_property'}}) == (
         "- Scoped to ip-v1 with filter {'legal_domain': 'intellectual_property'}; "
         'multi-corpus fan-out is not measured.')

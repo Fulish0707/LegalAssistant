@@ -1,7 +1,7 @@
 """The core-conclusion grader: one yardstick per question, sentence numbers instead of copied quotes."""
 import json
 
-from legal_rag.evaluation.answer_judge_core import CoreCheck, CoreConclusion, judge_core_answers
+from legal_rag.evaluation.answers.answer_judge_core import CoreCheck, CoreConclusion, judge_core_answers
 from legal_rag.llm import FakeChatModel
 
 ANSWER = "해고일부터 3개월 이내에 노동위원회에 구제신청을 할 수 있습니다.\n서면 통지가 없으면 해고는 효력이 없습니다."

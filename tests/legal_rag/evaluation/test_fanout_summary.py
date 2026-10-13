@@ -1,6 +1,6 @@
 import pytest
 
-from legal_rag.evaluation.fanout_summary import corpus_mix, gold_document_metrics
+from legal_rag.evaluation.relevance.fanout_summary import corpus_mix, gold_document_metrics
 
 
 def run(*rankings):

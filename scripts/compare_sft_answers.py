@@ -17,8 +17,8 @@ from pathlib import Path
 
 import typer
 
-from legal_rag.evaluation.answer_compare import CSV_FIELDS_WITH_REFERENCE, pairwise_rows
-from legal_rag.evaluation.relevance_pool import read_jsonl
+from legal_rag.evaluation.answers.answer_compare import CSV_FIELDS_WITH_REFERENCE, pairwise_rows
+from legal_rag.evaluation.relevance.relevance_pool import read_jsonl
 from legal_rag.training.adapter_eval import CONDITIONS, pairwise_answers
 
 app = typer.Typer(add_completion=False)

@@ -17,7 +17,7 @@ from legal_rag.factory import (
 from legal_rag.ingestion.corpus import Corpus
 
 from .diagnostics import build_duplicate_question_index, diagnose_case, normalize_question
-from .qa_dataset import _rows
+from ..qa_dataset import _rows
 from .reports import summarize_cases, write_diagnostic_reports
 
 _EVALUATION_SPLITS = {'test', 'eval', 'evaluation', 'validation', 'valid', 'val', 'dev'}

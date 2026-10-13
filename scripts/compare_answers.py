@@ -19,9 +19,9 @@ from pathlib import Path
 
 import typer
 
-from legal_rag.evaluation.answer_compare import (
+from legal_rag.evaluation.answers.answer_compare import (
     CSV_FIELDS, evidence_bundle, pairwise_rows, render_answer, sample_cases)
-from legal_rag.evaluation.relevance_pool import read_jsonl
+from legal_rag.evaluation.relevance.relevance_pool import read_jsonl
 from legal_rag.llm import OllamaChatModel
 from legal_rag.rag.generator import GenerationError, Generator
 

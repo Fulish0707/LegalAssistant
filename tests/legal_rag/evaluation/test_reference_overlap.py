@@ -1,4 +1,4 @@
-from legal_rag.evaluation.reference_overlap import bigram_recall, fact_recall, paired_difference
+from legal_rag.evaluation.answers.reference_overlap import bigram_recall, fact_recall, paired_difference
 
 
 def test_bigram_recall_ignores_spacing_and_counts_repeats_once_each():

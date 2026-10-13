@@ -15,12 +15,12 @@ from pathlib import Path
 
 import typer
 
-from legal_rag.evaluation.graded_metrics import per_case_metrics, restrict_to_pool, summarize_runs
-from legal_rag.evaluation.graded_report import (
+from legal_rag.evaluation.relevance.graded_metrics import per_case_metrics, restrict_to_pool, summarize_runs
+from legal_rag.evaluation.relevance.graded_report import (
     case_rows, failed_top10_total, min_chunk_coverage, render_markdown, write_cases_csv)
-from legal_rag.evaluation.judgment_store import JudgmentStore
-from legal_rag.evaluation.relevance_judge import JUDGE_THINK, describe_key, judge_key
-from legal_rag.evaluation.relevance_pool import read_jsonl
+from legal_rag.evaluation.relevance.judgment_store import JudgmentStore
+from legal_rag.evaluation.relevance.relevance_judge import JUDGE_THINK, describe_key, judge_key
+from legal_rag.evaluation.relevance.relevance_pool import read_jsonl
 
 app = typer.Typer(add_completion=False)
 

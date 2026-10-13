@@ -46,7 +46,7 @@ def prepare_output(source, output):
 
 
 def report(run):
-    from legal_rag.evaluation.answer_reporting import write_calibration_report
+    from legal_rag.evaluation.answers.answer_reporting import write_calibration_report
     write_calibration_report(run)
 
 

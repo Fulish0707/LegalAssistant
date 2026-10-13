@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from legal_rag.evaluation.calibration import (
+from legal_rag.evaluation.relevance.calibration import (
     STRATA, agreement, read_reference_grades, sample_calibration, write_calibration)
 
 
@@ -93,7 +93,7 @@ def test_agreement_on_known_matrix():
 
 
 def _graded_calibration(tmp_path, grades):
-    from legal_rag.evaluation.calibration import CSV_FIELDS
+    from legal_rag.evaluation.relevance.calibration import CSV_FIELDS
     write_calibration(tmp_path, sample_calibration(pool(), seed=42))
     path = tmp_path / 'calibration.csv'
     with path.open(newline='', encoding='utf-8-sig') as handle:
@@ -108,7 +108,7 @@ def _graded_calibration(tmp_path, grades):
 
 
 def test_require_reference_grades_refuses_missing_or_partial_labels(tmp_path):
-    from legal_rag.evaluation.calibration import require_reference_grades
+    from legal_rag.evaluation.relevance.calibration import require_reference_grades
     with pytest.raises(ValueError, match='missing'):
         require_reference_grades(tmp_path)
     _graded_calibration(tmp_path, ['1'] * 49)
@@ -117,13 +117,13 @@ def test_require_reference_grades_refuses_missing_or_partial_labels(tmp_path):
 
 
 def test_require_reference_grades_accepts_complete_labels(tmp_path):
-    from legal_rag.evaluation.calibration import require_reference_grades
+    from legal_rag.evaluation.relevance.calibration import require_reference_grades
     _graded_calibration(tmp_path, ['0'] * 50)
     assert require_reference_grades(tmp_path) == 50
 
 
 def test_disagreement_rows_and_review_csv(tmp_path):
-    from legal_rag.evaluation.calibration import REVIEW_FIELDS, disagreement_rows, write_review
+    from legal_rag.evaluation.relevance.calibration import REVIEW_FIELDS, disagreement_rows, write_review
     rows = _graded_calibration(tmp_path, ['2', '1', '0', ''])
     key = lambda row: tuple(row['pair_id'].split('|', 1))
     details = {'model_grade': 2, 'evidence_quote': '지어낸 인용', 'quote_verified': False}
@@ -145,14 +145,14 @@ def test_disagreement_rows_and_review_csv(tmp_path):
 
 
 def test_judge_passes_threshold():
-    from legal_rag.evaluation.calibration import judge_passes
+    from legal_rag.evaluation.relevance.calibration import judge_passes
     assert judge_passes({'binary_grade2': {'kappa': 0.6}, 'missing_llm': 0})
     assert not judge_passes({'binary_grade2': {'kappa': 0.59}, 'missing_llm': 0})
     assert not judge_passes({'binary_grade2': {'kappa': None}, 'missing_llm': 0})
 
 
 def test_judge_fails_when_a_reference_graded_pair_has_no_llm_grade():
-    from legal_rag.evaluation.calibration import agreement, judge_passes, missing_llm_message
+    from legal_rag.evaluation.relevance.calibration import agreement, judge_passes, missing_llm_message
     human = {('c', str(i)): g for i, g in enumerate([2, 2, 0, 0, 1])}
     llm = {('c', str(i)): g for i, g in enumerate([2, 2, 0, 0])}      # pair 4 failed or not judged
     result = agreement(human, llm, gold_pairs=set())
@@ -165,7 +165,7 @@ def test_judge_fails_when_a_reference_graded_pair_has_no_llm_grade():
 
 def test_calibration_fingerprint_hashes_labels_manifest_and_pool(tmp_path):
     import hashlib
-    from legal_rag.evaluation.calibration import calibration_fingerprint
+    from legal_rag.evaluation.relevance.calibration import calibration_fingerprint
     _graded_calibration(tmp_path, ['0'] * 50)
     (tmp_path / 'pool.jsonl').write_text('{}\n', encoding='utf-8')
     fingerprint = calibration_fingerprint(tmp_path)
@@ -178,7 +178,7 @@ def test_calibration_fingerprint_hashes_labels_manifest_and_pool(tmp_path):
 
 
 def test_model_grades_fall_back_to_stored_grade_and_downgrades_are_counted():
-    from legal_rag.evaluation.calibration import model_grades, quote_downgrades
+    from legal_rag.evaluation.relevance.calibration import model_grades, quote_downgrades
     rows = {('c', '1'): {'grade': 1, 'details': {'model_grade': 2, 'evidence_quote': 'x', 'quote_verified': False}},
             ('c', '2'): {'grade': 2, 'details': {'model_grade': 2, 'evidence_quote': 'y', 'quote_verified': True}},
             ('c', '3'): {'grade': 0},                                   # v1 row without details
@@ -200,8 +200,8 @@ def _load_script(name):
 
 def test_agreement_script_writes_per_key_files_with_reference_source(tmp_path):
     from typer.testing import CliRunner
-    from legal_rag.evaluation.judgment_store import JudgmentStore
-    from legal_rag.evaluation.relevance_judge import judge_key
+    from legal_rag.evaluation.relevance.judgment_store import JudgmentStore
+    from legal_rag.evaluation.relevance.relevance_judge import judge_key
     rows = _graded_calibration(tmp_path, ['2'] * 25 + ['0'] * 25)
     (tmp_path / 'pool.jsonl').write_text(
         ''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in pool()), encoding='utf-8')
@@ -262,7 +262,7 @@ def test_without_a_gold_quota_retrieved_gold_chunks_fall_into_rank_strata():
 
 
 def test_parse_quotas_keeps_argument_order_and_validates():
-    from legal_rag.evaluation.calibration import parse_quotas
+    from legal_rag.evaluation.relevance.calibration import parse_quotas
     assert list(parse_quotas(['rank_4_10=25', 'rank_1_3=25']).items()) == [('rank_4_10', 25), ('rank_1_3', 25)]
     assert parse_quotas([]) == STRATA
     for bad in (['rank_1_3'], ['rank_1_3=x'], ['nope=3'], ['rank_1_3=1', 'rank_1_3=2'], ['rank_1_3=0']):
@@ -308,7 +308,7 @@ def _matrix_pairs(matrix):
 
 
 def test_agreement_reports_both_binary_boundaries_on_calibration_matrix():
-    from legal_rag.evaluation.calibration import judge_passes
+    from legal_rag.evaluation.relevance.calibration import judge_passes
     human, llm = _matrix_pairs([[16, 4, 1], [3, 6, 8], [0, 4, 8]])
     result = agreement(human, llm, gold_pairs=set())
     assert result['confusion'] == [[16, 4, 1], [3, 6, 8], [0, 4, 8]]
@@ -325,8 +325,8 @@ def test_agreement_reports_both_binary_boundaries_on_calibration_matrix():
 
 def test_agreement_script_pass_boundary(tmp_path):
     from typer.testing import CliRunner
-    from legal_rag.evaluation.judgment_store import JudgmentStore
-    from legal_rag.evaluation.relevance_judge import judge_key
+    from legal_rag.evaluation.relevance.judgment_store import JudgmentStore
+    from legal_rag.evaluation.relevance.relevance_judge import judge_key
     rows = _graded_calibration(tmp_path, ['2'] * 20 + ['1'] * 10 + ['0'] * 20)
     (tmp_path / 'pool.jsonl').write_text(
         ''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in pool()), encoding='utf-8')
@@ -371,7 +371,7 @@ def test_conflicting_codex_and_legacy_grades_are_refused(tmp_path):
 
 
 def test_deep_ranks_form_their_own_stratum():
-    from legal_rag.evaluation.calibration import _stratum
+    from legal_rag.evaluation.relevance.calibration import _stratum
 
     assert _stratum({'is_gold_chunk': False, 'ranks': {'hybrid': 15}}) == 'rank_11_20'
     assert _stratum({'is_gold_chunk': False, 'ranks': {'hybrid': 21}}) == 'rank_21_50'
@@ -381,7 +381,7 @@ def test_deep_ranks_form_their_own_stratum():
 
 class TestPrevalenceRobustAgreement:
     def test_ac1_matches_a_hand_computed_value(self):
-        from legal_rag.evaluation.calibration import agreement
+        from legal_rag.evaluation.relevance.calibration import agreement
 
         # 50 pairs: reference calls 40 relevant, judge 35, 33 of them shared, 8 shared zeros.
         reference, llm, number = {}, {}, 0
@@ -396,7 +396,7 @@ class TestPrevalenceRobustAgreement:
         assert result['ac1'] == pytest.approx(0.712, abs=5e-4)
 
     def test_ac1_holds_where_kappa_collapses_on_the_same_accuracy(self):
-        from legal_rag.evaluation.calibration import _gwet_ac1, _kappa
+        from legal_rag.evaluation.relevance.calibration import _gwet_ac1, _kappa
 
         balanced = ([1] * 25 + [0] * 25, [1] * 21 + [0] * 4 + [1] * 5 + [0] * 20)
         skewed = ([1] * 45 + [0] * 5, [1] * 41 + [0] * 4 + [1] * 5 + [0] * 0)
@@ -406,7 +406,7 @@ class TestPrevalenceRobustAgreement:
         assert _gwet_ac1(*balanced) > 0.6 and _gwet_ac1(*skewed) > 0.6
 
     def test_an_unknown_metric_is_refused(self):
-        from legal_rag.evaluation.calibration import judge_passes
+        from legal_rag.evaluation.relevance.calibration import judge_passes
 
         with pytest.raises(ValueError, match='kappa'):
             judge_passes({'missing_llm': 0, 'binary_relevant': {'kappa': 1.0}}, 1, metric='f1')
