@@ -223,16 +223,72 @@ def quota_exceeded_response(result: QuotaResult):
     }), 429
 
 
-# --- Text Cleaning Utility ---
-_SMALL_TALK = re.compile(r"^(?:안녕|반가|고마|감사|수고|ㅎㅇ|hi|hello|thanks?|thank you|bye)", re.IGNORECASE)
+# --- Messages answered without the legal service ---
+_GREETING = re.compile(r"^(?:안녕|반가|ㅎㅇ|hi|hello)", re.IGNORECASE)
+_THANKS = re.compile(r"^(?:고마|감사|수고|thanks?|thank you|bye)", re.IGNORECASE)
+_ACKNOWLEDGED = re.compile(r"^(?:[ㅋㅎ]+|네|넵|예|응|ㅇㅇ|ㅇㅋ|오케이|ok|okay)?[\s,.!~]*"
+                           r"(?:알겠(?:어요?|습니다)|알았(?:어요?|습니다)|이해했(?:어요?|습니다)|[ㅋㅎ]+)[\s.!~]*$", re.IGNORECASE)
+# "고마워. 근데 변호사 없이도 할 수 있어?" thanks and then asks; the question must be searched.
+_GOES_ON = re.compile(r"\?|근데|그런데|그럼|그러면|하지만")
+# An answer to what the consultation asked ("계약서를 쓰셨나요?" - "네"). The legal service joins it
+# to the question before it.
+_YES_NO = re.compile(r"(?:네|넵|예|응|아니|아뇨|아니요|아니오)[.!]?")
+GREETING_REPLY = "안녕하세요. 법률 관련 궁금한 점을 구체적으로 적어 주시면 법령과 판례를 찾아 안내해 드리겠습니다."
+THANKS_REPLY = "도움이 되었다니 다행입니다. 더 궁금한 점이 있으면 이어서 적어 주세요."
+ACKNOWLEDGED_REPLY = "네. 더 궁금한 점이 있으면 이어서 적어 주세요."
+
+# Questions about the service itself. The legal service answers every message from retrieved
+# passages, so "너는 뭘 할 수 있어?" came back as a legal analysis citing two unrelated sources
+# (2026-10-13). A separate model call can tell such messages apart (message-kind-2026-10-13), but
+# it is not wired in; these patterns cover the common ones. Each needs the service as its
+# subject, so "소송 비용은 누가 내?" or "판결문은 믿어도 되는 증거야?" still go to the search.
+# Checked 2026-10-14: none of 980 legal questions matches (everyday-150, the four pilot-200 sets,
+# 30 general questions); with the greetings below, 15 of 18 hand-written conversational messages
+# get a fixed reply. The three that do not only state a feeling ("오늘 너무 힘들다").
+_SERVICE = "너|넌|당신|여기|이 ?서비스|챗봇|AI"
+_SERVICE_REPLIES = [
+    (re.compile(rf"(?:{_SERVICE}|이거).{{0,8}}(?:뭐|뭘|무엇|무슨|어떤).{{0,8}}(?:할 수|해 ?줄|해 ?주|하는 거|하는 곳|가능)"
+                r"|^(?:너|넌|당신)은?는? ?(?:누구|뭐야|뭐니|AI|인공지능|사람|로봇)"
+                r"|(?:이거|여기|이 ?서비스).{0,6}어떻게 (?:쓰|사용|이용)"
+                r"|변호사(?:랑|와|하고) ?(?:뭐가|무엇이|어떻게) ?(?:달라|다른|다르)"),
+     "저는 법률 상담을 돕는 AI입니다. 겪고 계신 상황이나 궁금한 점을 적어 주시면 관련 법령과 판례를 찾아 근거와 함께 "
+     "설명해 드립니다. 사건 자료 탭에 올리신 계약서 같은 문서도 함께 참고합니다. 변호사가 아니므로 답변은 1차 정보로 "
+     "보시고, 중요한 결정 전에는 근거 원문과 전문가의 확인을 받으시기 바랍니다."),
+    (re.compile(rf"(?:{_SERVICE}|답변|네 말).{{0,10}}(?:믿어도|믿을 수|신뢰|정확한 거|맞는 거)|변호사가 (?:확인|검토|작성|쓴)"),
+     "답변은 AI가 검색된 법령과 판례를 바탕으로 작성하고, 인용한 조문과 사건번호가 실제 근거에 있는지 확인한 뒤 보여 "
+     "드립니다. 그래도 틀릴 수 있고, 변호사가 검토한 답변이 아닙니다. 오른쪽의 근거 원문을 직접 확인하시고, 중요한 결정 "
+     "전에는 전문가와 상담하시기 바랍니다."),
+    (re.compile(r"(?:대화|상담|채팅|내가 쓴).{0,8}(?:내용|기록).{0,12}(?:저장|누가|남아|지워|삭제|볼 수)"),
+     "상담 내용은 이 브라우저에서 다시 볼 수 있도록 서버에 저장되며, 다른 브라우저에서는 열 수 없습니다. 서비스를 "
+     "운영하는 쪽은 서버에 저장된 기록에 접근할 수 있습니다. 서버가 다시 시작되면 상담 기록은 지워집니다."),
+    (re.compile(r"(?:이거|여기|이 ?서비스).{0,6}(?:무료|공짜|유료|돈 ?(?:내|들|받))|(?:이용|사용) ?(?:요금|료)"),
+     "지금은 무료로 이용하실 수 있습니다. 하루에 보낼 수 있는 질문 수에는 제한이 있습니다."),
+    (re.compile(r"사람.{0,8}(?:얘기|이야기|상담|연결|통화).{0,6}(?:싶|해 ?줘|할 수|가능|돼)"),
+     "지금은 상담원이나 변호사와 직접 연결해 드리는 기능이 없습니다. 상황을 적어 주시면 관련 법령과 판례를 찾아 "
+     "안내해 드리겠습니다."),
+]
+SMALL_TALK_CHARS, SERVICE_QUESTION_CHARS = 20, 30
 
 
-def _needs_legal_search(text):
-    """Everything but greetings and thanks gets the statute/case-law pre-search."""
+def _fixed_reply(text, in_conversation=False):
+    """The reply to a message that needs no legal search, or None when it does.
+
+    `in_conversation`: the consultation already holds an answer, so a bare 네 answers its question.
+    """
     stripped = (text or "").strip()
     if len(stripped) < 4:
-        return False
-    return not (_SMALL_TALK.match(stripped) and len(stripped) <= 20)
+        if in_conversation:
+            return None if _YES_NO.fullmatch(stripped) else ACKNOWLEDGED_REPLY
+        return GREETING_REPLY
+    if len(stripped) <= SERVICE_QUESTION_CHARS:
+        asked = next((reply for pattern, reply in _SERVICE_REPLIES if pattern.search(stripped)), None)
+        if asked:
+            return asked
+    if len(stripped) <= SMALL_TALK_CHARS and not _GOES_ON.search(stripped):
+        for pattern, reply in ((_GREETING, GREETING_REPLY), (_THANKS, THANKS_REPLY), (_ACKNOWLEDGED, ACKNOWLEDGED_REPLY)):
+            if pattern.match(stripped):
+                return reply
+    return None
 
 
 def _sse(payload):
@@ -241,7 +297,6 @@ def _sse(payload):
 
 # --- Flask Routes ---
 
-GREETING_REPLY = "안녕하세요. 법률 관련 궁금한 점을 구체적으로 적어 주시면 법령과 판례를 찾아 안내해 드리겠습니다."
 LEGAL_BACKEND_UNSET = "법률 답변 서비스가 설정되지 않았습니다. LEGAL_RAG_URL을 설정한 뒤 다시 시작하세요."
 LEGAL_BACKEND_DOWN = "법률 답변 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."
 
@@ -337,7 +392,9 @@ def _generate_legal_response_stream(user_input):
             yield _sse({'type': 'error', 'content': 'Daily AI request quota exceeded.', 'error': 'daily_ai_quota_exceeded', 'limit': quota_result.limit})
             return
 
-        if _needs_legal_search(user_input):
+        # POST /chat stored this message before the stream began, so an earlier turn makes more than one.
+        fixed = _fixed_reply(user_input, len(get_chat_history_from_db(session["user_id"], _conversation())) > 1)
+        if fixed is None:
             yield _sse({'type': 'thought', 'content': '법령·판례 검색 및 답변 작성 중'})
             documents = _case_documents(user_input)
             if documents:
@@ -359,7 +416,7 @@ def _generate_legal_response_stream(user_input):
             missing = unsupported_citations(chat_response, evidence_texts, own_clauses=[d["text"] for d in documents])
             chat_response = annotate_figures(annotate_unsupported(chat_response, missing))
         else:
-            chat_response, sources, questions = GREETING_REPLY, [], []
+            chat_response, sources, questions = fixed, [], []
 
         add_chat_message_to_db(session["user_id"], "assistant", chat_response, _conversation(), sources)
         yield _sse({
