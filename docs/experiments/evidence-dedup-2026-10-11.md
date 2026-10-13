@@ -139,14 +139,14 @@ reference의 군인공제회법 제17조의3은 검색 근거에 없었다. refe
 
 평가 폴더: `data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/`
 
-- [80문항 scan 및 복원 결과](../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/scan.json)
-- [사전 판정 기준](../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/pilot-PREREG.json)
-- [고정 manifest](../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/pilot-manifest.json)
-- [실제 결과](../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/pilot-results.jsonl) · [측정 집계](../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/pilot-metrics.json)
-- [8쌍 전체 검토](../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/pilot-review.jsonl)
-- [백엔드 검증](../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/backend-complete.txt) · [웹 검증](../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/web.txt)
-- [최종 보존 감사](../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/final-audit.json)
-- [설계](superpowers/specs/2026-10-11-evidence-dedup-design.md) · [계획](superpowers/plans/2026-10-11-evidence-dedup.md)
+- [80문항 scan 및 복원 결과](../../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/scan.json)
+- [사전 판정 기준](../../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/pilot-PREREG.json)
+- [고정 manifest](../../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/pilot-manifest.json)
+- [실제 결과](../../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/pilot-results.jsonl) · [측정 집계](../../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/pilot-metrics.json)
+- [8쌍 전체 검토](../../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/pilot-review.jsonl)
+- [백엔드 검증](../../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/backend-complete.txt) · [웹 검증](../../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/web.txt)
+- [최종 보존 감사](../../data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/final-audit.json)
+- [설계](../superpowers/specs/2026-10-11-evidence-dedup-design.md) · [계획](../superpowers/plans/2026-10-11-evidence-dedup.md)
 
 원시 입력·응답은 private ignored 파일이다. 문서만 커밋하면 원자료는 다른 환경에 포함되지 않는다.
 

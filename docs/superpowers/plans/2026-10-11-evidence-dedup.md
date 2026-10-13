@@ -29,6 +29,6 @@ Files: `src/legal_rag/evaluation/evidence_dedup.py`, `tests/legal_rag/unit/test_
 
 ## T3. 보고와 보존 감사
 
-- [x] `docs/evidence-dedup-2026-10-11.md`에 변경량·시간·내용·검증·한계를 기록하고 새3문서만 root에 복사한다.
+- [x] `docs/experiments/evidence-dedup-2026-10-11.md`에 변경량·시간·내용·검증·한계를 기록하고 새3문서만 root에 복사한다.
 - [x] `audit_diff.py` 및 별도 hash/payload/source roundtrip/seed/order/metric 검증으로 허용 변경·기존419개 파일·이전7상태·HEAD/stage를 확인한다.
 - [x] canonical task lifecycle을 관찰된 증거로 완료하고 새 mission만 COMPLETE로 기록한다.

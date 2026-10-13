@@ -10,7 +10,7 @@
 
 **Design:** [설계](../specs/2026-10-11-recovery-fixed-failure-design.md).
 
-**Status:** T1~T4 완료. 측정 32턴과 워밍업 4턴, AI 검토 16쌍, 보존 감사를 완료했다. 후보 판정은 미채택이다. 서비스 기본값과 이전 실행 상태를 보존했다. 결과는 [비교 보고서](../../recovery-fixed-failure-2026-10-11.md)에 기록했다.
+**Status:** T1~T4 완료. 측정 32턴과 워밍업 4턴, AI 검토 16쌍, 보존 감사를 완료했다. 후보 판정은 미채택이다. 서비스 기본값과 이전 실행 상태를 보존했다. 결과는 [비교 보고서](../../experiments/recovery-fixed-failure-2026-10-11.md)에 기록했다.
 
 ## T1. 설계와 입력 고정
 
@@ -35,6 +35,6 @@
 
 ## T4. 보고와 감사
 
-- [x] `docs/recovery-fixed-failure-2026-10-11.md`에 회차별 결과·한계·사례·다음 판단을 한국어로 기록한다. 작은 세로 다이어그램을 사용한다.
+- [x] `docs/experiments/recovery-fixed-failure-2026-10-11.md`에 회차별 결과·한계·사례·다음 판단을 한국어로 기록한다. 작은 세로 다이어그램을 사용한다.
 - [x] root와 이전 worktree의 원래 파일·실행 상태, 새 실행 중 고정 소스·payload, HEAD와 stage 상태를 확인한다. 기존 미커밋 변경을 보존한다.
 - [x] execute-protocol 상태와 계획을 실제 결과에 맞게 완료한다. 측정 완료를 서비스 지연 해결이나 자동 채택으로 표현하지 않는다.

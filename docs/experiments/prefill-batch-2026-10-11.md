@@ -104,8 +104,8 @@ Ollama v0.16.2의 [옵션 정의](https://github.com/ollama/ollama/blob/v0.16.2/
 
 ## 증거
 
-- [사전 설계](superpowers/specs/2026-10-11-prefill-batch-design.md), [실행 계획](superpowers/plans/2026-10-11-prefill-batch.md)
-- [지표](../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/metrics.json), [측정 원본](../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/results.jsonl), [제외 예열](../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/warmup.jsonl)
-- [전체 비교 검토](../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/review.jsonl), [품질 판정](../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/quality.json), [내용 비교](../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/content-comparison.json)
-- [정책 재생](../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/measurement-verification.json), [입력 캐시 대조](../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/cache-usage.json), [회귀 증거 바인딩](../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/regression.json)
-- [실제 엔진 설정](../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/engine-confirmations.jsonl), [서버 생명주기](../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/lifecycle.jsonl), [최종 감사](../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/final-audit.json)
+- [사전 설계](../superpowers/specs/2026-10-11-prefill-batch-design.md), [실행 계획](../superpowers/plans/2026-10-11-prefill-batch.md)
+- [지표](../../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/metrics.json), [측정 원본](../../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/results.jsonl), [제외 예열](../../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/warmup.jsonl)
+- [전체 비교 검토](../../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/review.jsonl), [품질 판정](../../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/quality.json), [내용 비교](../../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/content-comparison.json)
+- [정책 재생](../../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/measurement-verification.json), [입력 캐시 대조](../../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/cache-usage.json), [회귀 증거 바인딩](../../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/regression.json)
+- [실제 엔진 설정](../../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/engine-confirmations.jsonl), [서버 생명주기](../../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/lifecycle.jsonl), [최종 감사](../../data/eval/reports/chat_pipeline/prefill-batch-2026-10-11/final-audit.json)

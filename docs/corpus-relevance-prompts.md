@@ -39,8 +39,8 @@ PYTHONPATH=src .venv/bin/python scripts/judge_agreement.py \
 
 ## Evidence and limits
 
-The [shared v3 prompt snapshot](relevance-judge-prompt-v3.md) and
-[v1/v2 review](relevance-judge-v3-review.md) retain the earlier design evidence.
+The [shared v3 prompt snapshot](experiments/relevance-judge-prompt-v3.md) and
+[v1/v2 review](experiments/relevance-judge-v3-review.md) retain the earlier design evidence.
 Use this document for current profile selection and routing.
 
 The 48-pair pilot increased AI-reference agreement from 33/48 to 36/48. Civil improved, administrative had very limited positive coverage, IP was unchanged, and the original criminal guidance regressed. The criminal revision scored 7/12 (58.3%), versus shared 8/12 (66.7%), with all three partial passages overgraded as direct support. It had no quote extraction failures. Criminal therefore retains shared instructions. This was the same 12 development pairs, not an independent holdout. Exact quotes do not establish entailment, and these scores do not establish legal correctness or golden-answer improvement.

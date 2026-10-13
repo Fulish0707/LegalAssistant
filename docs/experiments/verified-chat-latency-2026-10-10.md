@@ -33,7 +33,7 @@ GPU 작업은 기존 `gpu.sh` 잠금으로 순차 실행했다. 코퍼스와 인
 
 새 검색·웹 측정은 로컬 프로필의 `criminal-v1`, `civil-v1`, `administrative-v1`, `ip-v1`, `statute-api-full-v1`을 사용했다. 고정 근거 비교는 기존 `prompt-tuning-2026-10-06/frozen.jsonl`을 재생한다. 참고 답변은 `prompt-format-2026-10-07/bullets-1/answer_pairs.jsonl`에서 가져왔다. 80문항의 구성은 행정·민사·형사·교차 분야 각각 20개다.
 
-측정 기준은 모델 호출 전에 [PREREG.md](../data/eval/reports/chat_pipeline/verified-latency-2026-10-10/PREREG.md)에 기록했다. 이후 변경은 [AMENDMENTS.md](../data/eval/reports/chat_pipeline/verified-latency-2026-10-10/AMENDMENTS.md)에 남겼다. 원자료 폴더는 Git에서 제외된다. 이 문서는 주요 결과와 판단을 보관한다.
+측정 기준은 모델 호출 전에 [PREREG.md](../../data/eval/reports/chat_pipeline/verified-latency-2026-10-10/PREREG.md)에 기록했다. 이후 변경은 [AMENDMENTS.md](../../data/eval/reports/chat_pipeline/verified-latency-2026-10-10/AMENDMENTS.md)에 남겼다. 원자료 폴더는 Git에서 제외된다. 이 문서는 주요 결과와 판단을 보관한다.
 
 ## 3. 검색 비교
 
@@ -110,7 +110,7 @@ flowchart TB
 
 ## 5. AI 읽기 검토
 
-80문항 중 매 4번째 문항 20개와 두 참고 결론 평가 중 통과 여부가 바뀐 14문항을 선택했다. 중복을 제외하면 27문항이다. AI가 두 방식의 전체 본문과 참고 답변을 읽었다. 적용 범위 오류가 의심되는 사례에서는 제공 근거도 확인했다. 사례별 검토 범위와 이유를 [manual_review.jsonl](../data/eval/reports/chat_pipeline/verified-latency-2026-10-10/manual_review.jsonl)에 `AI reviewed (Codex)`로 기록했다. 전문가의 독립 법률 검토는 아니다.
+80문항 중 매 4번째 문항 20개와 두 참고 결론 평가 중 통과 여부가 바뀐 14문항을 선택했다. 중복을 제외하면 27문항이다. AI가 두 방식의 전체 본문과 참고 답변을 읽었다. 적용 범위 오류가 의심되는 사례에서는 제공 근거도 확인했다. 사례별 검토 범위와 이유를 [manual_review.jsonl](../../data/eval/reports/chat_pipeline/verified-latency-2026-10-10/manual_review.jsonl)에 `AI reviewed (Codex)`로 기록했다. 전문가의 독립 법률 검토는 아니다.
 
 | 순번 | 확인한 차이 | 판정 |
 |---|---|---|
@@ -207,7 +207,7 @@ reuse의 전체 중앙값은 baseline보다 약 13.0% 작았다. 검색 절약�
 
 문서 업로드는 별도 2건이며 모두 성공했다. 분석과 저장 시간은 baseline 실행 41.00초, concise 실행 66.30초였다. 업로드 분석은 동일한 기존 웹 처리기이며 답변 표현 설정과 별개다. 이 차이를 concise 지침의 효과로 해석하지 않는다. 업로드와 채팅을 동시에 진행하는 조건은 측정하지 않았다.
 
-측정 서버는 종료했다. 원문·이벤트·단계 시간은 [turns.jsonl](../data/eval/reports/chat_pipeline/verified-latency-2026-10-10/e2e/turns.jsonl), [backend.jsonl](../data/eval/reports/chat_pipeline/verified-latency-2026-10-10/e2e/backend.jsonl), [details.json](../data/eval/reports/chat_pipeline/verified-latency-2026-10-10/e2e/details.json)에 보관한다.
+측정 서버는 종료했다. 원문·이벤트·단계 시간은 [turns.jsonl](../../data/eval/reports/chat_pipeline/verified-latency-2026-10-10/e2e/turns.jsonl), [backend.jsonl](../../data/eval/reports/chat_pipeline/verified-latency-2026-10-10/e2e/backend.jsonl), [details.json](../../data/eval/reports/chat_pipeline/verified-latency-2026-10-10/e2e/details.json)에 보관한다.
 
 ## 7. 회귀 확인
 

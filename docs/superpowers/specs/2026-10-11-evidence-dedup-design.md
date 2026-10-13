@@ -26,4 +26,4 @@
 
 ## 완료 산출물
 
-private `data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/`에 scan, 고정 입력·payload·manifest, raw/parsed/drafts/final, 측정 집계, 8쌍 검토와 최종 감사를 저장한다. `docs/evidence-dedup-2026-10-11.md`에 한국어 결과·한계를 기록한다. root에는 새 설계·계획·보고서만 복사한다.
+private `data/eval/reports/chat_pipeline/evidence-dedup-2026-10-11/`에 scan, 고정 입력·payload·manifest, raw/parsed/drafts/final, 측정 집계, 8쌍 검토와 최종 감사를 저장한다. `docs/experiments/evidence-dedup-2026-10-11.md`에 한국어 결과·한계를 기록한다. root에는 새 설계·계획·보고서만 복사한다.

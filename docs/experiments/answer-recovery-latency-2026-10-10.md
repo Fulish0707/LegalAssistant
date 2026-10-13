@@ -183,11 +183,11 @@ pass는 새 회귀를 확인하지 않았다는 뜻이다. baseline부터 있던
 
 ## 재현 자료와 한계
 
-- [사전 기준](../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/PREREG.md), [변경 결정](../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/AMENDMENTS.md).
-- [기준 상태·해시](../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/baseline-manifest.json), [생성 소스·입력 manifest](../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/main-01/manifest.jsonl), [실행 환경](../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/runtime.json).
-- [평가 모델](../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/evaluation-model.json), [평가 스크립트 고정](../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/evaluation-freeze.json), [평가 코드·캐시 해시](../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/evaluation-dependencies.json).
-- [최종 집계·판정](../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/final-quality.json), [구조화 실패 원문 검토](../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/main-01/failed-output-review.jsonl).
-- Codex 전체 이유: [반복 억제](../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/main-01/main/guard/codex-review.jsonl), [복구 변경](../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/main-01/main/recovery/codex-review.jsonl), [병합](../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/main-01/main/combined/codex-review.jsonl).
+- [사전 기준](../../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/PREREG.md), [변경 결정](../../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/AMENDMENTS.md).
+- [기준 상태·해시](../../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/baseline-manifest.json), [생성 소스·입력 manifest](../../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/main-01/manifest.jsonl), [실행 환경](../../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/runtime.json).
+- [평가 모델](../../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/evaluation-model.json), [평가 스크립트 고정](../../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/evaluation-freeze.json), [평가 코드·캐시 해시](../../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/evaluation-dependencies.json).
+- [최종 집계·판정](../../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/final-quality.json), [구조화 실패 원문 검토](../../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/main-01/failed-output-review.jsonl).
+- Codex 전체 이유: [반복 억제](../../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/main-01/main/guard/codex-review.jsonl), [복구 변경](../../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/main-01/main/recovery/codex-review.jsonl), [병합](../../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/main-01/main/combined/codex-review.jsonl).
 
 생성 모델 digest는 `359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7`이다. 평가 모델은 `qwen3:8b` Q4_K_M이며 digest는 `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`이다. core/strict의 context는 8192, 출력 한도는 300이다. 의미 검토의 context는 16384, 출력 한도는 2048이다. 모두 temperature 0, think OFF로 평가했다.
 
@@ -197,7 +197,7 @@ pass는 새 회귀를 확인하지 않았다는 뜻이다. baseline부터 있던
 
 ## 변경 보존 감사
 
-[최종 감사](../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/final-audit.json)는 PASS다. 공유 체크아웃의 기존 미커밋 코드와 기존 실행 상태는 보존했다. 계획·설계 문서를 결과에 맞게 갱신하고 이 결과 문서를 추가했다.
+[최종 감사](../../data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/final-audit.json)는 PASS다. 공유 체크아웃의 기존 미커밋 코드와 기존 실행 상태는 보존했다. 계획·설계 문서를 결과에 맞게 갱신하고 이 결과 문서를 추가했다.
 
 보호 파일 5개는 root와 worktree 모두 기준 해시와 같다. 고정된 생성 소스·입력 145개, 평가 스크립트 2개와 평가 의존 파일 5개의 해시도 같다. 두 체크아웃의 `git diff --check`, HEAD 유지, stage 없음과 결과 문서 링크·코드 블록 경계를 확인했다. 설명되지 않은 새 경로나 삭제는 없다. 후보를 적용하거나 commit하지 않았다.
 
