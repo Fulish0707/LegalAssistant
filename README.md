@@ -278,6 +278,7 @@ uv run python scripts/serve.py --profile local --port 8000
 | --- | --- |
 | GET /health | 서비스와 코퍼스 상태 |
 | POST /v1/search | 검색 결과와 출처 |
+| GET /v1/document | 조각 하나가 속한 문서의 전문과 그 조각의 위치 |
 | POST /v1/chat | 검색 근거를 사용한 답변 |
 
 답변 모델은 `.env`에서 고릅니다.
@@ -333,7 +334,7 @@ python -m pytest webapp/tests -k 'not Live' -q
 ### 웹 앱
 
 - [webapp/app.py](webapp/app.py): Flask 라우트, 웹 채팅 SSE, 대화 기록, 사건 자료 올리기.
-- [webapp/legal_backend.py](webapp/legal_backend.py): `/v1/chat` 호출과 답변·근거 표시 형식.
+- [webapp/legal_backend.py](webapp/legal_backend.py): `/v1/chat` 호출, 답변·근거 표시 형식, 근거 전문 가져오기.
 - [webapp/citation_guard.py](webapp/citation_guard.py): 근거에 없는 조문과 사건번호 찾기.
 - [webapp/langchain_config.py](webapp/langchain_config.py): 사건 자료의 Chroma 저장과 검색.
 - [webapp/llm_ocr.py](webapp/llm_ocr.py): 문서 텍스트 추출과 분석.

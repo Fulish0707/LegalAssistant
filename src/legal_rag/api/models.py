@@ -31,6 +31,14 @@ class SearchResponse(BaseModel):
     labels: dict[str, str] = Field(default_factory=dict)
 
 
+class DocumentResponse(BaseModel):
+    document_id: str
+    text: str  # the document's chunks joined in order
+    # Where the requested chunk lies in `text`, so a reader can show what an answer cited.
+    cited_start: int
+    cited_end: int
+
+
 class HealthResponse(BaseModel):
     status: str
     corpus_version: str

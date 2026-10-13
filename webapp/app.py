@@ -413,6 +413,30 @@ def chat():
     # Fallback to satisfy type checkers: ensure the route always returns a valid response
     return jsonify({"error": "Invalid request method."}), 405
 
+def _from_legal_backend(lookup, asked, missing):
+    """Answer a page's read of the legal corpus: `lookup(url, asked)` as JSON, or the error to show."""
+    legal_rag_url = os.getenv("LEGAL_RAG_URL", "").strip()
+    asked = (asked or '').strip()
+    if not asked:
+        return jsonify({"error": "Nothing was asked for."}), 400
+    if not legal_rag_url:
+        return jsonify({"error": LEGAL_BACKEND_UNSET}), 503
+    try:
+        found = lookup(legal_rag_url, asked)
+    except legal_backend.LegalBackendUnavailable as error:
+        app.logger.error(f"Legal corpus lookup failed: {error}")
+        return jsonify({"error": "법률 답변 서비스에 연결할 수 없습니다."}), 502
+    if found is None:
+        return jsonify({"error": missing}), 404
+    return jsonify(found)
+
+
+@app.route('/legal_source', methods=['GET'])
+def legal_source():
+    """The whole document behind a source card, with the place the answer cited."""
+    return _from_legal_backend(legal_backend.document, request.args.get('chunk_id'), "이 근거의 전문을 찾을 수 없습니다.")
+
+
 @app.route('/get_initial_state', methods=['GET'])
 def get_initial_state():
     user_id = session["user_id"]
