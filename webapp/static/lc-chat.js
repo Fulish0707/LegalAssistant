@@ -10,7 +10,10 @@
     thinking: false,
     extra: [],
     questions: [],   /* 최신 답변이 사용자에게 묻는 질문 — /chat final_response.questions */
-    answering: ''    /* 사용자가 답하려고 고른 질문 */
+    answering: '',   /* 사용자가 답하려고 고른 질문 */
+    pinned: null,    /* 이 상담에 붙인 판례 — {chunk_id, title}. 매 답변의 근거 맨 앞에 들어간다 */
+    conversation: 0, /* 열려 있는 상담 번호 — /get_initial_state.conversation */
+    conversations: []/* 질문이 있는 상담 목록, 최신순 — {id, title, started} */
   };
 
   let sse = null;
@@ -18,16 +21,17 @@
   /* ---------- 화면 ---------- */
 
   function side(){
-    LC.MATTERS = [{ title: title(), kind: '상담', when: '오늘', live: true }];
+    LC.MATTERS = LC.consultations({ conversations: P.conversations, conversation: P.conversation }, title());
+    LC.S.activeMatter = LC.MATTERS.findIndex(c => c.live);
     return `
 <div style="display:flex;flex-direction:column;gap:18px;height:100%;min-height:0">
   <button class="lc-primary" data-act="newCase" style="display:flex;align-items:center;justify-content:center;gap:7px;padding:11px;border:0;border-radius:10px;background:${a};color:#fff;font-size:13.5px;font-weight:500;cursor:pointer">${LC.icon('plus', 14, '#fff')} 새 상담</button>
   ${LC.matterList()}
+  ${P.extra.length ? `<button class="lc-link" data-act="deleteCase" style="align-self:flex-start;margin:-10px 8px 0;padding:0;border:0;background:transparent;font-size:11.5px;color:#9aa0a5;text-decoration:underline;cursor:pointer">이 상담 삭제</button>` : ''}
   <div style="display:flex;flex-direction:column;gap:3px">
     <div style="padding:0 8px 7px;font-size:10px;letter-spacing:.16em;color:#9aa0a5">도구</div>
     <a class="lc-ghost" href="documents.html" style="display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border-radius:10px;font-size:12.5px;color:#3d4348;text-decoration:none">${LC.icon('search', 15, '#9aa0a5')}계약서 검토</a>
   </div>
-  ${LC.helpCard()}
 </div>`;
   }
 
@@ -92,6 +96,11 @@
 
   <div style="flex:none;padding:10px 30px 12px;background:#fff;border-top:1px solid #e6e3dd">
     <div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:8px">
+      ${P.pinned ? `
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:10px;background:#e6f0f0;font-size:12px;color:#3d4348">
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">붙인 판례: <b style="font-weight:600">${esc(P.pinned.title)}</b> · 검색에서 고른 대목을 매 답변의 근거에 넣습니다</span>
+        <button class="lc-link" data-act="detachCase" style="flex:none;border:0;background:transparent;font-size:11.5px;color:${a};cursor:pointer">떼기</button>
+      </div>` : ''}
       ${P.answering ? `
       <div style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:10px;background:#f4f1ea;font-size:12px;color:#3d4348">
         <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">답하는 질문: ${esc(P.answering)}</span>
@@ -159,7 +168,7 @@
           else if (data.type === 'final_response') {
             P.extra.push({ role:'agent', text: data.chat_response });
             P.questions = data.questions || [];
-            LC.SOURCES = (data.sources || []).map((h, i) => ({ id: String(i + 1), kind: h.kind || '내 문서', title: h.source, quote: h.quote, score: h.score }));
+            LC.SOURCES = sourceCards(data.sources);
             P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
           }
           else if (data.type === 'error') {
@@ -184,16 +193,54 @@
     });
   }
 
+  /* 서버의 근거 목록을 우측 패널의 카드로 */
+  const sourceCards = sources => (sources || []).map((h, i) => ({ id: String(i + 1), kind: h.kind || '내 문서', title: h.source, quote: h.quote, score: h.score, chunkId: h.chunk_id }));
+
+  /* 서버가 준 상담 상태를 화면 상태로 옮긴다. 근거는 그 상담의 마지막 답변 것이다 */
+  function applyState(st){
+    LC.SOURCES = sourceCards(st.sources);
+    P.extra = (st.chat_history || []).map(m => ({ role: m.role === 'user' ? 'user' : 'agent', text: m.content }));
+    P.conversation = st.conversation || 0;
+    P.pinned = st.case || null;
+    P.conversations = st.conversations || [];
+  }
+
   async function fetchInitialState(){
     try {
       const r = await fetch('/get_initial_state');
       if (!r.ok) throw new Error(r.statusText);
-      const st = await r.json();
-      if (Array.isArray(st.chat_history)) {
-        P.extra = st.chat_history.map(m => ({ role: m.role === 'user' ? 'user' : 'agent', text: m.content }));
-      }
+      applyState(await r.json());
     } catch (err) {
       console.error('Initial state error:', err);
+    }
+    LC.pinThread = true;
+    LC.render();
+  }
+
+  /* 판례 검색에서 고른 판례를 지금 상담에 붙이거나(chunkId) 뗀다(null). 입력 중인 글은 그대로 둔다 */
+  async function attachCase(chunkId, title){
+    try {
+      const r = await fetch('/conversations/case', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chunk_id: chunkId, title: title }) });
+      if (!r.ok) throw new Error(r.statusText);
+      applyState(await r.json());
+    } catch (err) {
+      console.error('Case attach error:', err);
+    }
+    LC.pinThread = true;
+    LC.render();
+  }
+
+  /* 새 상담을 열거나 이전 상담을 다시 연다. 이전 상담의 기록은 서버에 남는다 */
+  async function openConversation(path, body){
+    if (sse) { sse.close(); sse = null; }
+    try {
+      const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+      if (!r.ok) throw new Error(r.statusText);
+      applyState(await r.json());
+      Object.assign(P, { draft: '', thinking: false, railTab: '전체', questions: [], answering: '' });
+      LC.S.traceLines = [];
+    } catch (err) {
+      console.error('Conversation open error:', err);
     }
     LC.pinThread = true;
     LC.render();
@@ -214,22 +261,31 @@
       prompt: k => { P.draft = k; setTimeout(() => { const el = document.getElementById('userInput'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 0); },
       answer: k => { P.answering = k; setTimeout(() => { const el = document.getElementById('userInput'); if (el) el.focus(); }, 0); },
       cancelAnswer: () => { P.answering = ''; },
+      detachCase: () => { attachCase(null); return false; },
       easier: () => { P.tone = '쉬운 말'; P.draft = '위 내용을 더 쉽게 설명해 주세요.'; },
       newCase: () => {
-        if (sse) { sse.close(); sse = null; }
-        Object.assign(P, { extra: [], draft: '', thinking: false, railTab: '전체', questions: [], answering: '' });
-        LC.S.traceLines = [];
-        LC.SOURCES = [];
-        LC.clearChatHistory();
+        openConversation('/conversations/new');
         if (location.search) history.replaceState(null, '', location.pathname);
+        return false;
+      },
+      deleteCase: () => {
+        if (confirm('이 상담의 대화를 지웁니다. 되돌릴 수 없습니다.')) openConversation('/conversations/delete');
+        return false;
+      },
+      pickMatter: k => {
+        const c = LC.MATTERS[Number(k)];
+        if (c && !c.live) openConversation('/conversations/select', { id: c.id });
+        return false;
       },
       send: () => { sendMessage(); return false; },
       voice: () => { alert('음성 입력은 준비 중입니다.'); return false; },
       upload: () => { const f = document.getElementById('fileUpload'); if (f) f.click(); return false; }
     },
     init: () => {
-      const ask = new URLSearchParams(location.search).get('ask');
+      const params = new URLSearchParams(location.search);
+      const ask = params.get('ask'), chosen = params.get('case'), own = params.get('doc');
       if (ask) P.draft = ask + ' 판례가 제 사건에도 적용될 수 있나요?';
+      if (own) P.draft = `올린 자료 "${own}"에 대해 묻습니다. `;   /* 내 자료는 서버가 질문에 맞는 대목을 찾아 함께 보낸다 */
 
       document.addEventListener('input', (e) => {
         if (e.target.id === 'userInput') {
@@ -250,7 +306,9 @@
         if (e.target.id === 'fileUpload' && e.target.files.length) LC.uploadFile(e.target.files[0]);
       });
 
-      fetchInitialState();
+      /* 판례 검색에서 넘어왔으면 그 판례를 이 상담에 붙인다. 주소에서 지워 두어 새로고침이 다시 붙이지 않게 한다 */
+      if (chosen) { attachCase(chosen, ask || ''); history.replaceState(null, '', location.pathname); }
+      else fetchInitialState();
     }
   });
 })();

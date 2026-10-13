@@ -67,9 +67,21 @@
     acts: {
       filter: k => { P.filter = k; },
       remove: k => { LC.removeDoc(Number(k)); return false; },
-      upload: () => { const f = document.getElementById('fileUpload'); if (f) f.click(); return false; }
+      upload: () => { const f = document.getElementById('fileUpload'); if (f) f.click(); return false; },
+      /* 상담을 고르면 그 상담을 열어 둔 채 상담 화면으로 간다 */
+      pickMatter: k => {
+        const c = LC.MATTERS[Number(k)];
+        const open = !c || c.live ? Promise.resolve() : fetch('/conversations/select', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id }) });
+        open.catch(err => console.error('Conversation open error:', err)).then(() => { location.href = 'chatbot.html'; });
+        return false;
+      }
     },
     init: () => {
+      fetch('/get_initial_state').then(r => r.json()).then(st => {
+        LC.MATTERS = LC.consultations(st);
+        LC.S.activeMatter = LC.MATTERS.findIndex(c => c.live);
+        LC.render();
+      }).catch(err => console.error('Initial state error:', err));
       document.addEventListener('change', (e) => {
         if (e.target.id === 'fileUpload' && e.target.files.length) LC.uploadFile(e.target.files[0]);
       });

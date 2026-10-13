@@ -68,6 +68,10 @@ class RetrievalSettings(_Section):
     rrf_k: int = 60
     corpora: list[str] = Field(default_factory=list)  # empty means query corpus.version alone
     corpus_weights: dict[str, float] = Field(default_factory=dict)  # absent corpora weigh 1.0
+    # The corpus whose statutes are stored article by article: it names the laws a case may cite
+    # and gives an article's text. The windowed corpora also name an article per chunk (the one a
+    # window opens in), so the stored data cannot tell them apart. Unset, every searched corpus is read.
+    law_corpus: str | None = None
     dense_weight: float = 1.0
     sparse_weight: float = 1.0
     # Top hits of every leg that always reach the reranker, whatever their fused score. 0 is plain

@@ -98,6 +98,13 @@ def ensure_database_schema(conn):
         cursor.execute("ALTER TABLE chat_history RENAME TO chat_history_legacy")
     cursor.execute("CREATE TABLE IF NOT EXISTS chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_user_id_id ON chat_history(user_id, id)")
+    # One browser holds several consultations; rows written before 2026-10-13 belong to the first.
+    chat_columns = {row[1] for row in cursor.execute("PRAGMA table_info(chat_history)")}
+    if "conversation" not in chat_columns:
+        cursor.execute("ALTER TABLE chat_history ADD COLUMN conversation INTEGER NOT NULL DEFAULT 0")
+    # The source cards of an answer, as JSON, so a reopened consultation shows them again.
+    if "sources" not in chat_columns:
+        cursor.execute("ALTER TABLE chat_history ADD COLUMN sources TEXT")
     # The Google-era users table is no longer created. Existing installs keep
     # theirs untouched; nothing in the app reads it any more.
     # daily_ai_quota keeps the legacy 'user' kind so old rows stay valid; the app
@@ -148,18 +155,46 @@ def init_db():
         # but since we used `with app.app_context()`, `close_connection` will be triggered.
 
 
-def get_chat_history_from_db(user_id):
+def get_chat_history_from_db(user_id, conversation=0):
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT role, content FROM chat_history WHERE user_id=? ORDER BY id ASC', (user_id,))
+    c.execute('SELECT role, content FROM chat_history WHERE user_id=? AND conversation=? ORDER BY id ASC', (user_id, conversation))
     rows = c.fetchall()
     return [{"role": row["role"], "content": row["content"]} for row in rows]
 
-def add_chat_message_to_db(user_id, role, content):
+def add_chat_message_to_db(user_id, role, content, conversation=0, sources=None):
+    """`sources` are an answer's source cards; a message that is not an answer has none."""
     conn = get_db()
     c = conn.cursor()
-    c.execute('INSERT INTO chat_history (user_id, role, content) VALUES (?, ?, ?)', (user_id, role, content))
+    c.execute('INSERT INTO chat_history (user_id, role, content, conversation, sources) VALUES (?, ?, ?, ?, ?)',
+              (user_id, role, content, conversation, None if sources is None else json.dumps(sources, ensure_ascii=False)))
     conn.commit()
+
+def get_latest_sources_from_db(user_id, conversation=0):
+    """The source cards of the consultation's last answer, as the chat page showed them."""
+    row = get_db().execute('SELECT sources FROM chat_history WHERE user_id=? AND conversation=? AND sources IS NOT NULL '
+                           'ORDER BY id DESC LIMIT 1', (user_id, conversation)).fetchone()
+    return json.loads(row["sources"]) if row else []
+
+def get_conversations_from_db(user_id):
+    """This browser's consultations that hold a question, newest first: {id, title, started}.
+
+    The title is the first line of the first question; `started` is its UTC time.
+    """
+    rows = get_db().execute(
+        'SELECT conversation, content, timestamp FROM chat_history WHERE id IN '
+        "(SELECT MIN(id) FROM chat_history WHERE user_id=? AND role='user' GROUP BY conversation) "
+        'ORDER BY conversation DESC', (user_id,)).fetchall()
+    return [{"id": row["conversation"], "title": row["content"].strip().split("\n")[0][:80], "started": row["timestamp"]}
+            for row in rows]
+
+def clear_all_chat_history():
+    """Forget every browser's consultations. The server does this each time it starts."""
+    with app.app_context():
+        conn = get_db()
+        conn.execute('DELETE FROM chat_history')
+        conn.commit()
+
 
 def clear_chat_history_in_db(user_id):
     conn = get_db()
@@ -188,16 +223,72 @@ def quota_exceeded_response(result: QuotaResult):
     }), 429
 
 
-# --- Text Cleaning Utility ---
-_SMALL_TALK = re.compile(r"^(?:안녕|반가|고마|감사|수고|ㅎㅇ|hi|hello|thanks?|thank you|bye)", re.IGNORECASE)
+# --- Messages answered without the legal service ---
+_GREETING = re.compile(r"^(?:안녕|반가|ㅎㅇ|hi|hello)", re.IGNORECASE)
+_THANKS = re.compile(r"^(?:고마|감사|수고|thanks?|thank you|bye)", re.IGNORECASE)
+_ACKNOWLEDGED = re.compile(r"^(?:[ㅋㅎ]+|네|넵|예|응|ㅇㅇ|ㅇㅋ|오케이|ok|okay)?[\s,.!~]*"
+                           r"(?:알겠(?:어요?|습니다)|알았(?:어요?|습니다)|이해했(?:어요?|습니다)|[ㅋㅎ]+)[\s.!~]*$", re.IGNORECASE)
+# "고마워. 근데 변호사 없이도 할 수 있어?" thanks and then asks; the question must be searched.
+_GOES_ON = re.compile(r"\?|근데|그런데|그럼|그러면|하지만")
+# An answer to what the consultation asked ("계약서를 쓰셨나요?" - "네"). The legal service joins it
+# to the question before it.
+_YES_NO = re.compile(r"(?:네|넵|예|응|아니|아뇨|아니요|아니오)[.!]?")
+GREETING_REPLY = "안녕하세요. 법률 관련 궁금한 점을 구체적으로 적어 주시면 법령과 판례를 찾아 안내해 드리겠습니다."
+THANKS_REPLY = "도움이 되었다니 다행입니다. 더 궁금한 점이 있으면 이어서 적어 주세요."
+ACKNOWLEDGED_REPLY = "네. 더 궁금한 점이 있으면 이어서 적어 주세요."
+
+# Questions about the service itself. The legal service answers every message from retrieved
+# passages, so "너는 뭘 할 수 있어?" came back as a legal analysis citing two unrelated sources
+# (2026-10-13). A separate model call can tell such messages apart (message-kind-2026-10-13), but
+# it is not wired in; these patterns cover the common ones. Each needs the service as its
+# subject, so "소송 비용은 누가 내?" or "판결문은 믿어도 되는 증거야?" still go to the search.
+# Checked 2026-10-14: none of 980 legal questions matches (everyday-150, the four pilot-200 sets,
+# 30 general questions); with the greetings below, 15 of 18 hand-written conversational messages
+# get a fixed reply. The three that do not only state a feeling ("오늘 너무 힘들다").
+_SERVICE = "너|넌|당신|여기|이 ?서비스|챗봇|AI"
+_SERVICE_REPLIES = [
+    (re.compile(rf"(?:{_SERVICE}|이거).{{0,8}}(?:뭐|뭘|무엇|무슨|어떤).{{0,8}}(?:할 수|해 ?줄|해 ?주|하는 거|하는 곳|가능)"
+                r"|^(?:너|넌|당신)은?는? ?(?:누구|뭐야|뭐니|AI|인공지능|사람|로봇)"
+                r"|(?:이거|여기|이 ?서비스).{0,6}어떻게 (?:쓰|사용|이용)"
+                r"|변호사(?:랑|와|하고) ?(?:뭐가|무엇이|어떻게) ?(?:달라|다른|다르)"),
+     "저는 법률 상담을 돕는 AI입니다. 겪고 계신 상황이나 궁금한 점을 적어 주시면 관련 법령과 판례를 찾아 근거와 함께 "
+     "설명해 드립니다. 사건 자료 탭에 올리신 계약서 같은 문서도 함께 참고합니다. 변호사가 아니므로 답변은 1차 정보로 "
+     "보시고, 중요한 결정 전에는 근거 원문과 전문가의 확인을 받으시기 바랍니다."),
+    (re.compile(rf"(?:{_SERVICE}|답변|네 말).{{0,10}}(?:믿어도|믿을 수|신뢰|정확한 거|맞는 거)|변호사가 (?:확인|검토|작성|쓴)"),
+     "답변은 AI가 검색된 법령과 판례를 바탕으로 작성하고, 인용한 조문과 사건번호가 실제 근거에 있는지 확인한 뒤 보여 "
+     "드립니다. 그래도 틀릴 수 있고, 변호사가 검토한 답변이 아닙니다. 오른쪽의 근거 원문을 직접 확인하시고, 중요한 결정 "
+     "전에는 전문가와 상담하시기 바랍니다."),
+    (re.compile(r"(?:대화|상담|채팅|내가 쓴).{0,8}(?:내용|기록).{0,12}(?:저장|누가|남아|지워|삭제|볼 수)"),
+     "상담 내용은 이 브라우저에서 다시 볼 수 있도록 서버에 저장되며, 다른 브라우저에서는 열 수 없습니다. 서비스를 "
+     "운영하는 쪽은 서버에 저장된 기록에 접근할 수 있습니다. 서버가 다시 시작되면 상담 기록은 지워집니다."),
+    (re.compile(r"(?:이거|여기|이 ?서비스).{0,6}(?:무료|공짜|유료|돈 ?(?:내|들|받))|(?:이용|사용) ?(?:요금|료)"),
+     "지금은 무료로 이용하실 수 있습니다. 하루에 보낼 수 있는 질문 수에는 제한이 있습니다."),
+    (re.compile(r"사람.{0,8}(?:얘기|이야기|상담|연결|통화).{0,6}(?:싶|해 ?줘|할 수|가능|돼)"),
+     "지금은 상담원이나 변호사와 직접 연결해 드리는 기능이 없습니다. 상황을 적어 주시면 관련 법령과 판례를 찾아 "
+     "안내해 드리겠습니다."),
+]
+SMALL_TALK_CHARS, SERVICE_QUESTION_CHARS = 20, 30
 
 
-def _needs_legal_search(text):
-    """Everything but greetings and thanks gets the statute/case-law pre-search."""
+def _fixed_reply(text, in_conversation=False):
+    """The reply to a message that needs no legal search, or None when it does.
+
+    `in_conversation`: the consultation already holds an answer, so a bare 네 answers its question.
+    """
     stripped = (text or "").strip()
     if len(stripped) < 4:
-        return False
-    return not (_SMALL_TALK.match(stripped) and len(stripped) <= 20)
+        if in_conversation:
+            return None if _YES_NO.fullmatch(stripped) else ACKNOWLEDGED_REPLY
+        return GREETING_REPLY
+    if len(stripped) <= SERVICE_QUESTION_CHARS:
+        asked = next((reply for pattern, reply in _SERVICE_REPLIES if pattern.search(stripped)), None)
+        if asked:
+            return asked
+    if len(stripped) <= SMALL_TALK_CHARS and not _GOES_ON.search(stripped):
+        for pattern, reply in ((_GREETING, GREETING_REPLY), (_THANKS, THANKS_REPLY), (_ACKNOWLEDGED, ACKNOWLEDGED_REPLY)):
+            if pattern.match(stripped):
+                return reply
+    return None
 
 
 def _sse(payload):
@@ -206,18 +297,48 @@ def _sse(payload):
 
 # --- Flask Routes ---
 
-GREETING_REPLY = "안녕하세요. 법률 관련 궁금한 점을 구체적으로 적어 주시면 법령과 판례를 찾아 안내해 드리겠습니다."
 LEGAL_BACKEND_UNSET = "법률 답변 서비스가 설정되지 않았습니다. LEGAL_RAG_URL을 설정한 뒤 다시 시작하세요."
 LEGAL_BACKEND_DOWN = "법률 답변 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."
 
 
+def _conversation():
+    """The number of the consultation this browser has open."""
+    return session.get("conversation_epoch", 0)
+
+
+# Changes with every start of this server. Consultations are forgotten at a start, and a browser
+# keeps its consultation number in its cookie, so the number alone would reach turns legal_rag
+# still remembers from before.
+SERVER_START = secrets.token_hex(4)
+
+
 def _legal_conversation_id():
-    """The browser's workspace id plus an epoch that clearing the chat advances.
+    """The browser's workspace id, this server start, and the number of the open consultation.
 
     legal_rag keeps recent turns per conversation id and has no call to forget them,
-    so a cleared chat continues under a new id instead.
+    so each consultation, and a cleared chat, continues under an id of its own.
     """
-    return f"{session['user_id']}-{session.get('conversation_epoch', 0)}"
+    return f"{session['user_id']}-{SERVER_START}-{_conversation()}"
+
+
+def _case_key():
+    return f"{SERVER_START}-{_conversation()}"
+
+
+def _pinned_case():
+    """The case attached to the open consultation, or None: {chunk_id, title}."""
+    return (session.get("cases") or {}).get(_case_key())
+
+
+def _chat_state():
+    """What the chat page shows: the open consultation's messages, the source cards of its last
+    answer, and the list of all consultations."""
+    user_id = session["user_id"]
+    return {"chat_history": get_chat_history_from_db(user_id, _conversation()),
+            "sources": get_latest_sources_from_db(user_id, _conversation()),
+            "case": _pinned_case(),
+            "conversation": _conversation(),
+            "conversations": get_conversations_from_db(user_id)}
 
 
 # Passages of the user's files sent with a turn. Three of 1,000 characters add about 2,700
@@ -240,7 +361,7 @@ FOLLOW_UP_CHARS = 12
 def _document_query(user_input):
     if len("".join(user_input.split())) > FOLLOW_UP_CHARS:
         return user_input
-    asked = [turn["content"] for turn in get_chat_history_from_db(session["user_id"]) if turn["role"] == "user"]
+    asked = [turn["content"] for turn in get_chat_history_from_db(session["user_id"], _conversation()) if turn["role"] == "user"]
     if asked and asked[-1] == user_input:  # POST /chat stored this message before the stream began
         asked.pop()
     return f"{asked[-1]}\n{user_input}" if asked else user_input
@@ -271,12 +392,18 @@ def _generate_legal_response_stream(user_input):
             yield _sse({'type': 'error', 'content': 'Daily AI request quota exceeded.', 'error': 'daily_ai_quota_exceeded', 'limit': quota_result.limit})
             return
 
-        if _needs_legal_search(user_input):
+        # POST /chat stored this message before the stream began, so an earlier turn makes more than one.
+        fixed = _fixed_reply(user_input, len(get_chat_history_from_db(session["user_id"], _conversation())) > 1)
+        if fixed is None:
             yield _sse({'type': 'thought', 'content': '법령·판례 검색 및 답변 작성 중'})
             documents = _case_documents(user_input)
             if documents:
                 yield _sse({'type': 'thought', 'content': f'사건 자료 {len(documents)}건 참고'})
-            body = legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id(), documents)
+            case = _pinned_case()
+            if case:
+                yield _sse({'type': 'thought', 'content': f"붙인 판례 참고: {case['title']}"})
+            body = legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id(), documents,
+                                     pinned=[case["chunk_id"]] if case else ())
             chat_response, sources = legal_backend.render(body, documents)
             questions = legal_backend.questions(body)
             yield _sse({'type': 'thought', 'content': f'근거 {len(sources)}건 확인'})
@@ -289,9 +416,9 @@ def _generate_legal_response_stream(user_input):
             missing = unsupported_citations(chat_response, evidence_texts, own_clauses=[d["text"] for d in documents])
             chat_response = annotate_figures(annotate_unsupported(chat_response, missing))
         else:
-            chat_response, sources, questions = GREETING_REPLY, [], []
+            chat_response, sources, questions = fixed, [], []
 
-        add_chat_message_to_db(session["user_id"], "assistant", chat_response)
+        add_chat_message_to_db(session["user_id"], "assistant", chat_response, _conversation(), sources)
         yield _sse({
             "type": "final_response",
             "chat_response": chat_response,
@@ -301,12 +428,12 @@ def _generate_legal_response_stream(user_input):
 
     except legal_backend.LegalBackendUnavailable:
         logging.exception("legal_rag /v1/chat is unavailable")
-        add_chat_message_to_db(session["user_id"], "assistant", LEGAL_BACKEND_DOWN)
+        add_chat_message_to_db(session["user_id"], "assistant", LEGAL_BACKEND_DOWN, _conversation())
         yield _sse({'type': 'error', 'content': LEGAL_BACKEND_DOWN})
     except Exception:
         logging.exception("Error during AI processing stream (_generate_legal_response_stream)")
         error_response_content = "An error occurred while processing your request. Please check server logs."
-        add_chat_message_to_db(session["user_id"], "assistant", error_response_content)
+        add_chat_message_to_db(session["user_id"], "assistant", error_response_content, _conversation())
         yield _sse({'type': 'error', 'content': error_response_content})
     finally:
         yield _sse({'type': 'stream_end'})
@@ -387,7 +514,7 @@ def chat():
         if not user_input:
             return jsonify({"error": "No message provided"}), 400
 
-        add_chat_message_to_db(session["user_id"], "user", user_input)
+        add_chat_message_to_db(session["user_id"], "user", user_input, _conversation())
         # The POST request now just acknowledges receipt.
         # The actual processing and streaming will be triggered by the frontend's GET request.
         return jsonify({"status": "message_received_ok", "message": "Proceed to connect to SSE for response."})
@@ -413,12 +540,102 @@ def chat():
     # Fallback to satisfy type checkers: ensure the route always returns a valid response
     return jsonify({"error": "Invalid request method."}), 405
 
+def _from_legal_backend(lookup, asked, missing):
+    """Answer a page's read of the legal corpus: `lookup(url, asked)` as JSON, or the error to show."""
+    legal_rag_url = os.getenv("LEGAL_RAG_URL", "").strip()
+    asked = (asked or '').strip()
+    if not asked:
+        return jsonify({"error": "Nothing was asked for."}), 400
+    if not legal_rag_url:
+        return jsonify({"error": LEGAL_BACKEND_UNSET}), 503
+    try:
+        found = lookup(legal_rag_url, asked)
+    except legal_backend.LegalBackendUnavailable as error:
+        app.logger.error(f"Legal corpus lookup failed: {error}")
+        return jsonify({"error": "법률 답변 서비스에 연결할 수 없습니다."}), 502
+    if found is None:
+        return jsonify({"error": missing}), 404
+    return jsonify(found)
+
+
+@app.route('/legal_source', methods=['GET'])
+def legal_source():
+    """The whole document behind a source card, with the place the answer cited."""
+    return _from_legal_backend(legal_backend.document, request.args.get('chunk_id'), "이 근거의 전문을 찾을 수 없습니다.")
+
+
+@app.route('/law', methods=['GET'])
+def law():
+    """One law's articles, each with its heading and text, for showing the article a filter names."""
+    return _from_legal_backend(legal_backend.law, request.args.get('name'), "이 법령을 찾을 수 없습니다.")
+
+
+@app.route('/case_search', methods=['POST'])
+def case_search():
+    """Cases closest to what the user described, each with the statute articles it cites."""
+    query = (request.get_json(silent=True) or {}).get('query')
+    return _from_legal_backend(lambda url, asked: {"results": legal_backend.search_cases(url, asked)},
+                               query if isinstance(query, str) else '', "")
+
+
 @app.route('/get_initial_state', methods=['GET'])
 def get_initial_state():
-    user_id = session["user_id"]
-    return jsonify({
-        "chat_history": get_chat_history_from_db(user_id)
-    })
+    return jsonify(_chat_state())
+
+
+@app.route('/conversations/new', methods=['POST'])
+def new_conversation():
+    """Open an empty consultation; the earlier ones stay in the list."""
+    held = [conversation["id"] for conversation in get_conversations_from_db(session["user_id"])]
+    if _conversation() in held:  # an open consultation that is still empty is reused
+        session["conversation_epoch"] = max(held) + 1
+    return jsonify(_chat_state())
+
+
+# A browser keeps this many attached cases in its cookie; each is about 300 bytes.
+PINNED_CASES_KEPT = 8
+
+
+@app.route('/conversations/case', methods=['POST'])
+def attach_case():
+    """Attach a case to the open consultation, or detach it with no chunk_id.
+
+    The service then puts that passage of the case first in the evidence of every turn of the
+    consultation; without it, a question that names a case is answered from whatever a search finds.
+    """
+    data = request.get_json(silent=True) or {}
+    chunk_id, title = data.get("chunk_id"), data.get("title")
+    # Entries of earlier server starts point at consultations that no longer exist.
+    cases = {key: value for key, value in (session.get("cases") or {}).items() if key.startswith(SERVER_START + "-")}
+    cases.pop(_case_key(), None)
+    if isinstance(chunk_id, str) and chunk_id.strip():
+        cases[_case_key()] = {"chunk_id": chunk_id.strip()[:512], "title": str(title or "").strip()[:200]}
+    session["cases"] = dict(list(cases.items())[-PINNED_CASES_KEPT:])
+    return jsonify(_chat_state())
+
+
+@app.route('/conversations/delete', methods=['POST'])
+def delete_conversation():
+    """Delete the open consultation with its messages, sources and attached case, and open an empty one."""
+    user_id, conversation = session["user_id"], _conversation()
+    held = [item["id"] for item in get_conversations_from_db(user_id)]
+    conn = get_db()
+    conn.execute('DELETE FROM chat_history WHERE user_id=? AND conversation=?', (user_id, conversation))
+    conn.commit()
+    session["cases"] = {key: value for key, value in (session.get("cases") or {}).items() if key != _case_key()}
+    # A number is never used twice: legal_rag still remembers the turns of the deleted one.
+    session["conversation_epoch"] = max([conversation, *held]) + 1
+    return jsonify(_chat_state())
+
+
+@app.route('/conversations/select', methods=['POST'])
+def select_conversation():
+    """Reopen one of this browser's consultations."""
+    chosen = (request.get_json(silent=True) or {}).get("id")
+    if chosen not in [conversation["id"] for conversation in get_conversations_from_db(session["user_id"])]:
+        return jsonify({"error": "No such consultation."}), 404
+    session["conversation_epoch"] = chosen
+    return jsonify(_chat_state())
 
 
 @app.route('/clear_chat_history_endpoint', methods=['POST']) # Added specific endpoint name
@@ -545,4 +762,5 @@ def process_document_ocr():
 
 if __name__ == '__main__':
     init_db() # Initialize the database
+    clear_all_chat_history()  # consultations last until the server restarts
     app.run(host="0.0.0.0", port=5005, debug=True, use_reloader=False)

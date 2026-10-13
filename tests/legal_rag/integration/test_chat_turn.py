@@ -264,3 +264,37 @@ def test_a_clarifying_question_passes_nothing_on(retriever):
     assert orch.handle("집 문제예요", conversation_id="p3").kind == "clarification"
     answered = orch.handle("보증금도 못 받았어요", conversation_id="p3")
     assert answered.prior_refs == [] and answered.trace.policy_action == "strip"
+
+
+def test_a_chosen_passage_leads_the_evidence_and_keeps_its_length(retriever):
+    """A user who asks about one case gets that case in the evidence, whatever retrieval ranks."""
+    settings, r = retriever
+    case = next(hit.chunk for hit in r.retrieve("손해배상 책임", 10, None) if hit.chunk.document_type.value != "statute")
+    # An answer without citations verifies against any evidence, so the script does not depend on its order.
+    plain = LegalAnswer(summary="일반적인 안내입니다.", analysis="일반적인 절차만 설명합니다.", confidence=Confidence.low)
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(issues=["보증금 반환"]), QueryAnalysis(issues=["보증금 반환"])],
+                           "LegalAnswer": [plain] * 6})
+    orchestrator = _orchestrator(settings, r, model)
+    question = "임차권등기명령 신청서에 적어야 하는 사항은?"
+
+    plain = orchestrator.handle(question, conversation_id="p1")
+    pinned = orchestrator.handle(question, conversation_id="p2", pinned=[case])
+
+    assert case.id not in [item.chunk_id for item in plain.evidence.items]
+    assert pinned.evidence.items[0].chunk_id == case.id and pinned.evidence.items[0].source_id == "S1"
+    assert len(pinned.evidence.items) == len(plain.evidence.items) == settings.retrieval.k_final
+    ids = [item.chunk_id for item in pinned.evidence.items]
+    assert len(ids) == len(set(ids))
+
+
+def test_a_chosen_passage_that_retrieval_also_found_is_listed_once(retriever):
+    settings, r = retriever
+    question = "임차권등기명령 신청서에 적어야 하는 사항은?"
+    found = r.retrieve(question, settings.retrieval.k_final, None)[1].chunk
+    plain = LegalAnswer(summary="일반적인 안내입니다.", analysis="일반적인 절차만 설명합니다.", confidence=Confidence.low)
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(issues=["보증금 반환"])], "LegalAnswer": [plain] * 3})
+
+    response = _orchestrator(settings, r, model).handle(question, conversation_id="p3", pinned=[found])
+
+    ids = [item.chunk_id for item in response.evidence.items]
+    assert ids[0] == found.id and ids.count(found.id) == 1
