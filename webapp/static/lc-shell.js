@@ -82,6 +82,7 @@ window.LC = window.LC || {};
   </button>`).join('')}
 </div>`;
 
+
   LC.helpCard = () => `
 <div style="margin-top:auto;display:flex;flex-direction:column;gap:9px;padding:14px;border-radius:12px;background:#f4faf9;border:1px solid #dbeae8">
   <div style="font-size:12px;font-weight:600">혼자 하기 어려우신가요?</div>
@@ -166,9 +167,9 @@ window.LC = window.LC || {};
           </span>`}
         </div>
         <div style="font-size:13px;font-weight:500;line-height:1.55">${LC.esc(s.title)}</div>
-        <div style="font-size:12px;line-height:1.7;color:#767d83;text-wrap:pretty;white-space:pre-wrap;${LC.S.openSource === s.id ? '' : 'display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden'}">${LC.esc(s.quote)}</div>
+        <div style="font-size:12px;line-height:1.7;color:#767d83;text-wrap:pretty;white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden">${LC.esc(s.quote)}</div>
         <div style="display:flex;gap:10px;padding-top:2px">
-          <button class="lc-link" data-act="viewSource" data-key="${LC.esc(s.id)}" style="background:transparent;border:0;padding:0;font-size:11px;color:${a};cursor:pointer">${s.kind === '내 문서' ? '원문 보기' : LC.S.openSource === s.id ? '접기' : '전문 보기'}</button>
+          <button class="lc-link" data-act="viewSource" data-key="${LC.esc(s.id)}" style="background:transparent;border:0;padding:0;font-size:11px;color:${a};cursor:pointer">${s.kind === '내 문서' ? '원문 보기' : '전문 보기'}</button>
         </div>
       </div>`).join('')}
     </div>` : '<div style="flex:1"></div>'}
@@ -176,6 +177,50 @@ window.LC = window.LC || {};
     ${o.footer || ''}
   </div>
 </aside>`;
+  };
+
+  /* ---------- 근거 전문 읽기 창 ---------- */
+
+  LC.reader = () => {
+    const r = LC.S.reader;
+    if (!r) return '';
+    const body = r.state === 'ready'
+      ? `${LC.esc(r.before)}<mark id="readerCited" style="background:#fdf1c7;color:inherit;padding:2px 0">${LC.esc(r.cited)}</mark>${LC.esc(r.after)}`
+      : `<span style="color:#9aa0a5">${LC.esc(r.state === 'loading' ? '전문을 불러오는 중입니다' : r.error)}</span>`;
+    return `
+<div data-act="closeReader" style="position:fixed;inset:0;z-index:50;background:rgba(20,23,26,.45);display:flex;align-items:center;justify-content:center">
+  <div data-act="readerBody" role="dialog" aria-modal="true" aria-label="${LC.esc(r.title)}" style="width:min(880px,92vw);height:88vh;display:flex;flex-direction:column;background:#fff;border-radius:14px;box-shadow:0 24px 64px rgba(0,0,0,.28);overflow:hidden">
+    <div style="flex:none;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 24px;border-bottom:1px solid #e6e3dd">
+      <div style="display:flex;flex-direction:column;gap:5px;min-width:0">
+        <span style="font-size:10px;letter-spacing:.14em;color:#9aa0a5">${LC.esc(r.kind)}</span>
+        <span style="font-family:'Noto Serif KR',serif;font-size:16px;font-weight:700;line-height:1.5">${LC.esc(r.title)}</span>
+      </div>
+      <div style="flex:none;display:flex;align-items:center;gap:14px">
+        ${r.state === 'ready' ? `<button class="lc-link" data-act="readerJump" style="background:transparent;border:0;padding:0;font-size:12px;color:${a};cursor:pointer">인용한 부분으로</button>` : ''}
+        <button class="lc-link" data-act="closeReader" style="background:transparent;border:0;padding:0;font-size:12px;color:#767d83;cursor:pointer">닫기</button>
+      </div>
+    </div>
+    <div id="readerText" style="flex:1;min-height:0;overflow-y:auto;padding:22px 28px 32px;font-family:'Noto Serif KR',serif;font-size:14.5px;line-height:1.95;white-space:pre-wrap;overflow-wrap:anywhere">${body}</div>
+    <div style="flex:none;padding:10px 24px;border-top:1px solid #f0ede7;font-size:11px;color:#9aa0a5">노란색으로 표시한 부분이 답변이 인용한 곳입니다.</div>
+  </div>
+</div>`;
+  };
+
+  LC.openReader = async function (source) {
+    const reader = LC.S.reader = { title: source.title, kind: source.kind, state: 'loading' };
+    LC.render();
+    try {
+      const r = await fetch('/legal_source?chunk_id=' + encodeURIComponent(source.chunkId));
+      const res = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(res.error || r.statusText);
+      Object.assign(reader, { state: 'ready', before: res.before, cited: res.cited, after: res.after });
+    } catch (err) {
+      console.error('Legal source error:', err);
+      Object.assign(reader, { state: 'error', error: err.message || '전문을 불러오지 못했습니다' });
+    }
+    if (LC.S.reader !== reader) return;   // 불러오는 동안 창을 닫았거나 다른 근거를 열었다
+    LC.readerJump = true;
+    LC.render();
   };
 
   LC.traceBlock = () => `
@@ -214,6 +259,7 @@ ${LC.S.traceOpen ? `
     const z = LC.S.scale === '작게' ? .92 : LC.S.scale === '크게' ? 1.14 : 1;
     const app = document.getElementById('app');
     const keep = (document.getElementById('thread') || {}).scrollTop;
+    const keepReader = (document.getElementById('readerText') || {}).scrollTop;
 
     app.innerHTML = `
 <div style="--accent:${a};zoom:${z};height:calc(100vh / ${z});overflow:auto">
@@ -230,12 +276,20 @@ ${LC.S.traceOpen ? `
     ${LC.page.rail ? (LC.page.rail() || '') : ''}
   </div>
 </div>
+${LC.reader()}
 </div>`;
 
     const thread = document.getElementById('thread');
     if (thread) {
       thread.scrollTop = (LC.pinThread || keep == null) ? thread.scrollHeight : keep;
       LC.pinThread = false;
+    }
+    const readerText = document.getElementById('readerText');
+    if (readerText) {
+      const cited = document.getElementById('readerCited');
+      if (LC.readerJump && cited) cited.scrollIntoView({ block: 'center' });
+      else if (keepReader != null) readerText.scrollTop = keepReader;
+      LC.readerJump = false;
     }
     if (LC.page.afterRender) LC.page.afterRender();
   };
@@ -253,11 +307,17 @@ ${LC.S.traceOpen ? `
     lawyer: () => { alert('변호사 연결은 준비 중입니다. 상담 기록을 바탕으로 적합한 변호사를 안내할 예정입니다.'); return false; },
     viewSource: k => {
       const s = LC.SOURCES.find(x => x.id === k);
-      if (s && s.kind === '내 문서') { location.href = 'documents.html'; return false; }
-      LC.S.openSource = LC.S.openSource === k ? null : k;   // 법령·판례는 제자리에서 전문 펼치기
-    }
+      if (!s) return false;
+      if (s.kind === '내 문서') { location.href = 'documents.html'; return false; }
+      LC.openReader(s);   // 법령·판례는 읽기 창에서 전문을 보여준다
+      return false;
+    },
+    closeReader: () => { LC.S.reader = null; },
+    readerJump: () => { LC.readerJump = true; },
+    readerBody: () => false   // 창 안을 눌러도 닫히지 않는다
   };
   document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && LC.S.reader) { LC.S.reader = null; LC.render(); return; }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); location.href = 'cases.html'; }
   });
 
@@ -353,6 +413,7 @@ ${LC.S.traceOpen ? `
     if (!r.ok || !res.ok) throw new Error(res.error || r.statusText);
     return res.results || [];
   };
+
 
   LC.clearChatHistory = async function () {
     try {

@@ -110,8 +110,7 @@ class VectorStore:
                                       with_payload=True, with_vectors=False)
         matched: set[str] = set()
         for point in points:
-            stored = Chunk.model_validate({key: value for key, value in point.payload.items()
-                                           if key not in _DERIVED_KEYS})
+            stored = self._chunk(point.payload)
             chunk = expected[str(point.id)]
             if stored != chunk:
                 raise ValueError(f"Stored chunk {chunk.id!r} differs from the corpus; cannot resume.")
@@ -124,6 +123,31 @@ class VectorStore:
             return {}
         points = self.client.retrieve(self.collection, ids=[point_id(i) for i in chunk_ids], with_payload=["id", "text"])
         return {point.payload["id"]: point.payload["text"] for point in points}
+
+    def chunk(self, chunk_id: str) -> Chunk | None:
+        points = self.client.retrieve(self.collection, ids=[point_id(chunk_id)], with_payload=True, with_vectors=False)
+        return self._chunk(points[0].payload) if points else None
+
+    def document_chunks(self, chunk: Chunk) -> list[Chunk]:
+        """Every chunk of the document and corpus that hold `chunk`, in original order."""
+        return self._all(models.Filter(must=[
+            models.FieldCondition(key="document_id", match=models.MatchValue(value=chunk.document_id)),
+            models.FieldCondition(key="metadata.corpus_version",
+                                  match=models.MatchValue(value=chunk.metadata.corpus_version)),
+        ]))
+
+    def _all(self, matching: models.Filter) -> list[Chunk]:
+        chunks, offset = [], None
+        while True:
+            points, offset = self.client.scroll(self.collection, scroll_filter=matching, limit=256,
+                                                offset=offset, with_payload=True, with_vectors=False)
+            chunks += [self._chunk(point.payload) for point in points]
+            if offset is None:
+                return sorted(chunks, key=lambda other: other.order)
+
+    @staticmethod
+    def _chunk(payload: dict) -> Chunk:
+        return Chunk.model_validate({key: value for key, value in payload.items() if key not in _DERIVED_KEYS})
 
     def chunks_near(self, chunk: Chunk, radius: int) -> list[Chunk]:
         """Bounded neighbors from the same document and corpus, in original order."""
@@ -140,8 +164,7 @@ class VectorStore:
             ]),
             limit=2 * radius + 1, with_payload=True, with_vectors=False,
         )
-        neighbors = [Chunk.model_validate({key: value for key, value in point.payload.items()
-                                          if key not in _DERIVED_KEYS}) for point in points]
+        neighbors = [self._chunk(point.payload) for point in points]
         return sorted((other for other in neighbors if other.id != chunk.id), key=lambda other: other.order)
 
     def search_dense(self, vector: list[float], k: int, filters: RetrievalFilters | None = None) -> list[tuple[Chunk, float]]:
@@ -160,11 +183,7 @@ class VectorStore:
             query_filter=self._to_filter(filters),
             with_payload=True,
         )
-        hits: list[tuple[Chunk, float]] = []
-        for point in result.points:
-            payload = {key: value for key, value in point.payload.items() if key not in _DERIVED_KEYS}
-            hits.append((Chunk.model_validate(payload), float(point.score)))
-        return hits
+        return [(self._chunk(point.payload), float(point.score)) for point in result.points]
 
     @staticmethod
     def _to_filter(filters: RetrievalFilters | None) -> models.Filter | None:

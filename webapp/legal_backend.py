@@ -53,6 +53,31 @@ def ask(base_url, message, conversation_id, documents=()):
         raise LegalBackendUnavailable(f"{type(error).__name__}: {error}") from error
 
 
+def _read(base_url, path, shape, **params):
+    """A GET to the service, passed through `shape`; None when the service answers 404."""
+    try:
+        response = httpx.get(base_url.rstrip("/") + path, params=params, timeout=TIMEOUT)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return shape(response.json())
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+        raise LegalBackendUnavailable(f"{type(error).__name__}: {error}") from error
+
+
+def document(base_url, chunk_id):
+    """The whole document that holds a cited chunk, or None if not indexed: {before, cited, after}.
+
+    The text is cut here: the service counts characters as Python does, and a browser counts a rare
+    character outside the basic plane as two.
+    """
+    def cut(body):
+        text, start, end = body["text"], body["cited_start"], body["cited_end"]
+        return {"before": text[:start], "cited": text[start:end], "after": text[end:]}
+
+    return _read(base_url, "/v1/document", cut, chunk_id=chunk_id)
+
+
 def _numbered(text, numbers):
     """Replace the model's source ids (S1, S2) with the sources panel's numbers."""
     def one(match):
@@ -96,7 +121,7 @@ def _bullets(heading, items):
 
 
 def render(body, documents=()):
-    """(chat text, [{source, quote, kind, score}]) for a /v1/chat response body.
+    """(chat text, [{source, quote, kind, score, chunk_id}]) for a /v1/chat response body.
 
     `documents` are the user's passages sent with the turn, in the order sent (D1, D2, ...).
     """
@@ -130,6 +155,8 @@ def render(body, documents=()):
             "quote": (item.get("text") or "").strip()[:QUOTE_CHARS],
             "kind": _kind(item),
             "score": item.get("score"),
+            # The card shows an excerpt; the reader asks for the whole document by this id.
+            "chunk_id": item.get("chunk_id"),
         }
         for item in items
     ] + [

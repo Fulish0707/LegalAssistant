@@ -33,7 +33,7 @@ def backend_answer(summary="보증금은 돌려받을 수 있습니다.", analys
     }
 
 
-STATUTE_ITEM = {"source_id": "S1", "document_type": "statute", "score": 0.9,
+STATUTE_ITEM = {"source_id": "S1", "chunk_id": "law#art:제3조", "document_type": "statute", "score": 0.9,
                 "header": {"Type": "Statute", "Law": "주택임대차보호법", "Article": "제3조"},
                 "text": "임차인은 보증금의 반환을 청구할 수 있다."}
 
@@ -152,7 +152,8 @@ class ChatStreamingTests(ChatStreamBase):
         final = self.final(self.collect(backend_answer("보증금 반환을 청구할 수 있습니다(S1).", items=[STATUTE_ITEM])))
 
         self.assertEqual(final["sources"], [{"source": "주택임대차보호법 제3조", "kind": "법령", "score": 0.9,
-                                             "quote": "임차인은 보증금의 반환을 청구할 수 있다."}])
+                                             "quote": "임차인은 보증금의 반환을 청구할 수 있다.",
+                                             "chunk_id": "law#art:제3조"}])
 
     def test_the_backend_gets_the_message_and_a_conversation_of_this_browser(self):
         self.collect(query="message=해고당했어요")
@@ -209,6 +210,38 @@ class ChatStreamingTests(ChatStreamBase):
             if line.startswith("data: ")
         ]
         self.assertEqual(types, ["error", "stream_end"])
+
+
+class LegalSourceTests(ChatStreamBase):
+    """The reader a source card opens asks this route for the whole document."""
+
+    DOCUMENT = {"before": "제2조 ...\n\n", "cited": "제3조 임차인은 보증금의 반환을 청구할 수 있다.", "after": ""}
+
+    def read(self, document=DOCUMENT, query="chunk_id=law%23art:제3조", url="http://legal:8000"):
+        self.lookup = mock.Mock(side_effect=document if isinstance(document, Exception) else None, return_value=document)
+        with mock.patch.dict(os.environ, {"LEGAL_RAG_URL": url}), \
+                mock.patch.object(self.app_module.legal_backend, "document", self.lookup):
+            return self.client.get("/legal_source?" + query)
+
+    def test_the_document_and_the_cited_place_are_returned(self):
+        response = self.read()
+
+        self.assertEqual((response.status_code, response.json), (200, self.DOCUMENT))
+        self.lookup.assert_called_once_with("http://legal:8000", "law#art:제3조")
+
+    def test_a_source_that_is_not_indexed_is_not_found(self):
+        self.assertEqual(self.read(None).status_code, 404)
+
+    def test_an_unavailable_backend_is_a_gateway_error(self):
+        response = self.read(self.app_module.legal_backend.LegalBackendUnavailable("ConnectError"))
+
+        self.assertEqual(response.status_code, 502)
+        self.assertNotIn("ConnectError", response.json["error"])
+
+    def test_a_request_without_a_chunk_or_a_backend_does_not_call_out(self):
+        self.assertEqual(self.read(query="").status_code, 400)
+        self.assertEqual(self.read(url="").status_code, 503)
+        self.lookup.assert_not_called()
 
 
 if __name__ == "__main__":

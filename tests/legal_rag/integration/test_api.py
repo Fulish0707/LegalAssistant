@@ -36,6 +36,18 @@ def test_search_endpoint(indexed):
     assert body["labels"] == {}
 
 
+def test_document_endpoint_returns_the_whole_document_and_where_the_chunk_lies(indexed):
+    client = _client(indexed, FakeChatModel({}))
+    hit = client.post("/v1/search", json={"query": "민법 제750조", "k": 1}).json()["hits"][0]["chunk"]
+
+    body = client.get("/v1/document", params={"chunk_id": hit["id"]}).json()
+
+    assert body["document_id"] == hit["document_id"]
+    assert body["text"][body["cited_start"]:body["cited_end"]] == hit["text"]
+    assert len(body["text"]) > len(hit["text"])
+    assert client.get("/v1/document", params={"chunk_id": "no-such-chunk"}).status_code == 404
+
+
 def test_chat_endpoint_round_trip(indexed):
     # A citation-free answer verifies against any evidence, so the script cannot run dry
     # whichever way the verifier decides on the grounded answer.

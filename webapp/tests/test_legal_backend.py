@@ -82,6 +82,34 @@ class AskTests(unittest.TestCase):
             legal_backend.ask("http://legal:8000", "q", "c")
 
 
+class DocumentTests(unittest.TestCase):
+    def fetched(self, handler):
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        return mock.patch.object(legal_backend.httpx, "get", client.get)
+
+    def test_the_whole_document_is_requested_by_the_chunk_the_card_shows(self):
+        def handler(request):
+            self.assertEqual((request.url.path, request.url.params["chunk_id"]), ("/v1/document", "law#art:제3조"))
+            return httpx.Response(200, json={"document_id": "law", "text": "제2조 \U00020000\n\n제3조 ...\n\n제4조", "cited_start": 7, "cited_end": 14})
+
+        with self.fetched(handler):
+            document = legal_backend.document("http://legal:8000/", "law#art:제3조")
+
+        self.assertEqual(document, {"before": "제2조 \U00020000\n\n", "cited": "제3조 ...", "after": "\n\n제4조"})
+
+    def test_a_chunk_the_service_does_not_hold_has_no_document(self):
+        with self.fetched(lambda request: httpx.Response(404, json={"detail": "none"})):
+            self.assertIsNone(legal_backend.document("http://legal:8000", "gone"))
+
+    def test_an_unreachable_or_broken_service_is_reported_as_unavailable(self):
+        def refused(request):
+            raise httpx.ConnectError("refused")
+
+        for handler in (refused, lambda request: httpx.Response(500, text="boom"), lambda request: httpx.Response(200, json={})):
+            with self.subTest(handler=handler), self.fetched(handler), self.assertRaises(legal_backend.LegalBackendUnavailable):
+                legal_backend.document("http://legal:8000", "c1")
+
+
 class RenderTests(unittest.TestCase):
     def test_answer_sections_appear_in_reading_order(self):
         text, _ = legal_backend.render(ANSWER)
@@ -109,7 +137,7 @@ class RenderTests(unittest.TestCase):
         _, sources = legal_backend.render(ANSWER)
 
         self.assertEqual(sources[0], {"source": "근로기준법 제28조", "quote": "구제신청은 3개월 이내에 하여야 한다.",
-                                      "kind": "법령", "score": 0.91})
+                                      "kind": "법령", "score": 0.91, "chunk_id": "c1"})
         self.assertEqual(sources[1]["source"], "대법원 2011두1234")
         self.assertEqual(sources[1]["kind"], "판례")
         self.assertEqual(len(sources[1]["quote"]), 400)
