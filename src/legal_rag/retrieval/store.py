@@ -62,12 +62,19 @@ class VectorStore:
             sparse_vectors_config={self.SPARSE: models.SparseVectorParams()},
             hnsw_config=models.HnswConfigDiff(on_disk=True) if on_disk else None,
         )
-        if self._server:  # payload indexes are a no-op in embedded mode
-            for key in ("document_type", "metadata.law_name", "metadata.court", "metadata.legal_domain",
-                        "document_id", "metadata.corpus_version"):
-                self.client.create_payload_index(self.collection, key, models.PayloadSchemaType.KEYWORD)
-            for key in (*_DERIVED_KEYS, "order"):
-                self.client.create_payload_index(self.collection, key, models.PayloadSchemaType.INTEGER)
+        self.create_payload_indexes()
+
+    def create_payload_indexes(self) -> None:
+        """Index the payload keys that filters use. Safe to repeat: a collection built before a key
+        was added here gets it, and reading a document by `document_id` no longer scans every point
+        (0.5 s against 0.01 s on 160,000 points)."""
+        if not self._server:  # payload indexes are a no-op in embedded mode
+            return
+        for key in ("document_type", "metadata.law_name", "metadata.court", "metadata.legal_domain",
+                    "document_id", "metadata.corpus_version"):
+            self.client.create_payload_index(self.collection, key, models.PayloadSchemaType.KEYWORD)
+        for key in (*_DERIVED_KEYS, "order"):
+            self.client.create_payload_index(self.collection, key, models.PayloadSchemaType.INTEGER)
 
     def count(self) -> int:
         return self.client.count(self.collection).count if self.exists() else 0
@@ -110,8 +117,7 @@ class VectorStore:
                                       with_payload=True, with_vectors=False)
         matched: set[str] = set()
         for point in points:
-            stored = Chunk.model_validate({key: value for key, value in point.payload.items()
-                                           if key not in _DERIVED_KEYS})
+            stored = self._chunk(point.payload)
             chunk = expected[str(point.id)]
             if stored != chunk:
                 raise ValueError(f"Stored chunk {chunk.id!r} differs from the corpus; cannot resume.")
@@ -124,6 +130,46 @@ class VectorStore:
             return {}
         points = self.client.retrieve(self.collection, ids=[point_id(i) for i in chunk_ids], with_payload=["id", "text"])
         return {point.payload["id"]: point.payload["text"] for point in points}
+
+    def chunk(self, chunk_id: str) -> Chunk | None:
+        points = self.client.retrieve(self.collection, ids=[point_id(chunk_id)], with_payload=True, with_vectors=False)
+        return self._chunk(points[0].payload) if points else None
+
+    def document_chunks(self, chunk: Chunk) -> list[Chunk]:
+        """Every chunk of the document and corpus that hold `chunk`, in original order."""
+        return self._all(models.Filter(must=[
+            models.FieldCondition(key="document_id", match=models.MatchValue(value=chunk.document_id)),
+            models.FieldCondition(key="metadata.corpus_version",
+                                  match=models.MatchValue(value=chunk.metadata.corpus_version)),
+        ]))
+
+    # Statutes stored article by article name their article; the windowed corpora do not.
+    _BY_ARTICLE = [models.IsEmptyCondition(is_empty=models.PayloadField(key="metadata.article"))]
+
+    def law_names(self) -> list[str]:
+        """The laws this store holds article by article."""
+        found = self.client.facet(self.collection, key="metadata.law_name", limit=100_000,
+                                  facet_filter=models.Filter(must_not=self._BY_ARTICLE))
+        return [hit.value for hit in found.hits]
+
+    def law_chunks(self, law_name: str) -> list[Chunk]:
+        """Every article chunk of one law, in original order."""
+        return self._all(models.Filter(
+            must=[models.FieldCondition(key="metadata.law_name", match=models.MatchValue(value=law_name))],
+            must_not=self._BY_ARTICLE))
+
+    def _all(self, matching: models.Filter) -> list[Chunk]:
+        chunks, offset = [], None
+        while True:
+            points, offset = self.client.scroll(self.collection, scroll_filter=matching, limit=256,
+                                                offset=offset, with_payload=True, with_vectors=False)
+            chunks += [self._chunk(point.payload) for point in points]
+            if offset is None:
+                return sorted(chunks, key=lambda other: other.order)
+
+    @staticmethod
+    def _chunk(payload: dict) -> Chunk:
+        return Chunk.model_validate({key: value for key, value in payload.items() if key not in _DERIVED_KEYS})
 
     def chunks_near(self, chunk: Chunk, radius: int) -> list[Chunk]:
         """Bounded neighbors from the same document and corpus, in original order."""
@@ -140,8 +186,7 @@ class VectorStore:
             ]),
             limit=2 * radius + 1, with_payload=True, with_vectors=False,
         )
-        neighbors = [Chunk.model_validate({key: value for key, value in point.payload.items()
-                                          if key not in _DERIVED_KEYS}) for point in points]
+        neighbors = [self._chunk(point.payload) for point in points]
         return sorted((other for other in neighbors if other.id != chunk.id), key=lambda other: other.order)
 
     def search_dense(self, vector: list[float], k: int, filters: RetrievalFilters | None = None) -> list[tuple[Chunk, float]]:
@@ -160,11 +205,7 @@ class VectorStore:
             query_filter=self._to_filter(filters),
             with_payload=True,
         )
-        hits: list[tuple[Chunk, float]] = []
-        for point in result.points:
-            payload = {key: value for key, value in point.payload.items() if key not in _DERIVED_KEYS}
-            hits.append((Chunk.model_validate(payload), float(point.score)))
-        return hits
+        return [(self._chunk(point.payload), float(point.score)) for point in result.points]
 
     @staticmethod
     def _to_filter(filters: RetrievalFilters | None) -> models.Filter | None:

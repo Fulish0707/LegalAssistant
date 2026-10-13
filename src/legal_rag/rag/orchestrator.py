@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from legal_rag.config import Settings
 from legal_rag.llm import ChatModel
 from legal_rag.retrieval.hybrid import HybridRetriever, Retriever
-from legal_rag.schemas import ChatResponse, EvidenceBundle, LegalAnswer, QueryAnalysis, Turn, UserDocument, VerificationAction, VerificationReport
+from legal_rag.schemas import (ChatResponse, Chunk, EvidenceBundle, LegalAnswer, QueryAnalysis, ScoredChunk, Turn, UserDocument,
+                               VerificationAction, VerificationReport)
 from legal_rag.textutil.refs import extract_case_refs, extract_statute_refs
 from legal_rag.verification import VerificationPolicy, Verifier, backfill_citations
 
@@ -78,7 +79,9 @@ class Orchestrator:
             settings=settings,
         )
 
-    def handle(self, message: str, *, conversation_id: str, user_documents: Sequence[UserDocument] = ()) -> ChatResponse:
+    def handle(self, message: str, *, conversation_id: str, user_documents: Sequence[UserDocument] = (),
+               pinned: Sequence[Chunk] = ()) -> ChatResponse:
+        """One chat turn. `pinned` are passages the user chose to ask about; they lead the evidence."""
         recorder = TraceRecorder(
             conversation_id=conversation_id,
             user_text=message,
@@ -120,6 +123,12 @@ class Orchestrator:
             else:
                 hits = self.retriever.retrieve(question, k, filters)
         trace.retrieved = dict(getattr(self.retriever, "last_trace", {}) or {})
+        if pinned:
+            # The chosen passages take the first places; the evidence stays k passages long, so the
+            # prompt stays inside the context the model was measured with.
+            chosen = [ScoredChunk(chunk=chunk, score=1.0, retriever="pinned") for chunk in pinned]
+            held = {chunk.id for chunk in pinned}
+            hits = (chosen + [hit for hit in hits if hit.chunk.id not in held])[:k]
 
         with recorder.stage("context"):
             bundle = self.context_builder.build(hits)

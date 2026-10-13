@@ -36,13 +36,52 @@ def test_search_endpoint(indexed):
     assert body["labels"] == {}
 
 
+def test_document_endpoint_returns_the_whole_document_and_where_the_chunk_lies(indexed):
+    client = _client(indexed, FakeChatModel({}))
+    hit = client.post("/v1/search", json={"query": "민법 제750조", "k": 1}).json()["hits"][0]["chunk"]
+
+    body = client.get("/v1/document", params={"chunk_id": hit["id"]}).json()
+
+    assert body["document_id"] == hit["document_id"]
+    assert body["text"][body["cited_start"]:body["cited_end"]] == hit["text"]
+    assert len(body["text"]) > len(hit["text"])
+    assert client.get("/v1/document", params={"chunk_id": "no-such-chunk"}).status_code == 404
+
+
+def test_a_law_is_read_article_by_article(indexed):
+    client = _client(indexed, FakeChatModel({}))
+
+    law = client.get("/v1/law", params={"name": "주택임대차보호법"}).json()
+    by_number = {article["article"]: article for article in law["articles"]}
+    assert law["name"] == "주택임대차보호법" and by_number["제3조"]["title"] == "대항력 등"
+    assert "주민등록을 마친 때" in by_number["제3조"]["text"]
+    # The first chunk of an article opens the whole law in the reader.
+    whole = client.get("/v1/document", params={"chunk_id": by_number["제3조"]["chunk_id"]}).json()
+    assert by_number["제3조"]["text"].split("\n")[0] in whole["text"]
+    assert client.get("/v1/law", params={"name": "없는법"}).status_code == 404
+
+
+def test_cases_are_listed_once_each_with_the_articles_their_text_cites(indexed):
+    client = _client(indexed, FakeChatModel({}))
+
+    body = client.post("/v1/cases", json={"query": "임대차 보증금 반환", "k": 10}).json()
+
+    documents = [hit["chunk"]["document_id"] for hit in body["hits"]]
+    assert documents and len(documents) == len(set(documents))
+    assert {hit["chunk"]["document_type"] for hit in body["hits"]} <= {"court_decision", "judgment", "decision"}
+    assert set(body["statutes"]) == set(documents)
+    cited = {(ref["law"], ref["article"]) for refs in body["statutes"].values() for ref in refs}
+    assert cited and {law for law, _ in cited} <= {"주택임대차보호법", "민법"}
+    assert client.post("/v1/cases", json={"query": ""}).status_code == 422
+
+
 def test_chat_endpoint_round_trip(indexed):
     # A citation-free answer verifies against any evidence, so the script cannot run dry
     # whichever way the verifier decides on the grounded answer.
     plain = LegalAnswer(summary="일반적인 안내입니다.", analysis="일반적인 절차만 설명합니다.", confidence=Confidence.low)
     model = FakeChatModel({
-        "QueryAnalysis": [QueryAnalysis(issues=["보증금 반환"], keywords=["임차권등기명령"]), QueryAnalysis()],
-        "LegalAnswer": [_answer(), plain, plain, plain],
+        "QueryAnalysis": [QueryAnalysis(issues=["보증금 반환"], keywords=["임차권등기명령"]), QueryAnalysis(), QueryAnalysis()],
+        "LegalAnswer": [_answer(), plain, plain, plain, plain, plain, plain],
     })
     client = _client(indexed, model)
     body = client.post("/v1/chat", json={"message": "임차권등기명령 신청서에 적어야 하는 사항은?"}).json()
@@ -50,6 +89,10 @@ def test_chat_endpoint_round_trip(indexed):
     assert body["evidence"]["items"][0]["source_id"] == "S1" and body["verification"]["ok"] is True
     assert body["answer"]["citations"][0]["source_id"] == "S1"
     assert "trace" not in body
+    chosen = client.post("/v1/search", json={"query": "손해배상 책임", "k": 10}).json()["hits"][-1]["chunk"]["id"]
+    asked = client.post("/v1/chat", json={"message": "이 판례가 제 사건에도 적용될 수 있나요?", "pinned_chunk_ids": [chosen, "no-such-chunk"]}).json()
+    assert asked["evidence"]["items"][0]["chunk_id"] == chosen
+    assert client.post("/v1/chat", json={"message": "x", "pinned_chunk_ids": ["a", "b", "c"]}).status_code == 422
     traced = client.post("/v1/chat", json={"message": "후속 질문", "conversation_id": body["conversation_id"], "include_trace": True}).json()
     assert traced["trace"]["policy_action"] in {"accept", "strip"} and traced["conversation_id"] == body["conversation_id"]
 

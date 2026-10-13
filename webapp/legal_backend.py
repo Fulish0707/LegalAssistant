@@ -39,17 +39,90 @@ class LegalBackendUnavailable(Exception):
     """The service could not be reached or did not return a chat response."""
 
 
-def ask(base_url, message, conversation_id, documents=()):
-    """One chat turn. `documents` are passages of the user's own files: [{name, text, ...}]."""
+def ask(base_url, message, conversation_id, documents=(), pinned=()):
+    """One chat turn. `documents` are passages of the user's own files: [{name, text, ...}].
+    `pinned` are ids of passages the user chose to ask about; the service puts them first in the evidence."""
     endpoint = base_url.rstrip("/") + "/v1/chat"
     payload = {"message": message, "conversation_id": conversation_id}
     if documents:
         payload["user_documents"] = [{"name": document["name"], "text": document["text"]} for document in documents]
+    if pinned:
+        payload["pinned_chunk_ids"] = list(pinned)
     try:
         response = httpx.post(endpoint, json=payload, timeout=TIMEOUT)
         response.raise_for_status()
         return response.json()
     except (httpx.HTTPError, ValueError) as error:
+        raise LegalBackendUnavailable(f"{type(error).__name__}: {error}") from error
+
+
+def _read(base_url, path, shape, **params):
+    """A GET to the service, passed through `shape`; None when the service answers 404."""
+    try:
+        response = httpx.get(base_url.rstrip("/") + path, params=params, timeout=TIMEOUT)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return shape(response.json())
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+        raise LegalBackendUnavailable(f"{type(error).__name__}: {error}") from error
+
+
+def document(base_url, chunk_id):
+    """The whole document that holds a cited chunk, or None if not indexed: {before, cited, after}.
+
+    The text is cut here: the service counts characters as Python does, and a browser counts a rare
+    character outside the basic plane as two.
+    """
+    def cut(body):
+        text, start, end = body["text"], body["cited_start"], body["cited_end"]
+        return {"before": text[:start], "cited": text[start:end], "after": text[end:]}
+
+    return _read(base_url, "/v1/document", cut, chunk_id=chunk_id)
+
+
+def law(base_url, name):
+    """One law's articles in order, or None if no such law: {name, articles: [{article, title, text, chunk_id}]}."""
+    return _read(base_url, "/v1/law", lambda body: {"name": body["name"], "articles": body["articles"]}, name=name)
+
+
+# The reranker scores 20 passages; the service keeps the best one of each case.
+CASE_SEARCH_K = 20
+# "광주고등법원-2014나2029": the civil and IP corpora name a case only in its document id.
+_COURT_ID = re.compile(r"^(?P<court>[^-\d]+)-(?P<number>\d+[가-힣]+\d+)(?:-\d+)?$")
+_DATE = re.compile(r"(\d{4})\D{1,3}(\d{1,2})\D{1,3}(\d{1,2})")
+
+
+def _case_card(hit, labels, statutes):
+    chunk = hit["chunk"]
+    metadata = chunk.get("metadata") or {}
+    named = _COURT_ID.match(chunk["document_id"])
+    court = metadata.get("court") or metadata.get("authority") or (named and named["court"])
+    number = metadata.get("case_number") or (named and named["number"])
+    decided = _DATE.search(str(metadata.get("decision_date") or (metadata.get("original") or {}).get("date") or ""))
+    return {
+        "title": " ".join(part for part in (court, number) if part) or labels.get(chunk["document_id"])
+                 or f"{_kind(chunk)} (법원·사건번호 미기재)",
+        "subject": (chunk.get("title") or "").strip(),
+        "date": "{}.{:0>2}.{:0>2}".format(*decided.groups()) if decided else "",
+        "kind": _kind(chunk),
+        "quote": (chunk.get("text") or "").strip()[:QUOTE_CHARS],
+        "score": hit.get("score"),
+        "chunk_id": chunk["id"],
+        # The articles this case's text cites; the page groups the results by them.
+        "statutes": [{"law": ref["law"], "article": ref["article"], "paragraph": ref.get("paragraph")}
+                     for ref in statutes.get(chunk["document_id"], [])],
+    }
+
+
+def search_cases(base_url, query):
+    """Cases closest to `query`, one card per case, best first, each with the articles it cites."""
+    try:
+        response = httpx.post(base_url.rstrip("/") + "/v1/cases", json={"query": query, "k": CASE_SEARCH_K}, timeout=TIMEOUT)
+        response.raise_for_status()
+        body = response.json()
+        return [_case_card(hit, body.get("labels") or {}, body.get("statutes") or {}) for hit in body["hits"]]
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
         raise LegalBackendUnavailable(f"{type(error).__name__}: {error}") from error
 
 
@@ -68,7 +141,10 @@ def _kind(item):
 
 
 def _label(item):
-    header = item.get("header") or {}
+    header = dict(item.get("header") or {})
+    named = _COURT_ID.match(item.get("document_id") or "")
+    if named and header.get("Type") == "Case" and not header.get("Case number"):
+        header.update({"Court": header.get("Court") or named["court"], "Case number": named["number"]})
     label = " ".join(dict.fromkeys(header[field] for field in _LABEL_FIELDS if header.get(field)))
     # Chunks often start mid-sentence, so the text is no substitute for a missing name.
     return label or f"{_kind(item)} (법원·사건번호 미기재)"
@@ -96,7 +172,7 @@ def _bullets(heading, items):
 
 
 def render(body, documents=()):
-    """(chat text, [{source, quote, kind, score}]) for a /v1/chat response body.
+    """(chat text, [{source, quote, kind, score, chunk_id}]) for a /v1/chat response body.
 
     `documents` are the user's passages sent with the turn, in the order sent (D1, D2, ...).
     """
@@ -130,6 +206,8 @@ def render(body, documents=()):
             "quote": (item.get("text") or "").strip()[:QUOTE_CHARS],
             "kind": _kind(item),
             "score": item.get("score"),
+            # The card shows an excerpt; the reader asks for the whole document by this id.
+            "chunk_id": item.get("chunk_id"),
         }
         for item in items
     ] + [

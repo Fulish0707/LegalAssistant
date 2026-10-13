@@ -31,10 +31,6 @@ window.LC = window.LC || {};
     'display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 10px;border-radius:9px;border:0;background:' +
     (on ? '#e6f0f0' : 'transparent') + ';color:' + (on ? a : '#3d4348') + ';font-size:12.5px;font-weight:' + (on ? '500' : '400') + ';cursor:pointer';
 
-  LC.sortPill = on =>
-    'padding:6px 12px;border-radius:999px;border:1px solid ' + (on ? a : '#e6e3dd') + ';background:' +
-    (on ? '#e6f0f0' : '#fff') + ';color:' + (on ? a : '#767d83') + ';font-size:11.5px;cursor:pointer';
-
   LC.bar = (score, w, h) =>
     '<span style="width:' + w + 'px;height:' + h + 'px;border-radius:3px;background:#eeeae2;overflow:hidden;display:block">' +
     '<span style="display:block;height:100%;width:' + LC.pct(score) + ';background:' + a + '"></span></span>';
@@ -69,9 +65,21 @@ window.LC = window.LC || {};
 
   /* ---------- 사이드바 공통 블록 ---------- */
 
-  LC.matterList = () => `
+  /* 서버의 상담 상태(/get_initial_state)를 사이드바 목록으로. 아직 질문이 없는 열린 상담은
+     서버 목록에 없으므로 맨 위에 넣는다. 서버 시각은 UTC다 */
+  LC.consultations = (st, openTitle) => {
+    const when = started => {
+      const d = new Date(String(started).replace(' ', 'T') + 'Z');
+      return isNaN(d) || d.toDateString() === new Date().toDateString() ? '오늘' : `${d.getMonth() + 1}월 ${d.getDate()}일`;
+    };
+    const list = (st.conversations || []).map(c => ({ id: c.id, title: c.title, kind: '상담', when: when(c.started), live: c.id === st.conversation }));
+    if (!list.some(c => c.live)) list.unshift({ id: st.conversation, title: openTitle || '새 상담', kind: '상담', when: '오늘', live: true });
+    return list;
+  };
+
+  LC.matterList = () => !LC.MATTERS.length ? '' : `
 <div style="display:flex;flex-direction:column;gap:3px">
-  ${LC.sectionLabel('진행 중').replace('font-size:10px', 'padding:0 8px 7px;font-size:10px')}
+  ${LC.sectionLabel('상담').replace('font-size:10px', 'padding:0 8px 7px;font-size:10px')}
   ${LC.MATTERS.map((c, i) => `
   <button class="lc-ghost" data-act="pickMatter" data-key="${i}" style="display:flex;flex-direction:column;gap:3px;width:100%;text-align:left;padding:10px;border:0;border-radius:10px;background:${LC.S.activeMatter === i ? '#f2efe9' : 'transparent'};color:#14171a;cursor:pointer">
     <div style="display:flex;align-items:center;gap:7px;min-width:0">
@@ -82,13 +90,6 @@ window.LC = window.LC || {};
   </button>`).join('')}
 </div>`;
 
-  LC.helpCard = () => `
-<div style="margin-top:auto;display:flex;flex-direction:column;gap:9px;padding:14px;border-radius:12px;background:#f4faf9;border:1px solid #dbeae8">
-  <div style="font-size:12px;font-weight:600">혼자 하기 어려우신가요?</div>
-  <div style="font-size:11.5px;line-height:1.65;color:#3d4348">서류 작성과 접수까지 단계별로 함께 진행합니다. 비용은 들지 않습니다.</div>
-  <button class="lc-primary" data-act="guide" style="padding:9px;border:0;border-radius:9px;background:${a};color:#fff;font-size:12px;font-weight:500;cursor:pointer">단계별로 함께 하기</button>
-  <button class="lc-outline" data-act="lawyer" style="padding:8px;border:1px solid #d8d4cc;border-radius:9px;background:#fff;font-size:11.5px;color:#3d4348;cursor:pointer">복잡한 사건은 변호사 연결</button>
-</div>`;
 
   /* ---------- 셸 ---------- */
 
@@ -166,9 +167,9 @@ window.LC = window.LC || {};
           </span>`}
         </div>
         <div style="font-size:13px;font-weight:500;line-height:1.55">${LC.esc(s.title)}</div>
-        <div style="font-size:12px;line-height:1.7;color:#767d83;text-wrap:pretty;white-space:pre-wrap;${LC.S.openSource === s.id ? '' : 'display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden'}">${LC.esc(s.quote)}</div>
+        <div style="font-size:12px;line-height:1.7;color:#767d83;text-wrap:pretty;white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden">${LC.esc(s.quote)}</div>
         <div style="display:flex;gap:10px;padding-top:2px">
-          <button class="lc-link" data-act="viewSource" data-key="${LC.esc(s.id)}" style="background:transparent;border:0;padding:0;font-size:11px;color:${a};cursor:pointer">${s.kind === '내 문서' ? '원문 보기' : LC.S.openSource === s.id ? '접기' : '전문 보기'}</button>
+          <button class="lc-link" data-act="viewSource" data-key="${LC.esc(s.id)}" style="background:transparent;border:0;padding:0;font-size:11px;color:${a};cursor:pointer">${s.kind === '내 문서' ? '원문 보기' : '전문 보기'}</button>
         </div>
       </div>`).join('')}
     </div>` : '<div style="flex:1"></div>'}
@@ -176,6 +177,50 @@ window.LC = window.LC || {};
     ${o.footer || ''}
   </div>
 </aside>`;
+  };
+
+  /* ---------- 근거 전문 읽기 창 ---------- */
+
+  LC.reader = () => {
+    const r = LC.S.reader;
+    if (!r) return '';
+    const body = r.state === 'ready'
+      ? `${LC.esc(r.before)}<mark id="readerCited" style="background:#fdf1c7;color:inherit;padding:2px 0">${LC.esc(r.cited)}</mark>${LC.esc(r.after)}`
+      : `<span style="color:#9aa0a5">${LC.esc(r.state === 'loading' ? '전문을 불러오는 중입니다' : r.error)}</span>`;
+    return `
+<div data-act="closeReader" style="position:fixed;inset:0;z-index:50;background:rgba(20,23,26,.45);display:flex;align-items:center;justify-content:center">
+  <div data-act="readerBody" role="dialog" aria-modal="true" aria-label="${LC.esc(r.title)}" style="width:min(880px,92vw);height:88vh;display:flex;flex-direction:column;background:#fff;border-radius:14px;box-shadow:0 24px 64px rgba(0,0,0,.28);overflow:hidden">
+    <div style="flex:none;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 24px;border-bottom:1px solid #e6e3dd">
+      <div style="display:flex;flex-direction:column;gap:5px;min-width:0">
+        <span style="font-size:10px;letter-spacing:.14em;color:#9aa0a5">${LC.esc(r.kind)}</span>
+        <span style="font-family:'Noto Serif KR',serif;font-size:16px;font-weight:700;line-height:1.5">${LC.esc(r.title)}</span>
+      </div>
+      <div style="flex:none;display:flex;align-items:center;gap:14px">
+        ${r.state === 'ready' ? `<button class="lc-link" data-act="readerJump" style="background:transparent;border:0;padding:0;font-size:12px;color:${a};cursor:pointer">인용한 부분으로</button>` : ''}
+        <button class="lc-link" data-act="closeReader" style="background:transparent;border:0;padding:0;font-size:12px;color:#767d83;cursor:pointer">닫기</button>
+      </div>
+    </div>
+    <div id="readerText" style="flex:1;min-height:0;overflow-y:auto;padding:22px 28px 32px;font-family:'Noto Serif KR',serif;font-size:14.5px;line-height:1.95;white-space:pre-wrap;overflow-wrap:anywhere">${body}</div>
+    <div style="flex:none;padding:10px 24px;border-top:1px solid #f0ede7;font-size:11px;color:#9aa0a5">노란색으로 표시한 부분이 답변이 인용한 곳입니다.</div>
+  </div>
+</div>`;
+  };
+
+  LC.openReader = async function (source) {
+    const reader = LC.S.reader = { title: source.title, kind: source.kind, state: 'loading' };
+    LC.render();
+    try {
+      const r = await fetch('/legal_source?chunk_id=' + encodeURIComponent(source.chunkId));
+      const res = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(res.error || r.statusText);
+      Object.assign(reader, { state: 'ready', before: res.before, cited: res.cited, after: res.after });
+    } catch (err) {
+      console.error('Legal source error:', err);
+      Object.assign(reader, { state: 'error', error: err.message || '전문을 불러오지 못했습니다' });
+    }
+    if (LC.S.reader !== reader) return;   // 불러오는 동안 창을 닫았거나 다른 근거를 열었다
+    LC.readerJump = true;
+    LC.render();
   };
 
   LC.traceBlock = () => `
@@ -214,6 +259,7 @@ ${LC.S.traceOpen ? `
     const z = LC.S.scale === '작게' ? .92 : LC.S.scale === '크게' ? 1.14 : 1;
     const app = document.getElementById('app');
     const keep = (document.getElementById('thread') || {}).scrollTop;
+    const keepReader = (document.getElementById('readerText') || {}).scrollTop;
 
     app.innerHTML = `
 <div style="--accent:${a};zoom:${z};height:calc(100vh / ${z});overflow:auto">
@@ -230,12 +276,20 @@ ${LC.S.traceOpen ? `
     ${LC.page.rail ? (LC.page.rail() || '') : ''}
   </div>
 </div>
+${LC.reader()}
 </div>`;
 
     const thread = document.getElementById('thread');
     if (thread) {
       thread.scrollTop = (LC.pinThread || keep == null) ? thread.scrollHeight : keep;
       LC.pinThread = false;
+    }
+    const readerText = document.getElementById('readerText');
+    if (readerText) {
+      const cited = document.getElementById('readerCited');
+      if (LC.readerJump && cited) cited.scrollIntoView({ block: 'center' });
+      else if (keepReader != null) readerText.scrollTop = keepReader;
+      LC.readerJump = false;
     }
     if (LC.page.afterRender) LC.page.afterRender();
   };
@@ -249,15 +303,19 @@ ${LC.S.traceOpen ? `
     refreshKb: () => { LC.fetchKnowledgeBaseStatus(); return false; },
     clearKb: () => { LC.clearKnowledgeBase(); return false; },
     print: () => { window.print(); return false; },
-    guide: () => { location.href = 'chatbot.html?ask=' + encodeURIComponent('단계별로 함께 진행해 주세요'); return false; },
-    lawyer: () => { alert('변호사 연결은 준비 중입니다. 상담 기록을 바탕으로 적합한 변호사를 안내할 예정입니다.'); return false; },
     viewSource: k => {
       const s = LC.SOURCES.find(x => x.id === k);
-      if (s && s.kind === '내 문서') { location.href = 'documents.html'; return false; }
-      LC.S.openSource = LC.S.openSource === k ? null : k;   // 법령·판례는 제자리에서 전문 펼치기
-    }
+      if (!s) return false;
+      if (s.kind === '내 문서') { location.href = 'documents.html'; return false; }
+      LC.openReader(s);   // 법령·판례는 읽기 창에서 전문을 보여준다
+      return false;
+    },
+    closeReader: () => { LC.S.reader = null; },
+    readerJump: () => { LC.readerJump = true; },
+    readerBody: () => false   // 창 안을 눌러도 닫히지 않는다
   };
   document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && LC.S.reader) { LC.S.reader = null; LC.render(); return; }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); location.href = 'cases.html'; }
   });
 
@@ -354,15 +412,6 @@ ${LC.S.traceOpen ? `
     return res.results || [];
   };
 
-  LC.clearChatHistory = async function () {
-    try {
-      const r = await fetch('/clear_chat_history_endpoint', { method: 'POST' });
-      if (!r.ok) throw new Error(r.statusText);
-    } catch (err) {
-      console.error('Chat history clear error:', err);
-    }
-  };
-
 
   /* 자료 업로드 — 사건 자료·상담 페이지가 공유 */
   LC.uploadFile = function (file, onDone) {
@@ -399,61 +448,5 @@ ${LC.S.traceOpen ? `
       });
   };
 
-  /* 조문 계층 필터 — 판례 검색 페이지가 사용, 다른 페이지에서도 재사용 가능 */
-  LC.drill = function (st) {
-    const law = LC.LAWS[st.lawIdx] || LC.LAWS[0];
-    const joOrder = [];
-    law.jangs.forEach(j => j.jos.forEach(jo => joOrder.push(jo.no)));
-    const match = c => (c.refs || []).some(r => r.law === law.name &&
-      (!st.joSel || r.jo === st.joSel) && (!st.hangSel || r.hang === st.hangSel) && (!st.hoSel || r.ho === st.hoSel));
-    const count = joNo => LC.CASES.filter(c => (c.refs || []).some(r => r.law === law.name && r.jo === joNo)).length;
 
-    let list = LC.CASES.filter(match);
-    if (st.sort === '조문순') list = list.slice().sort((x, y) => {
-      const k = c => Math.min.apply(null, c.refs.filter(r => r.law === law.name).map(r => joOrder.indexOf(r.jo)).concat([99]));
-      return k(x) - k(y);
-    });
-    else if (st.sort === '최신순') list = list.slice().sort((x, y) => (y.name.match(/\d{4}/) || [0])[0] - (x.name.match(/\d{4}/) || [0])[0]);
-    else list = list.slice().sort((x, y) => y.score - x.score);
-
-    const selJo = law.jangs.reduce((acc, j) => acc || j.jos.find(jo => jo.no === st.joSel), null);
-    const selJang = selJo ? (law.jangs.find(j => j.jos.indexOf(selJo) > -1) || {}).name : null;
-    const selHang = selJo && st.hangSel ? selJo.hangs.find(h => h.no === st.hangSel) : null;
-    const hos = selHang ? (st.hoSel ? selHang.hos.filter(h => h.no === st.hoSel) : selHang.hos) : [];
-    return { law, list, count, selJo, selJang, selHang, hos };
-  };
-
-  /* 판례 상세 패널 — 판례 검색 페이지 */
-  LC.caseDetailRail = function (det) {
-    return `
-<aside style="min-height:0;width:356px;flex:none;overflow:hidden;background:#fff;border-left:1px solid #e6e3dd;display:flex;flex-direction:column">
-  <div style="display:flex;flex-direction:column;height:100%;min-height:0">
-    <div style="flex:none;padding:16px 20px 14px;border-bottom:1px solid #f0ede7;display:flex;flex-direction:column;gap:8px">
-      <button class="lc-link" data-act="closeDetail" style="align-self:flex-start;padding:0;border:0;background:transparent;font-size:11.5px;color:#9aa0a5;cursor:pointer">← 근거 목록</button>
-      <div style="font-family:'Noto Serif KR',serif;font-size:16px;font-weight:700;line-height:1.45">${LC.esc(det.name)}</div>
-      <div style="display:flex;align-items:center;gap:8px">
-        ${LC.bar(det.score, 64, 5)}
-        <span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:${a}">유사도 ${LC.pct(det.score)}</span>
-      </div>
-    </div>
-    <div style="flex:1;min-height:0;overflow-y:auto;padding:18px 20px;display:flex;flex-direction:column;gap:18px">
-      <div style="display:flex;flex-direction:column;gap:6px">
-        ${LC.sectionLabel('사건 요지')}
-        <div style="font-size:13px;line-height:1.85;text-wrap:pretty">${LC.esc(det.summary)}</div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        ${LC.sectionLabel('판시 사항')}
-        <div style="font-family:'Noto Serif KR',serif;font-size:13px;line-height:1.9;text-wrap:pretty">${LC.esc(det.holding)}</div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        ${LC.sectionLabel('내 사건과 다른 점')}
-        <div style="padding:13px 15px;border-radius:12px;background:#fdf4e8;border:1px solid #f2e2c9;font-size:12.5px;line-height:1.8;color:#8a5215;text-wrap:pretty">${LC.esc(det.diff)}</div>
-      </div>
-    </div>
-    <div style="flex:none;border-top:1px solid #f0ede7;padding:14px 18px">
-      <a class="lc-primary" href="chatbot.html?ask=${encodeURIComponent(det.name)}" style="display:block;text-align:center;width:100%;padding:11px;border:0;border-radius:10px;background:${a};color:#fff;font-size:13px;font-weight:500;cursor:pointer;text-decoration:none">이 판례로 상담 이어가기</a>
-    </div>
-  </div>
-</aside>`;
-  };
 })();
