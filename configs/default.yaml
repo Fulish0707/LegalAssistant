@@ -61,7 +61,7 @@ rag:
   history_turns: 4
   max_regenerations: 1
   max_evidence_chars: 1500
-  context_neighbor_radius: 0  # expand after ranking; enabled in structural-civil profile
+  context_neighbor_radius: 0  # expand after ranking; used by the structural-chunk pilot (docs/experiments/structural-civil.md)
   context_neighbor_corpora: []  # empty permits all corpora when expansion is enabled
   max_context_chars: null     # optional rendered budget; expansion defaults to 7500
 

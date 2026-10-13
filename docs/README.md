@@ -14,7 +14,6 @@
 - [법률 RAG 개발 안내](legal-rag-backend.md): 백엔드 설치, 자료 수집·색인, API.
 - [평가 문서 목차](evaluation-index.md): 검색·답변 평가의 실행 안내와 유지되는 구현.
 - [검색 진단](retrieval-diagnostics.md): 검색 설정 비교, 관련성 pool과 결과 해석.
-- [구조 청크](structural-civil.md): 작은 구조 청크의 색인과 검색 비교.
 - [Corpus relevance prompts](corpus-relevance-prompts.md): corpus별 관련성 채점.
 - [채점기: core conclusion](answer-grader-core.md): 현재 답변 채점 방법.
 - [Answer grader v3 calibration](answer-grader-v3-calibration.md): 저장 답변의 v2/v3 채점 비교.
@@ -43,6 +42,10 @@
 - [실패 필드만 복구](experiments/partial-repair-2026-10-12.md)
 - [답변 의미 검증](experiments/semantic-verification-2026-10-12.md)
 - [요약 필드 우선 생성](experiments/summary-first-2026-10-12.md)
+
+구조 청크.
+
+- [구조 청크 시험](experiments/structural-civil.md): 채택하지 않았다. Qdrant 컬렉션은 2026-10-14에 삭제했다.
 
 관련성 채점 prompt.
 

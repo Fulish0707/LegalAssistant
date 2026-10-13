@@ -1,5 +1,9 @@
 # Golden-answer comparison
 
+> **Status, 2026-10-14.** The `prepare` and `generate` phases search the four `*-struct800-v1`
+> Qdrant collections, which were deleted. They do not run until the collections are built again
+> ([how](experiments/structural-civil.md)). `judge` and `report` read stored files and still run.
+
 This experiment compares original and smaller structural chunks using the same
 80 questions from the historical answer evaluation. Both arms search four indexes
 without domain filters or neighboring passages. It measures chunking's effect on
