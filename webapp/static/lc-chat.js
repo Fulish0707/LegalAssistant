@@ -10,15 +10,30 @@
     thinking: false,
     extra: [],
     questions: [],   /* 최신 답변이 사용자에게 묻는 질문 — /chat final_response.questions */
-    answering: ''    /* 사용자가 답하려고 고른 질문 */
+    answering: '',   /* 사용자가 답하려고 고른 질문 */
+    conversation: 0, /* 열려 있는 상담 번호 — /get_initial_state.conversation */
+    conversations: []/* 질문이 있는 상담 목록, 최신순 — {id, title, started} */
   };
 
   let sse = null;
 
   /* ---------- 화면 ---------- */
 
+  function when(started){
+    const d = new Date(String(started).replace(' ', 'T') + 'Z');   // 서버 시각은 UTC
+    return isNaN(d) || d.toDateString() === new Date().toDateString() ? '오늘' : `${d.getMonth() + 1}월 ${d.getDate()}일`;
+  }
+
+  /* 사이드바의 상담 목록. 아직 질문이 없는 새 상담은 서버 목록에 없으므로 맨 위에 넣는다 */
+  function matters(){
+    const list = P.conversations.map(c => ({ id: c.id, title: c.title, kind: '상담', when: when(c.started), live: c.id === P.conversation }));
+    if (!list.some(c => c.live)) list.unshift({ id: P.conversation, title: title(), kind: '상담', when: '오늘', live: true });
+    return list;
+  }
+
   function side(){
-    LC.MATTERS = [{ title: title(), kind: '상담', when: '오늘', live: true }];
+    LC.MATTERS = matters();
+    LC.S.activeMatter = LC.MATTERS.findIndex(c => c.live);
     return `
 <div style="display:flex;flex-direction:column;gap:18px;height:100%;min-height:0">
   <button class="lc-primary" data-act="newCase" style="display:flex;align-items:center;justify-content:center;gap:7px;padding:11px;border:0;border-radius:10px;background:${a};color:#fff;font-size:13.5px;font-weight:500;cursor:pointer">${LC.icon('plus', 14, '#fff')} 새 상담</button>
@@ -27,7 +42,6 @@
     <div style="padding:0 8px 7px;font-size:10px;letter-spacing:.16em;color:#9aa0a5">도구</div>
     <a class="lc-ghost" href="documents.html" style="display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border-radius:10px;font-size:12.5px;color:#3d4348;text-decoration:none">${LC.icon('search', 15, '#9aa0a5')}계약서 검토</a>
   </div>
-  ${LC.helpCard()}
 </div>`;
   }
 
@@ -159,7 +173,7 @@
           else if (data.type === 'final_response') {
             P.extra.push({ role:'agent', text: data.chat_response });
             P.questions = data.questions || [];
-            LC.SOURCES = (data.sources || []).map((h, i) => ({ id: String(i + 1), kind: h.kind || '내 문서', title: h.source, quote: h.quote, score: h.score, chunkId: h.chunk_id }));
+            LC.SOURCES = sourceCards(data.sources);
             P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
           }
           else if (data.type === 'error') {
@@ -184,16 +198,40 @@
     });
   }
 
+  /* 서버의 근거 목록을 우측 패널의 카드로 */
+  const sourceCards = sources => (sources || []).map((h, i) => ({ id: String(i + 1), kind: h.kind || '내 문서', title: h.source, quote: h.quote, score: h.score, chunkId: h.chunk_id }));
+
+  /* 서버가 준 상담 상태를 화면 상태로 옮긴다. 근거는 그 상담의 마지막 답변 것이다 */
+  function applyState(st){
+    LC.SOURCES = sourceCards(st.sources);
+    P.extra = (st.chat_history || []).map(m => ({ role: m.role === 'user' ? 'user' : 'agent', text: m.content }));
+    P.conversation = st.conversation || 0;
+    P.conversations = st.conversations || [];
+  }
+
   async function fetchInitialState(){
     try {
       const r = await fetch('/get_initial_state');
       if (!r.ok) throw new Error(r.statusText);
-      const st = await r.json();
-      if (Array.isArray(st.chat_history)) {
-        P.extra = st.chat_history.map(m => ({ role: m.role === 'user' ? 'user' : 'agent', text: m.content }));
-      }
+      applyState(await r.json());
     } catch (err) {
       console.error('Initial state error:', err);
+    }
+    LC.pinThread = true;
+    LC.render();
+  }
+
+  /* 새 상담을 열거나 이전 상담을 다시 연다. 이전 상담의 기록은 서버에 남는다 */
+  async function openConversation(path, body){
+    if (sse) { sse.close(); sse = null; }
+    try {
+      const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+      if (!r.ok) throw new Error(r.statusText);
+      applyState(await r.json());
+      Object.assign(P, { draft: '', thinking: false, railTab: '전체', questions: [], answering: '' });
+      LC.S.traceLines = [];
+    } catch (err) {
+      console.error('Conversation open error:', err);
     }
     LC.pinThread = true;
     LC.render();
@@ -216,12 +254,14 @@
       cancelAnswer: () => { P.answering = ''; },
       easier: () => { P.tone = '쉬운 말'; P.draft = '위 내용을 더 쉽게 설명해 주세요.'; },
       newCase: () => {
-        if (sse) { sse.close(); sse = null; }
-        Object.assign(P, { extra: [], draft: '', thinking: false, railTab: '전체', questions: [], answering: '' });
-        LC.S.traceLines = [];
-        LC.SOURCES = [];
-        LC.clearChatHistory();
+        openConversation('/conversations/new');
         if (location.search) history.replaceState(null, '', location.pathname);
+        return false;
+      },
+      pickMatter: k => {
+        const c = LC.MATTERS[Number(k)];
+        if (c && !c.live) openConversation('/conversations/select', { id: c.id });
+        return false;
       },
       send: () => { sendMessage(); return false; },
       voice: () => { alert('음성 입력은 준비 중입니다.'); return false; },

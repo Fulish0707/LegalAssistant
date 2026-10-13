@@ -98,6 +98,13 @@ def ensure_database_schema(conn):
         cursor.execute("ALTER TABLE chat_history RENAME TO chat_history_legacy")
     cursor.execute("CREATE TABLE IF NOT EXISTS chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_user_id_id ON chat_history(user_id, id)")
+    # One browser holds several consultations; rows written before 2026-10-13 belong to the first.
+    chat_columns = {row[1] for row in cursor.execute("PRAGMA table_info(chat_history)")}
+    if "conversation" not in chat_columns:
+        cursor.execute("ALTER TABLE chat_history ADD COLUMN conversation INTEGER NOT NULL DEFAULT 0")
+    # The source cards of an answer, as JSON, so a reopened consultation shows them again.
+    if "sources" not in chat_columns:
+        cursor.execute("ALTER TABLE chat_history ADD COLUMN sources TEXT")
     # The Google-era users table is no longer created. Existing installs keep
     # theirs untouched; nothing in the app reads it any more.
     # daily_ai_quota keeps the legacy 'user' kind so old rows stay valid; the app
@@ -148,18 +155,46 @@ def init_db():
         # but since we used `with app.app_context()`, `close_connection` will be triggered.
 
 
-def get_chat_history_from_db(user_id):
+def get_chat_history_from_db(user_id, conversation=0):
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT role, content FROM chat_history WHERE user_id=? ORDER BY id ASC', (user_id,))
+    c.execute('SELECT role, content FROM chat_history WHERE user_id=? AND conversation=? ORDER BY id ASC', (user_id, conversation))
     rows = c.fetchall()
     return [{"role": row["role"], "content": row["content"]} for row in rows]
 
-def add_chat_message_to_db(user_id, role, content):
+def add_chat_message_to_db(user_id, role, content, conversation=0, sources=None):
+    """`sources` are an answer's source cards; a message that is not an answer has none."""
     conn = get_db()
     c = conn.cursor()
-    c.execute('INSERT INTO chat_history (user_id, role, content) VALUES (?, ?, ?)', (user_id, role, content))
+    c.execute('INSERT INTO chat_history (user_id, role, content, conversation, sources) VALUES (?, ?, ?, ?, ?)',
+              (user_id, role, content, conversation, None if sources is None else json.dumps(sources, ensure_ascii=False)))
     conn.commit()
+
+def get_latest_sources_from_db(user_id, conversation=0):
+    """The source cards of the consultation's last answer, as the chat page showed them."""
+    row = get_db().execute('SELECT sources FROM chat_history WHERE user_id=? AND conversation=? AND sources IS NOT NULL '
+                           'ORDER BY id DESC LIMIT 1', (user_id, conversation)).fetchone()
+    return json.loads(row["sources"]) if row else []
+
+def get_conversations_from_db(user_id):
+    """This browser's consultations that hold a question, newest first: {id, title, started}.
+
+    The title is the first line of the first question; `started` is its UTC time.
+    """
+    rows = get_db().execute(
+        'SELECT conversation, content, timestamp FROM chat_history WHERE id IN '
+        "(SELECT MIN(id) FROM chat_history WHERE user_id=? AND role='user' GROUP BY conversation) "
+        'ORDER BY conversation DESC', (user_id,)).fetchall()
+    return [{"id": row["conversation"], "title": row["content"].strip().split("\n")[0][:80], "started": row["timestamp"]}
+            for row in rows]
+
+def clear_all_chat_history():
+    """Forget every browser's consultations. The server does this each time it starts."""
+    with app.app_context():
+        conn = get_db()
+        conn.execute('DELETE FROM chat_history')
+        conn.commit()
+
 
 def clear_chat_history_in_db(user_id):
     conn = get_db()
@@ -211,13 +246,34 @@ LEGAL_BACKEND_UNSET = "법률 답변 서비스가 설정되지 않았습니다. 
 LEGAL_BACKEND_DOWN = "법률 답변 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."
 
 
+def _conversation():
+    """The number of the consultation this browser has open."""
+    return session.get("conversation_epoch", 0)
+
+
+# Changes with every start of this server. Consultations are forgotten at a start, and a browser
+# keeps its consultation number in its cookie, so the number alone would reach turns legal_rag
+# still remembers from before.
+SERVER_START = secrets.token_hex(4)
+
+
 def _legal_conversation_id():
-    """The browser's workspace id plus an epoch that clearing the chat advances.
+    """The browser's workspace id, this server start, and the number of the open consultation.
 
     legal_rag keeps recent turns per conversation id and has no call to forget them,
-    so a cleared chat continues under a new id instead.
+    so each consultation, and a cleared chat, continues under an id of its own.
     """
-    return f"{session['user_id']}-{session.get('conversation_epoch', 0)}"
+    return f"{session['user_id']}-{SERVER_START}-{_conversation()}"
+
+
+def _chat_state():
+    """What the chat page shows: the open consultation's messages, the source cards of its last
+    answer, and the list of all consultations."""
+    user_id = session["user_id"]
+    return {"chat_history": get_chat_history_from_db(user_id, _conversation()),
+            "sources": get_latest_sources_from_db(user_id, _conversation()),
+            "conversation": _conversation(),
+            "conversations": get_conversations_from_db(user_id)}
 
 
 # Passages of the user's files sent with a turn. Three of 1,000 characters add about 2,700
@@ -240,7 +296,7 @@ FOLLOW_UP_CHARS = 12
 def _document_query(user_input):
     if len("".join(user_input.split())) > FOLLOW_UP_CHARS:
         return user_input
-    asked = [turn["content"] for turn in get_chat_history_from_db(session["user_id"]) if turn["role"] == "user"]
+    asked = [turn["content"] for turn in get_chat_history_from_db(session["user_id"], _conversation()) if turn["role"] == "user"]
     if asked and asked[-1] == user_input:  # POST /chat stored this message before the stream began
         asked.pop()
     return f"{asked[-1]}\n{user_input}" if asked else user_input
@@ -291,7 +347,7 @@ def _generate_legal_response_stream(user_input):
         else:
             chat_response, sources, questions = GREETING_REPLY, [], []
 
-        add_chat_message_to_db(session["user_id"], "assistant", chat_response)
+        add_chat_message_to_db(session["user_id"], "assistant", chat_response, _conversation(), sources)
         yield _sse({
             "type": "final_response",
             "chat_response": chat_response,
@@ -301,12 +357,12 @@ def _generate_legal_response_stream(user_input):
 
     except legal_backend.LegalBackendUnavailable:
         logging.exception("legal_rag /v1/chat is unavailable")
-        add_chat_message_to_db(session["user_id"], "assistant", LEGAL_BACKEND_DOWN)
+        add_chat_message_to_db(session["user_id"], "assistant", LEGAL_BACKEND_DOWN, _conversation())
         yield _sse({'type': 'error', 'content': LEGAL_BACKEND_DOWN})
     except Exception:
         logging.exception("Error during AI processing stream (_generate_legal_response_stream)")
         error_response_content = "An error occurred while processing your request. Please check server logs."
-        add_chat_message_to_db(session["user_id"], "assistant", error_response_content)
+        add_chat_message_to_db(session["user_id"], "assistant", error_response_content, _conversation())
         yield _sse({'type': 'error', 'content': error_response_content})
     finally:
         yield _sse({'type': 'stream_end'})
@@ -387,7 +443,7 @@ def chat():
         if not user_input:
             return jsonify({"error": "No message provided"}), 400
 
-        add_chat_message_to_db(session["user_id"], "user", user_input)
+        add_chat_message_to_db(session["user_id"], "user", user_input, _conversation())
         # The POST request now just acknowledges receipt.
         # The actual processing and streaming will be triggered by the frontend's GET request.
         return jsonify({"status": "message_received_ok", "message": "Proceed to connect to SSE for response."})
@@ -439,10 +495,26 @@ def legal_source():
 
 @app.route('/get_initial_state', methods=['GET'])
 def get_initial_state():
-    user_id = session["user_id"]
-    return jsonify({
-        "chat_history": get_chat_history_from_db(user_id)
-    })
+    return jsonify(_chat_state())
+
+
+@app.route('/conversations/new', methods=['POST'])
+def new_conversation():
+    """Open an empty consultation; the earlier ones stay in the list."""
+    held = [conversation["id"] for conversation in get_conversations_from_db(session["user_id"])]
+    if _conversation() in held:  # an open consultation that is still empty is reused
+        session["conversation_epoch"] = max(held) + 1
+    return jsonify(_chat_state())
+
+
+@app.route('/conversations/select', methods=['POST'])
+def select_conversation():
+    """Reopen one of this browser's consultations."""
+    chosen = (request.get_json(silent=True) or {}).get("id")
+    if chosen not in [conversation["id"] for conversation in get_conversations_from_db(session["user_id"])]:
+        return jsonify({"error": "No such consultation."}), 404
+    session["conversation_epoch"] = chosen
+    return jsonify(_chat_state())
 
 
 @app.route('/clear_chat_history_endpoint', methods=['POST']) # Added specific endpoint name
@@ -569,4 +641,5 @@ def process_document_ocr():
 
 if __name__ == '__main__':
     init_db() # Initialize the database
+    clear_all_chat_history()  # consultations last until the server restarts
     app.run(host="0.0.0.0", port=5005, debug=True, use_reloader=False)
