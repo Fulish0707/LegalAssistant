@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Build the three prepared structural corpora, then evaluate four-index retrieval.
+# The collections were deleted on 2026-10-14; this is the way to build them again (hours of
+# embedding). civil-struct800-v1 is built first, as docs/experiments/structural-civil.md describes.
 set -euo pipefail
 cd /home/layke/Documents/MyLLMAgent
 

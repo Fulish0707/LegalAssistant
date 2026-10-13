@@ -1,5 +1,12 @@
 # Structural civil retrieval pilot
 
+> **Status, 2026-10-14.** The structural chunks were not adopted, and the Qdrant collections of
+> the four `*-struct800-v1` corpora were deleted to free memory (Qdrant 15.5 -> 11.9 GB). The
+> commands below do not run until a collection is built again. The processed corpora under
+> `data/processed/` are kept, and the BM25 statistics are in `data/indexes/dummyIndex.zip`.
+> `configs/structural-all.yaml` and `scripts/run_structural_all.sh` are kept as the way to rebuild;
+> the `structural-civil` serving profile was removed (see git history for `configs/structural-civil.yaml`).
+
 The new corpus `civil-struct800-v1` retains the 75,624 civil-v1 documents and changes
 only their chunking. Target 800 / maximum 1000 characters, with structural section
 boundaries and sentence-window fallback. No overlap is introduced. There are
