@@ -107,6 +107,8 @@ class LLMSettings(_Section):
 
 
 class RagSettings(_Section):
+    # Preserve the complete answer schema and verification in both expression styles.
+    answer_style: Literal["full", "concise"] = "full"
     allow_clarification: bool = True
     llm_rewrite: bool = False
     # Turn the analyzer's single needed document kind into a hard retrieval filter. Off: on

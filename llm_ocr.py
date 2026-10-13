@@ -4,6 +4,7 @@ import os
 import pypdf
 import re
 import docx
+from citation_guard import STATUTE_RE, unsupported_citations
 from html_sanitizer import sanitize_report_html
 
 DOCUMENT_ANALYSIS_MODES = {
@@ -166,6 +167,23 @@ def clean_html_response(report_html):
 
     return sanitize_report_html(report_html)
 
+UNSOURCED_NOTICE = ("<p>※ 확인 필요: {citations}은(는) 올리신 문서에 없는 조문·사건번호입니다. 이 분석은 법령을 검색하지 않고 "
+                    "작성되어 실제 법령과 다를 수 있습니다. 국가법령정보센터(law.go.kr)나 대법원 종합법률정보에서 직접 확인하세요.</p>")
+
+
+def flag_unsourced_citations(report_html, source_texts):
+    """Append a notice naming the statute articles and case numbers the report cites that the document does not contain.
+
+    This route has no legal search, and qwen3:4b cited an invented article in every legal review of the
+    2026-10-09 test (data/eval/reports/doc_analysis/synthetic-2026-10-09). A bare 제6조 is left alone: it is
+    how a report refers to the document's own clauses.
+    """
+    cited = unsupported_citations(re.sub(r"<[^>]+>", " ", report_html), source_texts)
+    bare = lambda citation: (match := STATUTE_RE.fullmatch(citation)) and not match.group("law")
+    missing = [citation for citation in cited if not bare(citation)]
+    return report_html + UNSOURCED_NOTICE.format(citations=", ".join(missing)) if missing else report_html
+
+
 def build_document_analysis_prompt(extracted_text, user_instructions, analysis_mode, question):
     mode_config = DOCUMENT_ANALYSIS_MODES.get(analysis_mode, DOCUMENT_ANALYSIS_MODES["report"])
     prompt_user_instructions = user_instructions if user_instructions else "No extra instructions provided."
@@ -237,6 +255,7 @@ def analyze_document(file_path, file_extension, user_instructions, llm, prompt_t
         ai_response = llm.invoke(formatted_prompt_messages)
         report_html = ai_response.content if hasattr(ai_response, 'content') else str(ai_response)
         report_html = clean_html_response(report_html)
+        report_html = flag_unsourced_citations(report_html, [extracted_text, user_instructions, question])
         
         result = {
             "report_html": report_html,
