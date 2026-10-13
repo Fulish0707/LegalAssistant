@@ -11,6 +11,7 @@
     extra: [],
     questions: [],   /* 최신 답변이 사용자에게 묻는 질문 — /chat final_response.questions */
     answering: '',   /* 사용자가 답하려고 고른 질문 */
+    pinned: null,    /* 이 상담에 붙인 판례 — {chunk_id, title}. 매 답변의 근거 맨 앞에 들어간다 */
     conversation: 0, /* 열려 있는 상담 번호 — /get_initial_state.conversation */
     conversations: []/* 질문이 있는 상담 목록, 최신순 — {id, title, started} */
   };
@@ -106,6 +107,11 @@
 
   <div style="flex:none;padding:10px 30px 12px;background:#fff;border-top:1px solid #e6e3dd">
     <div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:8px">
+      ${P.pinned ? `
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:10px;background:#e6f0f0;font-size:12px;color:#3d4348">
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">붙인 판례: <b style="font-weight:600">${esc(P.pinned.title)}</b> · 검색에서 고른 대목을 매 답변의 근거에 넣습니다</span>
+        <button class="lc-link" data-act="detachCase" style="flex:none;border:0;background:transparent;font-size:11.5px;color:${a};cursor:pointer">떼기</button>
+      </div>` : ''}
       ${P.answering ? `
       <div style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:10px;background:#f4f1ea;font-size:12px;color:#3d4348">
         <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">답하는 질문: ${esc(P.answering)}</span>
@@ -206,6 +212,7 @@
     LC.SOURCES = sourceCards(st.sources);
     P.extra = (st.chat_history || []).map(m => ({ role: m.role === 'user' ? 'user' : 'agent', text: m.content }));
     P.conversation = st.conversation || 0;
+    P.pinned = st.case || null;
     P.conversations = st.conversations || [];
   }
 
@@ -216,6 +223,19 @@
       applyState(await r.json());
     } catch (err) {
       console.error('Initial state error:', err);
+    }
+    LC.pinThread = true;
+    LC.render();
+  }
+
+  /* 판례 검색에서 고른 판례를 지금 상담에 붙이거나(chunkId) 뗀다(null). 입력 중인 글은 그대로 둔다 */
+  async function attachCase(chunkId, title){
+    try {
+      const r = await fetch('/conversations/case', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chunk_id: chunkId, title: title }) });
+      if (!r.ok) throw new Error(r.statusText);
+      applyState(await r.json());
+    } catch (err) {
+      console.error('Case attach error:', err);
     }
     LC.pinThread = true;
     LC.render();
@@ -252,6 +272,7 @@
       prompt: k => { P.draft = k; setTimeout(() => { const el = document.getElementById('userInput'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 0); },
       answer: k => { P.answering = k; setTimeout(() => { const el = document.getElementById('userInput'); if (el) el.focus(); }, 0); },
       cancelAnswer: () => { P.answering = ''; },
+      detachCase: () => { attachCase(null); return false; },
       easier: () => { P.tone = '쉬운 말'; P.draft = '위 내용을 더 쉽게 설명해 주세요.'; },
       newCase: () => {
         openConversation('/conversations/new');
@@ -268,7 +289,8 @@
       upload: () => { const f = document.getElementById('fileUpload'); if (f) f.click(); return false; }
     },
     init: () => {
-      const ask = new URLSearchParams(location.search).get('ask');
+      const params = new URLSearchParams(location.search);
+      const ask = params.get('ask'), chosen = params.get('case');
       if (ask) P.draft = ask + ' 판례가 제 사건에도 적용될 수 있나요?';
 
       document.addEventListener('input', (e) => {
@@ -290,7 +312,9 @@
         if (e.target.id === 'fileUpload' && e.target.files.length) LC.uploadFile(e.target.files[0]);
       });
 
-      fetchInitialState();
+      /* 판례 검색에서 넘어왔으면 그 판례를 이 상담에 붙인다. 주소에서 지워 두어 새로고침이 다시 붙이지 않게 한다 */
+      if (chosen) { attachCase(chosen, ask || ''); history.replaceState(null, '', location.pathname); }
+      else fetchInitialState();
     }
   });
 })();

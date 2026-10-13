@@ -80,8 +80,8 @@ def test_chat_endpoint_round_trip(indexed):
     # whichever way the verifier decides on the grounded answer.
     plain = LegalAnswer(summary="일반적인 안내입니다.", analysis="일반적인 절차만 설명합니다.", confidence=Confidence.low)
     model = FakeChatModel({
-        "QueryAnalysis": [QueryAnalysis(issues=["보증금 반환"], keywords=["임차권등기명령"]), QueryAnalysis()],
-        "LegalAnswer": [_answer(), plain, plain, plain],
+        "QueryAnalysis": [QueryAnalysis(issues=["보증금 반환"], keywords=["임차권등기명령"]), QueryAnalysis(), QueryAnalysis()],
+        "LegalAnswer": [_answer(), plain, plain, plain, plain, plain, plain],
     })
     client = _client(indexed, model)
     body = client.post("/v1/chat", json={"message": "임차권등기명령 신청서에 적어야 하는 사항은?"}).json()
@@ -89,6 +89,10 @@ def test_chat_endpoint_round_trip(indexed):
     assert body["evidence"]["items"][0]["source_id"] == "S1" and body["verification"]["ok"] is True
     assert body["answer"]["citations"][0]["source_id"] == "S1"
     assert "trace" not in body
+    chosen = client.post("/v1/search", json={"query": "손해배상 책임", "k": 10}).json()["hits"][-1]["chunk"]["id"]
+    asked = client.post("/v1/chat", json={"message": "이 판례가 제 사건에도 적용될 수 있나요?", "pinned_chunk_ids": [chosen, "no-such-chunk"]}).json()
+    assert asked["evidence"]["items"][0]["chunk_id"] == chosen
+    assert client.post("/v1/chat", json={"message": "x", "pinned_chunk_ids": ["a", "b", "c"]}).status_code == 422
     traced = client.post("/v1/chat", json={"message": "후속 질문", "conversation_id": body["conversation_id"], "include_trace": True}).json()
     assert traced["trace"]["policy_action"] in {"accept", "strip"} and traced["conversation_id"] == body["conversation_id"]
 

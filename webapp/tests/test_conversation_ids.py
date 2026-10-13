@@ -120,6 +120,43 @@ class ConsultationListTests(ChatStreamBase):
         self.assertEqual(other.get("/get_initial_state").json["conversations"], [])
         self.assertEqual(owner.post("/conversations/select", json={"id": 7}).status_code, 404)
 
+    CASE = {"chunk_id": "서울중앙지방법원-2023가단5103393_chunk_0001", "title": "서울중앙지방법원 2023가단5103393"}
+
+    def pinned(self, client, message="이 판례가 제 사건에도 적용될 수 있나요?"):
+        client.post("/chat", json={"message": message})
+        with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
+                patch.object(self.app_module.legal_backend, "ask", Mock(return_value={"kind": "rejected"})) as backend:
+            client.get("/chat", query_string={"message": message}).get_data()
+        return list(backend.call_args.kwargs["pinned"])
+
+    def test_an_attached_case_goes_with_every_turn_of_its_consultation_only(self):
+        client = self.app_module.app.test_client()
+
+        self.assertEqual(client.post("/conversations/case", json=self.CASE).json["case"], self.CASE)
+        self.assertEqual(self.pinned(client), [self.CASE["chunk_id"]])
+        self.assertEqual(self.pinned(client, "그럼 제 경우에는 어떤가요?"), [self.CASE["chunk_id"]])
+
+        self.assertIsNone(client.post("/conversations/new").json["case"])
+        self.assertEqual(self.pinned(client, "부당해고를 당했어요"), [])
+
+        first = client.get("/get_initial_state").json["conversations"][-1]["id"]
+        self.assertEqual(client.post("/conversations/select", json={"id": first}).json["case"], self.CASE)
+
+    def test_a_detached_case_no_longer_goes_with_the_turn(self):
+        client = self.app_module.app.test_client()
+        client.post("/conversations/case", json=self.CASE)
+
+        self.assertIsNone(client.post("/conversations/case", json={"chunk_id": None}).json["case"])
+        self.assertEqual(self.pinned(client), [])
+
+    def test_a_case_attached_before_a_server_start_is_gone_after_it(self):
+        client = self.app_module.app.test_client()
+        client.post("/conversations/case", json=self.CASE)
+
+        with patch.object(self.app_module, "SERVER_START", "restarted"):
+            self.assertIsNone(client.get("/get_initial_state").json["case"])
+            self.assertEqual(self.pinned(client), [])
+
     def test_a_server_start_forgets_every_consultation(self):
         """`python webapp/app.py` calls this before it serves. The browser's cookie outlives the
         start, so the backend conversation must change too."""

@@ -39,12 +39,15 @@ class LegalBackendUnavailable(Exception):
     """The service could not be reached or did not return a chat response."""
 
 
-def ask(base_url, message, conversation_id, documents=()):
-    """One chat turn. `documents` are passages of the user's own files: [{name, text, ...}]."""
+def ask(base_url, message, conversation_id, documents=(), pinned=()):
+    """One chat turn. `documents` are passages of the user's own files: [{name, text, ...}].
+    `pinned` are ids of passages the user chose to ask about; the service puts them first in the evidence."""
     endpoint = base_url.rstrip("/") + "/v1/chat"
     payload = {"message": message, "conversation_id": conversation_id}
     if documents:
         payload["user_documents"] = [{"name": document["name"], "text": document["text"]} for document in documents]
+    if pinned:
+        payload["pinned_chunk_ids"] = list(pinned)
     try:
         response = httpx.post(endpoint, json=payload, timeout=TIMEOUT)
         response.raise_for_status()
@@ -138,7 +141,10 @@ def _kind(item):
 
 
 def _label(item):
-    header = item.get("header") or {}
+    header = dict(item.get("header") or {})
+    named = _COURT_ID.match(item.get("document_id") or "")
+    if named and header.get("Type") == "Case" and not header.get("Case number"):
+        header.update({"Court": header.get("Court") or named["court"], "Case number": named["number"]})
     label = " ".join(dict.fromkeys(header[field] for field in _LABEL_FIELDS if header.get(field)))
     # Chunks often start mid-sentence, so the text is no substitute for a missing name.
     return label or f"{_kind(item)} (법원·사건번호 미기재)"

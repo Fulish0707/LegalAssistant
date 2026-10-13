@@ -15,6 +15,9 @@ class ChatRequest(BaseModel):
     include_trace: bool = False
     # Passages of the caller's own files that bear on this message; the service holds no user files.
     user_documents: list[UserDocument] = Field(default_factory=list, max_length=3)
+    # Passages the user chose to ask about, such as a case from a search: they lead the evidence
+    # and retrieval fills the rest. An id no corpus holds is ignored.
+    pinned_chunk_ids: list[str] = Field(default_factory=list, max_length=2)
 
 
 class SearchRequest(BaseModel):

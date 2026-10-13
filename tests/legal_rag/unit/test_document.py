@@ -1,5 +1,5 @@
 from legal_rag.embeddings import FakeEmbedder
-from legal_rag.retrieval.document import find_document, full_text
+from legal_rag.retrieval.document import find_document, full_text, pinned_chunks
 from legal_rag.retrieval.sparse import BM25Stats
 from legal_rag.retrieval.store import VectorStore
 from legal_rag.retrieval.tokenizer import RegexTokenizer
@@ -57,3 +57,24 @@ def test_the_document_is_read_from_the_store_in_order_and_only_from_its_own_corp
         assert find_document([store], "no-such-chunk") is None
     finally:
         store.close()
+
+
+class OneChunkStore:
+    def __init__(self, *chunks):
+        self.held = {chunk.id: chunk for chunk in chunks}
+
+    def chunk(self, chunk_id):
+        return self.held.get(chunk_id)
+
+
+def test_a_pinned_case_named_only_in_its_document_id_gets_its_number():
+    civil = piece(0, "판단", doc="서울중앙지방법원-2023가단5103393")
+    numbered = piece(0, "판단", doc="criminal::judgment::1").model_copy(update={"metadata": ChunkMetadata(
+        dataset="f", corpus_version="v", case_number="84도2229")})
+    plain = piece(0, "제1조", doc="statute:abc")
+
+    pinned = pinned_chunks([OneChunkStore(plain), OneChunkStore(civil, numbered)], [civil.id, "no-such-chunk", numbered.id, plain.id])
+
+    assert [chunk.id for chunk in pinned] == [civil.id, numbered.id, plain.id]
+    assert [chunk.metadata.case_number for chunk in pinned] == ["2023가단5103393", "84도2229", None]
+    assert pinned[0].text == civil.text

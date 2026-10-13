@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from legal_rag.schemas import Chunk
+from legal_rag.textutil.refs import CASE_RE
 
 from .store import VectorStore
 
@@ -28,6 +29,24 @@ def full_text(chunks: list[Chunk], cited_chunk_id: str) -> tuple[str, int, int]:
         if chunk.id == cited_chunk_id:
             cited = (start, len(text))
     return text, *cited
+
+
+def pinned_chunks(stores: list[VectorStore], chunk_ids: list[str]) -> list[Chunk]:
+    """The passages a user chose to ask about, for a turn's evidence; an id no corpus holds is skipped.
+
+    A case that keeps its number only in its document id (서울중앙지방법원-2023가단5103393) gets the
+    number in its metadata, so the evidence header names the case the question names.
+    """
+    pinned = []
+    for chunk_id in chunk_ids:
+        chunk = next((found for store in stores if (found := store.chunk(chunk_id)) is not None), None)
+        if chunk is None:
+            continue
+        number = CASE_RE.search(chunk.document_id)
+        if number and not chunk.metadata.case_number:
+            chunk = chunk.model_copy(update={"metadata": chunk.metadata.model_copy(update={"case_number": number.group(0)})})
+        pinned.append(chunk)
+    return pinned
 
 
 def find_document(stores: list[VectorStore], chunk_id: str) -> tuple[Chunk, str, int, int] | None:
