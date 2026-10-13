@@ -202,7 +202,7 @@
         <div style="font-size:13px;line-height:1.75;color:#3d4348;text-wrap:pretty;white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden">${esc(c.quote)}</div>
         <div style="display:flex;gap:14px">
           <button class="lc-link" data-act="viewCase" data-key="${esc(c.chunk_id)}" style="background:transparent;border:0;padding:0;font-size:11.5px;color:${a};cursor:pointer">전문 보기</button>
-          <a class="lc-link" href="chatbot.html?ask=${encodeURIComponent(c.title)}" style="font-size:11.5px;color:${a}">이 판례로 상담 이어가기</a>
+          <a class="lc-link" href="chatbot.html?ask=${encodeURIComponent(c.title)}&case=${encodeURIComponent(c.chunk_id)}" style="font-size:11.5px;color:${a}">이 판례로 상담 이어가기</a>
         </div>
       </div>`).join('');
   }

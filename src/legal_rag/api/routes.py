@@ -7,7 +7,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 
-from legal_rag.retrieval.document import find_document
+from legal_rag.retrieval.document import find_document, pinned_chunks
 from legal_rag.retrieval.labels import document_labels
 from legal_rag.retrieval.laws import articles, compact_names, statutes_cited
 from legal_rag.schemas import ChatResponse, CitationKind, RetrievalFilters
@@ -99,8 +99,12 @@ async def law(request: Request, name: str = Query(min_length=1, max_length=200))
 async def chat(body: ChatRequest, request: Request) -> ChatResponse:
     orchestrator = request.app.state.get_orchestrator()
     conversation_id = body.conversation_id or uuid.uuid4().hex
+    pinned = []
+    if body.pinned_chunk_ids:
+        stores = list(_stores(request.app.state.get_retriever()).values())
+        pinned = await run_in_threadpool(pinned_chunks, stores, body.pinned_chunk_ids)
     response = await run_in_threadpool(orchestrator.handle, body.message, conversation_id=conversation_id,
-                                         user_documents=body.user_documents)
+                                         user_documents=body.user_documents, pinned=pinned)
     if not body.include_trace:
         response = response.model_copy(update={"trace": None})
     return response

@@ -266,12 +266,22 @@ def _legal_conversation_id():
     return f"{session['user_id']}-{SERVER_START}-{_conversation()}"
 
 
+def _case_key():
+    return f"{SERVER_START}-{_conversation()}"
+
+
+def _pinned_case():
+    """The case attached to the open consultation, or None: {chunk_id, title}."""
+    return (session.get("cases") or {}).get(_case_key())
+
+
 def _chat_state():
     """What the chat page shows: the open consultation's messages, the source cards of its last
     answer, and the list of all consultations."""
     user_id = session["user_id"]
     return {"chat_history": get_chat_history_from_db(user_id, _conversation()),
             "sources": get_latest_sources_from_db(user_id, _conversation()),
+            "case": _pinned_case(),
             "conversation": _conversation(),
             "conversations": get_conversations_from_db(user_id)}
 
@@ -332,7 +342,11 @@ def _generate_legal_response_stream(user_input):
             documents = _case_documents(user_input)
             if documents:
                 yield _sse({'type': 'thought', 'content': f'사건 자료 {len(documents)}건 참고'})
-            body = legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id(), documents)
+            case = _pinned_case()
+            if case:
+                yield _sse({'type': 'thought', 'content': f"붙인 판례 참고: {case['title']}"})
+            body = legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id(), documents,
+                                     pinned=[case["chunk_id"]] if case else ())
             chat_response, sources = legal_backend.render(body, documents)
             questions = legal_backend.questions(body)
             yield _sse({'type': 'thought', 'content': f'근거 {len(sources)}건 확인'})
@@ -518,6 +532,28 @@ def new_conversation():
     held = [conversation["id"] for conversation in get_conversations_from_db(session["user_id"])]
     if _conversation() in held:  # an open consultation that is still empty is reused
         session["conversation_epoch"] = max(held) + 1
+    return jsonify(_chat_state())
+
+
+# A browser keeps this many attached cases in its cookie; each is about 300 bytes.
+PINNED_CASES_KEPT = 8
+
+
+@app.route('/conversations/case', methods=['POST'])
+def attach_case():
+    """Attach a case to the open consultation, or detach it with no chunk_id.
+
+    The service then puts that passage of the case first in the evidence of every turn of the
+    consultation; without it, a question that names a case is answered from whatever a search finds.
+    """
+    data = request.get_json(silent=True) or {}
+    chunk_id, title = data.get("chunk_id"), data.get("title")
+    # Entries of earlier server starts point at consultations that no longer exist.
+    cases = {key: value for key, value in (session.get("cases") or {}).items() if key.startswith(SERVER_START + "-")}
+    cases.pop(_case_key(), None)
+    if isinstance(chunk_id, str) and chunk_id.strip():
+        cases[_case_key()] = {"chunk_id": chunk_id.strip()[:512], "title": str(title or "").strip()[:200]}
+    session["cases"] = dict(list(cases.items())[-PINNED_CASES_KEPT:])
     return jsonify(_chat_state())
 
 

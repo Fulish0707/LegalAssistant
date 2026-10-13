@@ -112,6 +112,33 @@ class DocumentTests(unittest.TestCase):
                 legal_backend.document("http://legal:8000", "c1")
 
 
+class PinnedPassageTests(unittest.TestCase):
+    def test_chosen_passages_are_sent_only_when_there_are_any(self):
+        sent = []
+
+        def handler(request):
+            sent.append(json.loads(request.content))
+            return httpx.Response(200, json=ANSWER)
+
+        with served(handler):
+            legal_backend.ask("http://legal:8000", "이 판례가 제 사건에도 적용되나요?", "c1", pinned=["서울중앙지방법원-2023가단5103393_chunk_0001"])
+            legal_backend.ask("http://legal:8000", "보증금 문의", "c1")
+
+        self.assertEqual(sent[0]["pinned_chunk_ids"], ["서울중앙지방법원-2023가단5103393_chunk_0001"])
+        self.assertNotIn("pinned_chunk_ids", sent[1])
+
+    def test_a_case_card_takes_its_number_from_the_document_id_when_the_header_has_none(self):
+        """The civil corpus leaves the header's case number empty; the card must still name the case asked about."""
+        item = {"source_id": "S1", "chunk_id": "c", "document_id": "서울중앙지방법원-2023가단5103393", "document_type": "judgment",
+                "header": {"Type": "Case", "Court": "서울중앙지방법원", "Case number": ""}, "text": "판단", "score": 1.0}
+        body = {"kind": "answer", "answer": {"summary": "적용될 수 있습니다(S1).", "analysis": "", "citations": []},
+                "evidence": {"items": [item]}}
+
+        _, sources = legal_backend.render(body)
+
+        self.assertEqual(sources[0]["source"], "서울중앙지방법원 2023가단5103393")
+
+
 class LawTests(unittest.TestCase):
     def fetched(self, handler):
         client = httpx.Client(transport=httpx.MockTransport(handler))
