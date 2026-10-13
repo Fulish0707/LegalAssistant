@@ -157,6 +157,33 @@ class ConsultationListTests(ChatStreamBase):
             self.assertIsNone(client.get("/get_initial_state").json["case"])
             self.assertEqual(self.pinned(client), [])
 
+    def test_deleting_the_open_consultation_removes_only_it_and_opens_an_empty_one(self):
+        client, other = self.app_module.app.test_client(), self.app_module.app.test_client()
+        self.ask(other, "다른 브라우저의 상담")
+        first_id = self.ask(client, "전세 보증금을 못 받았어요")
+        client.post("/conversations/new")
+        self.ask(client, "부당해고를 당했어요", backend_answer("구제신청을 할 수 있습니다(S1).", items=[STATUTE_ITEM]))
+        client.post("/conversations/case", json=self.CASE)
+
+        state = client.post("/conversations/delete").json
+
+        self.assertEqual((state["chat_history"], state["sources"], state["case"]), ([], [], None))
+        self.assertEqual([c["title"] for c in state["conversations"]], ["전세 보증금을 못 받았어요"])
+        self.assertEqual(len(other.get("/get_initial_state").json["chat_history"]), 2)
+        # The deleted consultation's number is not given out again: the backend still remembers its turns.
+        self.assertNotIn(self.ask(client, "새로 묻습니다"), {first_id, first_id[:-1] + "1"})
+        self.assertEqual(len(client.get("/get_initial_state").json["conversations"]), 2)
+
+    def test_deleting_an_empty_consultation_changes_nothing_that_is_stored(self):
+        client = self.app_module.app.test_client()
+        self.ask(client, "전세 보증금을 못 받았어요")
+        client.post("/conversations/new")
+
+        state = client.post("/conversations/delete").json
+
+        self.assertEqual([c["title"] for c in state["conversations"]], ["전세 보증금을 못 받았어요"])
+        self.assertEqual(state["chat_history"], [])
+
     def test_a_server_start_forgets_every_consultation(self):
         """`python webapp/app.py` calls this before it serves. The browser's cookie outlives the
         start, so the backend conversation must change too."""
