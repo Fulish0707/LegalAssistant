@@ -19,7 +19,7 @@
 
 ## T3 — 보고와 보존 감사
 
-- [x] docs/summary-first-2026-10-12.md에 수치·필드 순서·상대 오류·채택 여부·제한을 기록한다.
+- [x] docs/experiments/summary-first-2026-10-12.md에 수치·필드 순서·상대 오류·채택 여부·제한을 기록한다.
 - [x] audit_study.py로 baseline·이전 상태·외부 파일·manifest·재생·검토·지표·서버 종료·root 추가3문서를 확인한다.
 - [x] GPU 정리와 canonical T1–T3 완료를 확인한다. 시험 완료와 후보 채택을 구분한다.
 

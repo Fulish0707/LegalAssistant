@@ -47,5 +47,5 @@ Files: `src/legal_rag/evaluation/source_quotes.py`, `tests/legal_rag/unit/test_s
 ## T4. 제한된 통합과 보고
 
 - [x] P1 통과 파일만 root의 기준 해시를 확인한 뒤 복사한다. 기존 변경은 덮어쓰지 않는다. P2 후보는 worktree에만 보관한다.
-- [x] 한국어 보고서 `docs/citation-latency-2026-10-11.md`에 검증·pilot 결과와 한계를 기록한다.
+- [x] 한국어 보고서 `docs/experiments/citation-latency-2026-10-11.md`에 검증·pilot 결과와 한계를 기록한다.
 - [x] root 기존 파일·prior state·HEAD·stage·고정 실험 hash·문서 링크와 path audit를 확인한다. 각 완료 상태는 관찰된 evidence로 전이한다.

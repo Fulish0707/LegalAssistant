@@ -98,9 +98,9 @@ flowchart TB
 
 ## 근거 파일
 
-- [설계](superpowers/specs/2026-10-12-semantic-verification-design.md), [실행 계획](superpowers/plans/2026-10-12-semantic-verification.md)
-- [고정 입력과 라벨](../data/eval/reports/chat_pipeline/semantic-verification-2026-10-12/inputs.jsonl), [측정 계획](../data/eval/reports/chat_pipeline/semantic-verification-2026-10-12/PREREG.json)
-- [측정 결과](../data/eval/reports/chat_pipeline/semantic-verification-2026-10-12/results.jsonl), [지표와 재검증](../data/eval/reports/chat_pipeline/semantic-verification-2026-10-12/metrics.json)
-- [AI 검토 기록](../data/eval/reports/chat_pipeline/semantic-verification-2026-10-12/review.jsonl), [코드·입력 해시](../data/eval/reports/chat_pipeline/semantic-verification-2026-10-12/manifest.json)
+- [설계](../superpowers/specs/2026-10-12-semantic-verification-design.md), [실행 계획](../superpowers/plans/2026-10-12-semantic-verification.md)
+- [고정 입력과 라벨](../../data/eval/reports/chat_pipeline/semantic-verification-2026-10-12/inputs.jsonl), [측정 계획](../../data/eval/reports/chat_pipeline/semantic-verification-2026-10-12/PREREG.json)
+- [측정 결과](../../data/eval/reports/chat_pipeline/semantic-verification-2026-10-12/results.jsonl), [지표와 재검증](../../data/eval/reports/chat_pipeline/semantic-verification-2026-10-12/metrics.json)
+- [AI 검토 기록](../../data/eval/reports/chat_pipeline/semantic-verification-2026-10-12/review.jsonl), [코드·입력 해시](../../data/eval/reports/chat_pipeline/semantic-verification-2026-10-12/manifest.json)
 
-최종 [보존·범위 검사](../data/eval/reports/chat_pipeline/semantic-verification-2026-10-12/final-audit.json)는 PASS다. Git HEAD와 스테이징도 보존됐다. 격리 서버 4개가 모두 종료됐고 기존 Ollama 서버의 모델 목록과 GPU 프로세스 목록은 비어 있었다.
+최종 [보존·범위 검사](../../data/eval/reports/chat_pipeline/semantic-verification-2026-10-12/final-audit.json)는 PASS다. Git HEAD와 스테이징도 보존됐다. 격리 서버 4개가 모두 종료됐고 기존 Ollama 서버의 모델 목록과 GPU 프로세스 목록은 비어 있었다.

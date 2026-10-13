@@ -37,7 +37,7 @@
 ## T4 — 회귀·보고·감사
 
 - [x] 기존환경에서 PYTHONPATH=src .venv/bin/python -m pytest tests/legal_rag -q를 새로 실행한다. 독립 /tmp/core-first-web 환경으로 표시경계 tests/test_chat_streaming.py,tests/test_legal_backend.py,tests/test_citation_guard.py,tests/test_document_citation_notice.py를 실행한다. 웹 전체 통과로 표현하지 않는다.
-- [x] docs/partial-repair-2026-10-12.md에 구조도·수치·적용분기·실패·범위·AI검토·채택판정을 기록한다.
+- [x] docs/experiments/partial-repair-2026-10-12.md에 구조도·수치·적용분기·실패·범위·AI검토·채택판정을 기록한다.
 - [x] baseline/manifest/회귀/리뷰/지표/요청재생/서버종료/기존파일/새3문서를 감사한다. root와이전상태를 유지하고 새canonical태스크만 완료한다.
 
 [설계](../specs/2026-10-12-partial-repair-design.md)

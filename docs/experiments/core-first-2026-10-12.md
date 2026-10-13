@@ -101,8 +101,8 @@ flowchart TB
 
 ## 8. 증거
 
-[사전 설계](superpowers/specs/2026-10-12-core-first-design.md) · [실행 계획](superpowers/plans/2026-10-12-core-first.md)
+[사전 설계](../superpowers/specs/2026-10-12-core-first-design.md) · [실행 계획](../superpowers/plans/2026-10-12-core-first.md)
 
-[시간·호출 지표](../data/eval/reports/chat_pipeline/core-first-2026-10-12/metrics.json) · [전체 검토](../data/eval/reports/chat_pipeline/core-first-2026-10-12/review.jsonl) · [품질 결정](../data/eval/reports/chat_pipeline/core-first-2026-10-12/quality.json)
+[시간·호출 지표](../../data/eval/reports/chat_pipeline/core-first-2026-10-12/metrics.json) · [전체 검토](../../data/eval/reports/chat_pipeline/core-first-2026-10-12/review.jsonl) · [품질 결정](../../data/eval/reports/chat_pipeline/core-first-2026-10-12/quality.json)
 
-[호출 재생](../data/eval/reports/chat_pipeline/core-first-2026-10-12/measurement-verification.json) · [캐시 대응](../data/eval/reports/chat_pipeline/core-first-2026-10-12/cache-usage.json) · [새 회귀](../data/eval/reports/chat_pipeline/core-first-2026-10-12/regression.json) · [기존 live 실패](../data/eval/reports/chat_pipeline/core-first-2026-10-12/existing-web-failure.json) · [최종 보존 감사](../data/eval/reports/chat_pipeline/core-first-2026-10-12/final-audit.json)
+[호출 재생](../../data/eval/reports/chat_pipeline/core-first-2026-10-12/measurement-verification.json) · [캐시 대응](../../data/eval/reports/chat_pipeline/core-first-2026-10-12/cache-usage.json) · [새 회귀](../../data/eval/reports/chat_pipeline/core-first-2026-10-12/regression.json) · [기존 live 실패](../../data/eval/reports/chat_pipeline/core-first-2026-10-12/existing-web-failure.json) · [최종 보존 감사](../../data/eval/reports/chat_pipeline/core-first-2026-10-12/final-audit.json)

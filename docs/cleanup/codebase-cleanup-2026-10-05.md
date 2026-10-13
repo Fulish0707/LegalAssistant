@@ -26,7 +26,7 @@
 
 ## 문서 정리
 
-- [평가 문서 목차](evaluation-index.md)를 추가하고 README에서 연결했다.
+- [평가 문서 목차](../evaluation-index.md)를 추가하고 README에서 연결했다.
 - 관련성 prompt 전문·검토는 과거 기록으로 표시하고 현재 corpus routing 안내로 연결했다.
 - Full QLoRA 안내에서 공통 환경 설치 절을 연결했다. pilot/full 데이터와 adapter 평가 조건은 각 안내에 유지했다.
 - Golden-answer 안내에 유지되는 helper와 새 출력 디렉터리 사용법을 반영했다.

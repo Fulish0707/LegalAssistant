@@ -121,8 +121,8 @@ temperature0 후보의 입력·속도·상대 품질 기준을 함께 적용해 
 
 ## 증거
 
-- [사전 설계](superpowers/specs/2026-10-11-temperature-zero-design.md), [실행 계획](superpowers/plans/2026-10-11-temperature-zero.md)
-- [지표](../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/metrics.json), [측정 원본](../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/results.jsonl), [제외 예열](../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/warmup.jsonl)
-- [전체 검토](../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/review.jsonl), [품질 판정](../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/quality.json), [내용 비교](../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/content-comparison.json), [회차 간 비교](../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/round-stability.json)
-- [정책 재생](../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/measurement-verification.json), [캐시 대조](../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/cache-usage.json), [회귀 바인딩](../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/regression.json)
-- [실제 엔진](../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/engine-confirmations.jsonl), [서버 종료](../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/lifecycle.jsonl), [최종 감사](../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/final-audit.json)
+- [사전 설계](../superpowers/specs/2026-10-11-temperature-zero-design.md), [실행 계획](../superpowers/plans/2026-10-11-temperature-zero.md)
+- [지표](../../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/metrics.json), [측정 원본](../../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/results.jsonl), [제외 예열](../../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/warmup.jsonl)
+- [전체 검토](../../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/review.jsonl), [품질 판정](../../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/quality.json), [내용 비교](../../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/content-comparison.json), [회차 간 비교](../../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/round-stability.json)
+- [정책 재생](../../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/measurement-verification.json), [캐시 대조](../../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/cache-usage.json), [회귀 바인딩](../../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/regression.json)
+- [실제 엔진](../../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/engine-confirmations.jsonl), [서버 종료](../../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/lifecycle.jsonl), [최종 감사](../../data/eval/reports/chat_pipeline/temperature-zero-2026-10-11/final-audit.json)

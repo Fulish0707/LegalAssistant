@@ -21,7 +21,7 @@
 
 - `integration/test_import_processed.py`의 저장소 루트 경로를 `parents[2]`에서 `parents[3]`으로 수정했다.
 - 빈 `tests/legal_rag/llm/__init__.py`를 제거했다.
-- 루트 `tests/test_*.py`(Flask 앱 테스트)는 실행 환경이 다르므로 옮기지 않았다.
+- 루트 `tests/test_*.py`(Flask 앱 테스트)는 아래 `webapp/` 이동에서 함께 옮겼다.
 
 ## 테스트 파일 이름 변경
 
@@ -64,6 +64,40 @@
 - `env.yml`: `docs/local-qlora.md`가 참조하고 기본 shell 환경(`llm`)을 기술하므로 유지했다.
 - `google_api.ipynb`: 10-04 조사에서 보관 후보로 표시했다. 수동 사용 여부를 확인하지 않았으므로 유지했다.
 
+## Flask 웹 앱 폴더
+
+루트의 Flask 앱을 `webapp/`으로 옮겼다. 백엔드(`src/legal_rag/`)와 웹 앱은 실행 환경이 다른 두 애플리케이션이다.
+
+| 이전 위치 | 현재 위치 |
+|---|---|
+| 루트의 `app.py`, `legal_backend.py`, `citation_guard.py`, `langchain_config.py`, `llm_model.py`, `llm_ocr.py`, `llm_prompt.py`, `quota.py`, `html_sanitizer.py` | `webapp/` |
+| `templates/`, `static/`, `requirements.txt` | `webapp/` |
+| `tests/test_*.py` 17개 | `webapp/tests/` |
+
+- 실행 명령은 저장소 루트에서 `python webapp/app.py`다. 테스트 명령은 `python -m pytest webapp/tests -k 'not Live' -q`다.
+- 데이터 폴더(`sqlite_db/`, `uploads/`, `chroma_db/`)는 루트에 유지했다. `APP_STATE_DB`와 `RAG_PERSIST_DIR`의 상대 경로, 기본값과 업로드 폴더는 실행 위치가 아닌 저장소 루트를 기준으로 한다. 루트에서 실행하면 이전과 같은 파일을 사용한다.
+- 앱 모듈 사이의 import와 테스트 코드는 수정하지 않았다. `webapp/`은 패키지가 아니며 `webapp/tests/`는 `tests` 패키지다.
+- `scripts/eval_chat_pipeline.py`는 `citation_guard`를 `webapp/`에서 가져온다.
+- 정적 파일 응답을 확인하는 테스트 1개를 `test_health_reporting.py`에 추가했다.
+- `webapp/tests`와 `tests/legal_rag`는 최상위 패키지 이름이 같으므로 한 pytest 실행에서 함께 수집할 수 없다. 두 테스트는 이전에도 서로 다른 Python 환경에서 실행했다.
+- `data/eval/reports/`의 과거 실행본 Python 5개는 루트의 웹 앱 모듈을 import한다. 당시 snapshot이므로 수정하지 않았다.
+- worktree 3개(`local-multimodal`, `rag-recall-evaluation`, `security-2026-10-07`)에 이동한 파일의 미커밋 변경이 있다.
+
+## 문서 폴더
+
+`docs/` 최상위에는 현재 안내만 둔다. 과거 기록은 두 폴더로 옮겼다. 문서 내용은 수정하지 않았다.
+
+| 폴더 | 옮긴 파일 |
+|---|---|
+| `docs/experiments/` | 2026-10-10 ~ 10-12 시험 결과 14개, 관련성 judge prompt 기록 2개, 미채택 시험 정리 기록 |
+| `docs/cleanup/` | 정리 조사·실행 기록 4개(이 문서 포함)와 JSON 목록 4개 |
+
+- `README.md`와 `docs/`의 Markdown 상대 링크 195개를 새 위치에 맞게 수정했다. 이동 전후 모두 깨진 링크는 0개다.
+- `docs/superpowers/`의 계획·설계가 본문에 적은 시험 결과 경로를 새 위치로 수정했다.
+- `docs/cleanup/`의 10-04 조사와 JSON 목록의 본문 경로는 당시 snapshot이므로 수정하지 않았다.
+- [문서 목차](../README.md)를 추가했다.
+- Notion 페이지의 링크는 확인하지 않았다.
+
 ## scripts 추적 규칙
 
 `.gitignore`의 `scripts/*` 규칙과 예외 2개를 제거했다. 스크립트 35개가 이미 추적 대상이었고, 이 규칙은 새 파일만 숨겼다. 문서가 참조하는 `scripts/run_structural_all.sh`를 추적 대상에 추가했다.
@@ -96,6 +130,6 @@
 | `tests/legal_rag` (`.venv`) | 631 passed, 2 skipped | 631 passed, 2 skipped |
 | evaluation import 대상 확인 (함수 내부 import 포함) | — | 이름 339개 모두 확인 |
 | `scripts/*.py --help` | — | 33개 성공. conda 환경이 필요한 `probe_app_format.py`, `generate_sft_answers.py`는 실행하지 않음 |
-| Flask 앱 테스트 (anaconda) | 133 passed | 다시 실행하지 않음 |
+| Flask 앱 테스트 (anaconda) | 133 passed | evaluation 분리 후 133 passed. `webapp/` 이동 후 134 passed (정적 파일 테스트 1개 추가) |
 
-Flask 앱 테스트 파일은 변경하지 않았다. 정리 후 실행은 수행하지 못했으므로 통과 여부를 확인하지 않았다.
+`webapp/` 이동 후 별도 폴더의 스크립트에서 앱을 import하여 루트 `.env`가 적용되고 DB·업로드·Chroma 경로가 저장소 루트를 가리키는 것을 확인했다. 실제 서버 실행과 브라우저 화면은 확인하지 않았다.

@@ -17,20 +17,20 @@
 
 | 시험 공간 | 압축 파일 | 결과 문서 |
 |---|---|---|
-| `answer-recovery` | [answer-recovery.tar.gz](../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/answer-recovery.tar.gz) | [결과](answer-recovery-latency-2026-10-10.md) |
-| `citation-latency` | [citation-latency.tar.gz](../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/citation-latency.tar.gz) | [결과](citation-latency-2026-10-11.md) |
-| `context-budget` | [context-budget.tar.gz](../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/context-budget.tar.gz) | [결과](context-budget-2026-10-11.md) |
-| `core-first` | [core-first.tar.gz](../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/core-first.tar.gz) | [결과](core-first-2026-10-12.md) |
-| `evidence-dedup` | [evidence-dedup.tar.gz](../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/evidence-dedup.tar.gz) | [결과](evidence-dedup-2026-10-11.md) |
-| `first-pass-budget` | [first-pass-budget.tar.gz](../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/first-pass-budget.tar.gz) | [결과](first-pass-budget-2026-10-11.md) |
-| `kv-cache` | [kv-cache.tar.gz](../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/kv-cache.tar.gz) | [결과](kv-cache-2026-10-11.md) |
-| `partial-repair` | [partial-repair.tar.gz](../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/partial-repair.tar.gz) | [결과](partial-repair-2026-10-12.md) |
-| `prefill-batch` | [prefill-batch.tar.gz](../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/prefill-batch.tar.gz) | [결과](prefill-batch-2026-10-11.md) |
-| `recovery-fixed-failure` | [recovery-fixed-failure.tar.gz](../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/recovery-fixed-failure.tar.gz) | [결과](recovery-fixed-failure-2026-10-11.md) |
-| `semantic-verification` | [semantic-verification.tar.gz](../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/semantic-verification.tar.gz) | [결과](semantic-verification-2026-10-12.md) |
-| `summary-first` | [summary-first.tar.gz](../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/summary-first.tar.gz) | [결과](summary-first-2026-10-12.md) |
-| `temperature-zero` | [temperature-zero.tar.gz](../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/temperature-zero.tar.gz) | [결과](temperature-zero-2026-10-11.md) |
-| `verified-chat-latency` | [verified-chat-latency.tar.gz](../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/verified-chat-latency.tar.gz) | [결과](verified-chat-latency-2026-10-10.md) |
+| `answer-recovery` | [answer-recovery.tar.gz](../../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/answer-recovery.tar.gz) | [결과](answer-recovery-latency-2026-10-10.md) |
+| `citation-latency` | [citation-latency.tar.gz](../../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/citation-latency.tar.gz) | [결과](citation-latency-2026-10-11.md) |
+| `context-budget` | [context-budget.tar.gz](../../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/context-budget.tar.gz) | [결과](context-budget-2026-10-11.md) |
+| `core-first` | [core-first.tar.gz](../../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/core-first.tar.gz) | [결과](core-first-2026-10-12.md) |
+| `evidence-dedup` | [evidence-dedup.tar.gz](../../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/evidence-dedup.tar.gz) | [결과](evidence-dedup-2026-10-11.md) |
+| `first-pass-budget` | [first-pass-budget.tar.gz](../../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/first-pass-budget.tar.gz) | [결과](first-pass-budget-2026-10-11.md) |
+| `kv-cache` | [kv-cache.tar.gz](../../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/kv-cache.tar.gz) | [결과](kv-cache-2026-10-11.md) |
+| `partial-repair` | [partial-repair.tar.gz](../../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/partial-repair.tar.gz) | [결과](partial-repair-2026-10-12.md) |
+| `prefill-batch` | [prefill-batch.tar.gz](../../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/prefill-batch.tar.gz) | [결과](prefill-batch-2026-10-11.md) |
+| `recovery-fixed-failure` | [recovery-fixed-failure.tar.gz](../../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/recovery-fixed-failure.tar.gz) | [결과](recovery-fixed-failure-2026-10-11.md) |
+| `semantic-verification` | [semantic-verification.tar.gz](../../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/semantic-verification.tar.gz) | [결과](semantic-verification-2026-10-12.md) |
+| `summary-first` | [summary-first.tar.gz](../../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/summary-first.tar.gz) | [결과](summary-first-2026-10-12.md) |
+| `temperature-zero` | [temperature-zero.tar.gz](../../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/temperature-zero.tar.gz) | [결과](temperature-zero-2026-10-11.md) |
+| `verified-chat-latency` | [verified-chat-latency.tar.gz](../../data/eval/reports/chat_pipeline/unsuccessful-cleanup-2026-10-13/verified-chat-latency.tar.gz) | [결과](verified-chat-latency-2026-10-10.md) |
 
 ## 보관 위치와 복원
 

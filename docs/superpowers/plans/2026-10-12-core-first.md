@@ -47,7 +47,7 @@ def core_analysis(core):
 
 ## T4 — 결과·보존
 
-- [x] docs/core-first-2026-10-12.md에 실제 수치·core/상세 오류·실패 응답·범위·채택 여부를 기록한다.
+- [x] docs/experiments/core-first-2026-10-12.md에 실제 수치·core/상세 오류·실패 응답·범위·채택 여부를 기록한다.
 - [x] audit_study.py로 root전체·이전상태·외부파일·baseline payload·새 회귀·manifest·재생·리뷰·지표·서버 종료·root 추가3문서를 확인한다.
 - [x] canonical T1–T4를 증거와 함께 완료한다. 후보는 worktree에 보관하고 운영에는 적용하지 않는다. 부분 복구는 별도 후보로 남긴다.
 

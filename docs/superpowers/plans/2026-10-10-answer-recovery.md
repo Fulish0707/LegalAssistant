@@ -10,7 +10,7 @@
 
 **Design:** [설계 문서](../specs/2026-10-10-answer-recovery-design.md).
 
-**Status:** 2026-10-11 Task 1~9 실행·평가·보고와 최종 감사 완료. 진단 28턴, 제외 파일럿 56턴, 주 비교 320턴과 제외 워밍업 4턴, core/strict 640건 채점을 마쳤다. 의미 검토는 Codex 240쌍 완료, 로컬 모델 237쌍 완료·3건 형식 오류다. 세 후보 모두 채택하지 않는다. 조건부 형식 수정·역순 반복·웹 측정은 해당 조건 미충족으로 제외했다. 기본값 OFF / legacy를 유지한다. 상세 이유는 [결과 문서](../../answer-recovery-latency-2026-10-10.md)에 있다.
+**Status:** 2026-10-11 Task 1~9 실행·평가·보고와 최종 감사 완료. 진단 28턴, 제외 파일럿 56턴, 주 비교 320턴과 제외 워밍업 4턴, core/strict 640건 채점을 마쳤다. 의미 검토는 Codex 240쌍 완료, 로컬 모델 237쌍 완료·3건 형식 오류다. 세 후보 모두 채택하지 않는다. 조건부 형식 수정·역순 반복·웹 측정은 해당 조건 미충족으로 제외했다. 기본값 OFF / legacy를 유지한다. 상세 이유는 [결과 문서](../../experiments/answer-recovery-latency-2026-10-10.md)에 있다.
 
 ---
 
@@ -51,13 +51,13 @@
 | `src/legal_rag/rag/orchestrator.py` | 새 설정 전달만 변경 |
 | `tests/legal_rag/unit/test_answer_recovery.py` | 실패 분류, 수정 경계, 재시도, 설정 계약 |
 | `tests/legal_rag/integration/test_answer_recovery.py` | 형식 수정 이후에도 인용 검사가 수행되는지 확인 |
-| `docs/answer-recovery-latency-2026-10-10.md` | 구현 후 실제 결과와 채택 판단 |
+| `docs/experiments/answer-recovery-latency-2026-10-10.md` | 구현 후 실제 결과와 채택 판단 |
 
 `configs/local.yaml`, 기존 `answer_system.md`, `answer_concise.md`와 답변 스키마는 이번 후보 구현에서 수정하지 않는다. 기존 파일의 작업 중 변경을 먼저 확인하고, 새 수정만 분리한다.
 
 ## Task 1. 현재 기준과 측정 조건 보관
 
-**Read:** 기존 [결과](../../verified-chat-latency-2026-10-10.md), `src/legal_rag/rag/generator.py`, `src/legal_rag/llm/ollama.py`, `src/legal_rag/schemas/answer.py`.
+**Read:** 기존 [결과](../../experiments/verified-chat-latency-2026-10-10.md), `src/legal_rag/rag/generator.py`, `src/legal_rag/llm/ollama.py`, `src/legal_rag/schemas/answer.py`.
 
 **Create:** `data/eval/reports/chat_pipeline/answer-recovery-2026-10-10/PREREG.md`, `baseline-manifest.json`, `AMENDMENTS.md`.
 
@@ -932,7 +932,7 @@ flock /tmp/claude-1000/myllmagent-gpu.lock .venv/bin/python -m legal_rag.evaluat
 
 **Read/reuse:** 이전 `e2e_server.py`, `e2e_run.py`의 격리 서버·SSE 측정 방식을 새 실험 폴더의 사본에서 사용한다.
 
-**Create:** `docs/answer-recovery-latency-2026-10-10.md`.
+**Create:** `docs/experiments/answer-recovery-latency-2026-10-10.md`.
 
 - [ ] 고정 근거 비교를 통과한 경우에만 scratch API와 Flask에서 baseline / 선택 후보를 비교한다. 현재 사용자 서비스와 다른 포트, 독립 DB·Chroma·업로드 경로와 InMemory 대화 저장소를 사용한다.
 - [ ] 새 웹 baseline은 **현재 검색 재사용 ON + full + 반복 억제 OFF + legacy**다. 이전 `e2e_server.py`의 `old_retrieve_many()` 연결을 복사하지 않는다. 선택 후보도 같은 검색을 사용한다. 기존 `baseline/reuse/concise` 세 mount는 새 baseline/후보 두 mount로 바꾼다. API의 settings와 Orchestrator의 settings는 같아야 한다.
