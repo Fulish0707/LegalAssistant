@@ -16,6 +16,18 @@
   };
   let caseSeq = 0;           /* 늦게 도착한 이전 검색 결과를 버린다 */
 
+  /* 상담 탭에 다녀와도 검색과 선택이 남도록 이 브라우저 탭에 적어 둔다. 탭을 닫으면 사라진다.
+     진행 중 표시와 조문 본문(법령 하나가 수십만 자일 수 있다)은 적지 않고 다시 구한다 */
+  const KEPT = 'lc.caseSearch';
+  const KEPT_FIELDS = ['query', 'applied', 'cases', 'searched', 'law', 'art', 'para', 'hits'];
+  function keep(){
+    try { sessionStorage.setItem(KEPT, JSON.stringify(Object.fromEntries(KEPT_FIELDS.map(k => [k, P[k]])))); } catch (err) { /* 저장소를 못 쓰면 유지하지 않을 뿐이다 */ }
+  }
+  function restore(){
+    try { Object.assign(P, JSON.parse(sessionStorage.getItem(KEPT) || '{}')); } catch (err) { /* 읽지 못하면 빈 화면으로 시작한다 */ }
+  }
+  restore();   /* 첫 화면을 그리기 전에 읽는다. 그리는 순간 keep()이 지금 상태를 적기 때문이다 */
+
   /* ---------- 결과에서 조문 목록 만들기 ---------- */
 
   const cites = (c, law, art, para) => c.statutes.some(s =>
@@ -52,7 +64,7 @@
   async function searchCases(){
     const q = P.applied;
     const seq = ++caseSeq;
-    Object.assign(P, { law: null, art: null, para: null });
+    Object.assign(P, { law: null, art: null, para: null, searched: false });
     if (!q) { Object.assign(P, { cases: [], caseState: '', searched: false }); LC.render(); return; }
     P.caseState = '검색 중'; LC.render();
     try {
@@ -251,6 +263,7 @@
   LC.definePage({
     id: '판례 검색',
     side, main,
+    afterRender: keep,
     acts: {
       law: k => { Object.assign(P, { law: P.law === k ? null : k, art: null, para: null }); },
       article: k => { Object.assign(P, { art: P.art === k ? null : k, para: null }); if (P.art) loadLaw(P.law); },
@@ -264,8 +277,10 @@
       viewLaw: k => { LC.openReader({ title: P.law + ' ' + P.art, kind: '법령', chunkId: k }); return false; }
     },
     init: () => {
+      if (P.applied && !P.searched) { searchOwnDocuments(); searchCases(); }   /* 검색 도중에 탭을 떠났다 */
+      else if (P.art) loadLaw(P.law);
       document.addEventListener('input', (e) => {
-        if (e.target.id === 'caseQuery') P.query = e.target.value;
+        if (e.target.id === 'caseQuery') { P.query = e.target.value; keep(); }
       });
       document.addEventListener('keydown', (e) => {
         if (e.target.id === 'caseQuery' && e.key === 'Enter') { e.preventDefault(); applyQuery(); }
