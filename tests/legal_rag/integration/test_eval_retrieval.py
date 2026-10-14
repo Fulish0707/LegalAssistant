@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from legal_rag.evaluation import load_retrieval_examples, run_retrieval_eval
-from tests.legal_rag.integration.test_ingest_to_search import indexed  # noqa: F401
 
 EVAL = Path(__file__).resolve().parents[1] / "fixtures" / "eval" / "retrieval.jsonl"
 

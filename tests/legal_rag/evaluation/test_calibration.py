@@ -125,7 +125,8 @@ def test_require_reference_grades_accepts_complete_labels(tmp_path):
 def test_disagreement_rows_and_review_csv(tmp_path):
     from legal_rag.evaluation.relevance.calibration import REVIEW_FIELDS, disagreement_rows, write_review
     rows = _graded_calibration(tmp_path, ['2', '1', '0', ''])
-    key = lambda row: tuple(row['pair_id'].split('|', 1))
+    def key(row):
+        return tuple(row['pair_id'].split('|', 1))
     details = {'model_grade': 2, 'evidence_quote': '지어낸 인용', 'quote_verified': False}
     llm = {key(rows[0]): {'grade': 2, 'reason': 'same'},
            key(rows[1]): {'grade': 0, 'reason': 'differs', 'details': details},
@@ -169,7 +170,8 @@ def test_calibration_fingerprint_hashes_labels_manifest_and_pool(tmp_path):
     _graded_calibration(tmp_path, ['0'] * 50)
     (tmp_path / 'pool.jsonl').write_text('{}\n', encoding='utf-8')
     fingerprint = calibration_fingerprint(tmp_path)
-    sha = lambda name: hashlib.sha256((tmp_path / name).read_bytes()).hexdigest()
+    def sha(name):
+        return hashlib.sha256((tmp_path / name).read_bytes()).hexdigest()
     assert fingerprint == {'calibration_csv_sha256': sha('calibration.csv'),
                            'calibration_json_sha256': sha('calibration.json'),
                            'pool_jsonl_sha256': sha('pool.jsonl')}

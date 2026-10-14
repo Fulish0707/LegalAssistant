@@ -8,6 +8,7 @@ this is the check that does not depend on the model obeying.
 import unittest
 
 from citation_guard import annotate_unsupported, unsupported_citations
+from tests.test_chat_streaming import ChatStreamBase, backend_answer
 
 
 class UnsupportedCitationTests(unittest.TestCase):
@@ -76,12 +77,6 @@ class UnsupportedCitationTests(unittest.TestCase):
         self.assertIn("확인", annotated)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
-from tests.test_chat_streaming import ChatStreamBase, backend_answer
-
 
 class CitationGuardStreamTests(ChatStreamBase):
     def final_for(self, chat):
@@ -109,3 +104,7 @@ class CitationGuardStreamTests(ChatStreamBase):
         self.assertIn("확인 필요: 근로기준법 제36조", self.final(self.collect(body))["chat_response"])
         body["prior_refs"] = ["근로기준법 제36조"]
         self.assertNotIn("확인 필요", self.final(self.collect(body))["chat_response"])
+
+
+if __name__ == "__main__":
+    unittest.main()

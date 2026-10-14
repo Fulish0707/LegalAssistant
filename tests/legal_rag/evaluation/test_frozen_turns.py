@@ -5,7 +5,6 @@ from legal_rag.rag.conversation import InMemoryConversationStore
 from legal_rag.rag.orchestrator import Orchestrator
 from legal_rag.schemas import Citation, CitationKind, Confidence, LegalAnswer, QueryAnalysis
 from legal_rag.verification import VerificationPolicy, Verifier
-from tests.legal_rag.integration.test_ingest_to_search import indexed  # noqa: F401
 
 QUESTION = "임차권등기명령 신청서에 적어야 하는 사항은?"
 
@@ -44,7 +43,8 @@ def test_a_frozen_turn_replays_the_same_evidence_and_open_questions(indexed, tmp
     model = FakeChatModel({"LegalAnswer": [_answer()]})  # no QueryAnalysis scripted: the analyzer must not call the model
     orch = _orchestrator(settings, FrozenRetriever(), model)
     orch.analyzer = FrozenAnalyzer()
-    orch.retriever.load(frozen); orch.analyzer.load(frozen)
+    orch.retriever.load(frozen)
+    orch.analyzer.load(frozen)
     response = orch.handle(QUESTION, conversation_id="replay")
 
     assert response.kind == "answer" and response.evidence == expected

@@ -64,19 +64,29 @@ def test_import_preserves_source_and_supports_retrieval(source, tmp_path):
 @pytest.mark.parametrize('defect', ['duplicate_document', 'duplicate_chunk', 'empty', 'orphan', 'domain', 'type', 'count', 'position', 'malformed'])
 def test_invalid_input_never_publishes(source, tmp_path, defect):
     root, docs, chunks = source
-    if defect == 'duplicate_document': docs.append(docs[0])
-    if defect == 'duplicate_chunk': chunks.append(chunks[0])
-    if defect == 'empty': chunks[0]['text'] = '  '
-    if defect == 'orphan': chunks[0]['document_id'] = 'missing'
-    if defect == 'domain': chunks[0]['legal_domain'] = 'criminal'
-    if defect == 'type': chunks[0]['document_type'] = 'judgment'
-    if defect == 'count': chunks[0]['total_chunks'] = 2
-    if defect == 'position': chunks[0]['chunk_index'] = -1
+    if defect == 'duplicate_document':
+        docs.append(docs[0])
+    if defect == 'duplicate_chunk':
+        chunks.append(chunks[0])
+    if defect == 'empty':
+        chunks[0]['text'] = '  '
+    if defect == 'orphan':
+        chunks[0]['document_id'] = 'missing'
+    if defect == 'domain':
+        chunks[0]['legal_domain'] = 'criminal'
+    if defect == 'type':
+        chunks[0]['document_type'] = 'judgment'
+    if defect == 'count':
+        chunks[0]['total_chunks'] = 2
+    if defect == 'position':
+        chunks[0]['chunk_index'] = -1
     write_rows(root / 'documents.jsonl', docs)
     write_rows(root / 'chunks.jsonl', chunks)
-    if defect == 'malformed': (root / 'chunks.jsonl').write_text('{bad json}\n')
+    if defect == 'malformed':
+        (root / 'chunks.jsonl').write_text('{bad json}\n')
     cfg = settings(tmp_path)
-    with pytest.raises(ValueError): importer.import_processed(root, cfg)
+    with pytest.raises(ValueError):
+        importer.import_processed(root, cfg)
     assert not cfg.processed_corpus_dir().exists()
 
 
@@ -87,7 +97,8 @@ def test_sample_complete_documents_and_no_overwrite(source, tmp_path):
     assert report['documents'] == 2 and report['chunks'] == 2
     assert report['source_documents'] == 6 and report['source_chunks'] == 6
     saved = (cfg.processed_corpus_dir() / 'chunks.jsonl').read_bytes()
-    with pytest.raises(FileExistsError): importer.import_processed(root, cfg)
+    with pytest.raises(FileExistsError):
+        importer.import_processed(root, cfg)
     assert (cfg.processed_corpus_dir() / 'chunks.jsonl').read_bytes() == saved
 
 
