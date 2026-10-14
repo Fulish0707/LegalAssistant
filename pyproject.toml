@@ -32,3 +32,7 @@ packages = ["src/legal_rag"]
 [tool.pytest.ini_options]
 testpaths = ["tests/legal_rag"]
 addopts = "-p no:cacheprovider"
+
+[tool.ruff.lint.per-file-ignores]
+# load_dotenv() must run before the project modules are imported.
+"webapp/app.py" = ["E402"]

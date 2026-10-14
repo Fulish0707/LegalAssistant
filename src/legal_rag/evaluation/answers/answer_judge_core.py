@@ -104,7 +104,8 @@ def grade_answer(chat, pair: dict, cache_path: Path) -> dict:
     response = chat.generate([Message(role="system", content=CHECK_SYSTEM), Message(role="user", content=content)],
                              response_schema=CoreCheck, temperature=0.0, max_tokens=300)
     check = response.parsed
-    existing = lambda numbers: [n for n in numbers if 1 <= n <= len(sentences)]
+    def existing(numbers):
+        return [n for n in numbers if 1 <= n <= len(sentences)]
     core_stated = check.core_stated and bool(existing(check.core_sentences))
     has_condition = bool(conclusion["condition"].strip())
     return {"core": conclusion["core"], "condition": conclusion["condition"], "core_stated": core_stated,

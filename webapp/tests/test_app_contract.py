@@ -13,7 +13,6 @@ test can reach Ollama or Chroma.
 import importlib
 import io
 import os
-import sqlite3
 import sys
 import tempfile
 import unittest

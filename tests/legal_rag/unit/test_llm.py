@@ -50,13 +50,15 @@ def test_ollama_num_ctx_in_options_only_when_set():
 
 
 def test_ollama_plain_text_without_schema():
-    handler = lambda req: httpx.Response(200, json={"message": {"content": "안녕"}})
+    def handler(req):
+        return httpx.Response(200, json={"message": {"content": "안녕"}})
     m = OllamaChatModel(model="m", base_url="http://t", transport=httpx.MockTransport(handler))
     assert m.generate([Message(role="user", content="q")]).text == "안녕"
 
 
 def test_ollama_invalid_json_raises_structured_output_error():
-    handler = lambda req: httpx.Response(200, json={"message": {"content": "not json"}})
+    def handler(req):
+        return httpx.Response(200, json={"message": {"content": "not json"}})
     m = OllamaChatModel(model="m", base_url="http://t", transport=httpx.MockTransport(handler))
     with pytest.raises(StructuredOutputError) as info:
         m.generate([Message(role="user", content="q")], response_schema=Out)

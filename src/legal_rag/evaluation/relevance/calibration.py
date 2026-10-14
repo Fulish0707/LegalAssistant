@@ -167,8 +167,8 @@ def _gwet_ac1(a: list[int], b: list[int]) -> float | None:
     return None if expected == 1 else (observed - expected) / (1 - expected)
 
 
-def _binary(h: list[int], l: list[int], *, boundary: int) -> dict:
-    bh, bl = [int(x >= boundary) for x in h], [int(y >= boundary) for y in l]
+def _binary(h: list[int], m: list[int], *, boundary: int) -> dict:
+    bh, bl = [int(x >= boundary) for x in h], [int(y >= boundary) for y in m]
     tp = sum(x and y for x, y in zip(bh, bl))
     return {'kappa': _kappa(bh, bl, weighted=False),
             'ac1': _gwet_ac1(bh, bl),
@@ -180,15 +180,15 @@ def _binary(h: list[int], l: list[int], *, boundary: int) -> dict:
 
 def agreement(reference: dict, llm: dict, *, gold_pairs: set) -> dict:
     pairs = sorted(key for key in reference if key in llm)
-    h, l = [reference[k] for k in pairs], [llm[k] for k in pairs]
-    confusion = [[sum(x == i and y == j for x, y in zip(h, l)) for j in range(3)] for i in range(3)]
+    h, m = [reference[k] for k in pairs], [llm[k] for k in pairs]
+    confusion = [[sum(x == i and y == j for x, y in zip(h, m)) for j in range(3)] for i in range(3)]
     return {
         'pairs': len(pairs), 'missing_llm': len([k for k in reference if k not in llm]),
         'confusion': confusion,
-        'exact_agreement': sum(x == y for x, y in zip(h, l)) / len(pairs) if pairs else None,
-        'weighted_kappa': _kappa(h, l, weighted=True),
-        'binary_relevant': _binary(h, l, boundary=1),
-        'binary_grade2': _binary(h, l, boundary=2),
+        'exact_agreement': sum(x == y for x, y in zip(h, m)) / len(pairs) if pairs else None,
+        'weighted_kappa': _kappa(h, m, weighted=True),
+        'binary_relevant': _binary(h, m, boundary=1),
+        'binary_grade2': _binary(h, m, boundary=2),
         'gold_llm_grades': {str(g): sum(llm[k] == g for k in pairs if k in gold_pairs) for g in range(3)},
     }
 

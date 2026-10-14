@@ -7,7 +7,6 @@ from legal_rag.rag.conversation import InMemoryConversationStore
 from legal_rag.rag.orchestrator import Orchestrator
 from legal_rag.schemas import Citation, CitationKind, Confidence, LegalAnswer, QueryAnalysis, StandaloneQuestion, Turn
 from legal_rag.verification import VerificationPolicy, Verifier
-from tests.legal_rag.integration.test_ingest_to_search import indexed  # noqa: F401
 
 
 def _answer(source_id="S1", reference="주택임대차보호법 제3조의3", analysis="주택임대차보호법 제3조의3에 따라 임차권등기명령을 신청할 수 있습니다."):

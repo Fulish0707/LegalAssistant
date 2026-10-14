@@ -43,7 +43,8 @@ def main(
         typer.echo("LAW_GO_KR_OC is not set; using the public test key (fine for a few laws, not for a bulk load).", err=True)
         oc = "test"
     out_dir.mkdir(parents=True, exist_ok=True)
-    squash = lambda s: re.sub(r"\s+", "", s)
+    def squash(s):
+        return re.sub(r"\s+", "", s)
     entries = list_current_laws(oc)
     if names:
         wanted = {squash(n) for n in names}

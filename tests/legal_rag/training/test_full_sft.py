@@ -66,12 +66,12 @@ def test_full_data_no_caps_no_downsampling_and_disjoint(tmp_path):
 def test_overlong_answers_and_unsupported_candidates_go_to_review(tmp_path):
     fixture(tmp_path/'input')
     p=tmp_path/'input/civil/qa.jsonl'
-    rows=[json.loads(l) for l in p.read_text().splitlines()]
+    rows=[json.loads(line) for line in p.read_text().splitlines()]
     rows[1]['answer']='x'*900
     rows[2]['answer']='zzzzzzzzzzzzzzzz'
     write(p,rows)
     report=prepare_full_dataset(tmp_path/'input',tmp_path/'out',CharTokenizer(),domains=('civil','criminal'), max_length=600)
-    reviews=[json.loads(l) for l in (tmp_path/'out/review.jsonl').read_text().splitlines()]
+    reviews=[json.loads(line) for line in (tmp_path/'out/review.jsonl').read_text().splitlines()]
     assert any(r['reason']=='answer_or_prompt_too_long' for r in reviews)
     assert any(r['reason']=='low_answer_coverage' for r in reviews)
     assert report['counts']['civil']['kept'] < 150
@@ -80,6 +80,7 @@ def test_overlong_answers_and_unsupported_candidates_go_to_review(tmp_path):
 def test_loader_rejects_changed_output(tmp_path):
     fixture(tmp_path/'input')
     prepare_full_dataset(tmp_path/'input',tmp_path/'out',CharTokenizer(),domains=('civil','criminal'),max_length=600)
-    with (tmp_path/'out/train.jsonl').open('a') as f:f.write('{}\n')
+    with (tmp_path/'out/train.jsonl').open('a') as f:
+        f.write('{}\n')
     with pytest.raises(ValueError, match='hash'):
         load_full_splits(tmp_path/'out')
