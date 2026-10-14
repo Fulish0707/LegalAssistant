@@ -164,6 +164,19 @@ Use `scripts/import_processed.py` for data produced outside this repository. It 
 only `documents.jsonl` and `chunks.jsonl` from the supplied directory. QA files are
 never read or indexed. Original files remain unchanged.
 
+The four AI Hub corpora were produced by the scripts in `scripts/preprocess/`, one per
+domain. Each writes `documents.jsonl`, `chunks.jsonl`, `qa.jsonl`, and `stats.json`.
+The admin and criminal scripts expect `fulltext/` (CSV) and `qa/` (JSON) under the input
+directory and also write `match_report.json`. The civil and IP scripts read the source
+text inside the QA JSON files.
+
+```bash
+python scripts/preprocess/preprocess_admin.py    --input-dir data/raw/aihub/administrative --output-dir data/processed/administrative
+python scripts/preprocess/preprocess_criminal.py --input-dir data/raw/aihub/criminal       --output-dir data/processed/criminal
+python scripts/preprocess/preprocess_civil.py    --input-dir data/raw/aihub/civil          --output-dir data/processed/civil
+python scripts/preprocess/preprocess_intel.py    --input-dir data/raw/aihub/intellectual_property --output-dir data/processed/intellectual_property
+```
+
 ```bash
 # Validate the entire source without creating a corpus.
 uv run python scripts/import_processed.py \

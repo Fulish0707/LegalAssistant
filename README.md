@@ -98,7 +98,7 @@ flowchart LR
 
 - **판례·유권해석과 평가 질문:** AI Hub의 형사법, 민사법, 행정법, 지식재산권법 질의응답 데이터입니다. AI Hub에서 이용 신청 후 받습니다.
 - **법령:** 국가법령정보센터 Open API에서 받습니다. 방법은 [8.3절](#83-전체-법령-코퍼스-만들기)에 있습니다.
-- **AI Hub 원문의 전처리 스크립트는 이 저장소에 없습니다.** 백엔드는 전처리된 `documents.jsonl`과 `chunks.jsonl`을 `scripts/import_processed.py`로 가져옵니다. 필요한 필드는 [법률 RAG 개발 안내](docs/legal-rag-backend.md#import-externally-preprocessed-jsonl)에 있습니다.
+- **AI Hub 원문은 분야마다 [전처리 스크립트](scripts/preprocess/)로 바꿉니다.** 결과의 `documents.jsonl`과 `chunks.jsonl`을 `scripts/import_processed.py`로 가져옵니다. 명령과 필요한 필드는 [법률 RAG 개발 안내](docs/legal-rag-backend.md#import-externally-preprocessed-jsonl)에 있습니다.
 
 ## 4. 한 턴의 흐름
 
@@ -376,6 +376,7 @@ python -m pytest webapp/tests -k 'not Live' -q
 - [scripts/eval_chat_pipeline.py](scripts/eval_chat_pipeline.py): 답변 파이프라인 평가.
 - [scripts/judge_answers.py](scripts/judge_answers.py): 답변 채점.
 - [scripts/eval_retrieval.py](scripts/eval_retrieval.py): 검색 평가.
+- [scripts/preprocess/](scripts/preprocess/): AI Hub 원문을 분야마다 문서·조각으로 바꾸는 전처리.
 
 ### 문서
 
