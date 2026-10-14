@@ -45,7 +45,8 @@ def ask(base_url, message, conversation_id, documents=(), pinned=()):
     endpoint = base_url.rstrip("/") + "/v1/chat"
     payload = {"message": message, "conversation_id": conversation_id}
     if documents:
-        payload["user_documents"] = [{"name": document["name"], "text": document["text"]} for document in documents]
+        # legal_rag refuses a name over 200 characters (UserDocument in src/legal_rag/schemas/evidence.py).
+        payload["user_documents"] = [{"name": document["name"][:200], "text": document["text"]} for document in documents]
     if pinned:
         payload["pinned_chunk_ids"] = list(pinned)
     try:

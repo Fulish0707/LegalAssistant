@@ -179,3 +179,13 @@ def test_a_reference_from_an_earlier_answer_may_be_repeated_and_excuses_nothing_
     assert not ok("제36조에 따라 청구할 수 있습니다.")
     assert not ok("근로기준법 제36조가 적용됩니다. 제37조의 지연이자도 붙습니다.")
     assert not ok("2021다22222 판결도 같습니다.")
+
+
+def test_strip_keeps_a_sentence_whose_article_only_shares_the_prefix():
+    """Removing "헌법 제3조" also removed the grounded sentence on 제3조의3, because the bare
+    needle "제3조" is a prefix of "제3조의3" (code review, 2026-10-14)."""
+    ans = _answer(analysis="주택임대차보호법 제3조의3에 따라 임차권등기명령을 신청할 수 있습니다. 헌법 제3조도 관련됩니다.")
+    report = Verifier().verify(ans, _bundle())
+    assert [issue.detail for issue in report.issues] == ["헌법 제3조"]
+    stripped = VerificationPolicy().strip(ans, report)
+    assert stripped.analysis == "주택임대차보호법 제3조의3에 따라 임차권등기명령을 신청할 수 있습니다."

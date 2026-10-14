@@ -12,11 +12,13 @@ test can reach Ollama or Chroma.
 
 import importlib
 import io
+import json
 import os
 import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
+from urllib.parse import quote
 
 from quota import guest_ip_identity, reserve_daily_quota
 
@@ -241,12 +243,46 @@ class AppContractTests(unittest.TestCase):
         ask = Mock(return_value={"kind": "rejected"})
         env, stub = self.backend(ask)
         with env, stub:
-            response = self.app_module.app.test_client().get("/chat?message=hello")
+            response = self.app_module.app.test_client().get("/chat?message=" + quote("전세 보증금을 못 받았어요"))
 
         ask.assert_not_called()
         self.assertEqual(response.status_code, 200)
         self.assertIn("daily_ai_quota_exceeded", response.get_data(as_text=True))
         self.assertIn("stream_end", response.get_data(as_text=True))
+
+    def test_a_greeting_is_answered_without_using_the_daily_quota(self):
+        """The quota was reserved before the canned reply was chosen (code review, 2026-10-14)."""
+        identity = self.exhaust_ip_quota("127.0.0.1")
+        used = self.quota_row(identity)[0]
+        ask = Mock(return_value={"kind": "rejected"})
+        env, stub = self.backend(ask)
+        with env, stub:
+            body = self.app_module.app.test_client().get("/chat?message=" + quote("안녕하세요")).get_data(as_text=True)
+
+        ask.assert_not_called()
+        self.assertIn("final_response", body)
+        self.assertNotIn("daily_ai_quota_exceeded", body)
+        self.assertEqual(self.quota_row(identity)[0], used)
+
+    def test_a_message_over_the_backend_limit_is_refused_before_quota_and_backend(self):
+        """legal_rag rejects a message over 4,000 characters with 422, which the app showed as
+        'service unavailable' on every retry, each one using quota (code review, 2026-10-14)."""
+        long_message = "보증금" * 1400
+        identity = guest_ip_identity("127.0.0.1", self.app_module.app.config["QUOTA_IP_SALT"])
+        used = (self.quota_row(identity) or [0])[0]
+        client = self.app_module.app.test_client()
+        posted = client.post("/chat", json={"message": long_message})
+        ask = Mock(return_value={"kind": "rejected"})
+        env, stub = self.backend(ask)
+        with env, stub:
+            body = client.get("/chat?message=" + quote(long_message)).get_data(as_text=True)
+
+        events = [json.loads(line[len("data: "):]) for line in body.splitlines() if line.startswith("data: ")]
+
+        self.assertEqual(posted.status_code, 400)
+        ask.assert_not_called()
+        self.assertEqual(events, [{"type": "error", "content": self.app_module.MESSAGE_TOO_LONG}, {"type": "stream_end"}])
+        self.assertEqual((self.quota_row(identity) or [0])[0], used)
 
     def test_quota_is_shared_per_ip_and_survives_a_cleared_cookie(self):
         shared_ip, other_ip = "203.0.113.10", "203.0.113.11"

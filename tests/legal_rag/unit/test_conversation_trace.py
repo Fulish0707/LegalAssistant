@@ -1,4 +1,6 @@
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from legal_rag.rag.conversation import InMemoryConversationStore, SQLiteConversationStore
@@ -33,3 +35,18 @@ def test_trace_recorder_times_stages_and_writes_json_line(tmp_path):
     assert line["timings"][0]["stage"] == "analyze" and line["user_text"] is None and line["policy_action"] == "accept"
     assert line["model"] == "fake" and line["search_queries"] == ["q"]
     assert TraceRecorder(conversation_id="c", user_text="보임", include_text=True).trace.user_text == "보임"
+
+
+def test_sqlite_store_keeps_every_turn_of_concurrent_appends(tmp_path):
+    """Reading MAX(seq) and inserting in two statements let two requests take the same seq,
+    and the second hit the primary key (code review, 2026-10-14)."""
+    store = SQLiteConversationStore(tmp_path / "c.db")
+    barrier = threading.Barrier(16)
+
+    def append(n):
+        barrier.wait()
+        store.append("c1", Turn(role="user", content=f"turn {n}", created_at=datetime(2026, 1, 1)))
+
+    with ThreadPoolExecutor(16) as pool:
+        list(pool.map(append, range(16)))
+    assert sorted(turn.content for turn in store.get("c1").turns) == sorted(f"turn {n}" for n in range(16))

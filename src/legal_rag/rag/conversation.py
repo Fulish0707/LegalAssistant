@@ -54,5 +54,6 @@ class SQLiteConversationStore:
 
     def append(self, conversation_id: str, turn: Turn) -> None:
         with self._connect() as conn:
-            seq = conn.execute("SELECT COALESCE(MAX(seq), -1) + 1 FROM turns WHERE conversation_id=?", (conversation_id,)).fetchone()[0]
-            conn.execute("INSERT INTO turns VALUES (?, ?, ?)", (conversation_id, seq, turn.model_dump_json()))
+            # One statement, so two concurrent appends cannot take the same seq.
+            conn.execute("INSERT INTO turns SELECT ?, COALESCE(MAX(seq), -1) + 1, ? FROM turns WHERE conversation_id=?",
+                         (conversation_id, turn.model_dump_json(), conversation_id))

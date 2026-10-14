@@ -1,3 +1,6 @@
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 from legal_rag.reranking import NoopReranker
 from legal_rag.retrieval.fusion import RRFFuser
 from legal_rag.retrieval.hybrid import HybridRetriever
@@ -43,6 +46,34 @@ def test_hybrid_runs_every_query_through_every_leg_and_reranks():
     assert set(hybrid.last_trace) == {"dense:q1", "sparse:q1", "dense:q2", "sparse:q2", "fused", "reranked"}
     assert hybrid.retrieve("q1", k=1)[0].chunk.id in {c1.id, c2.id}
 
+
+
+class _MeetingStub(_Stub):
+    """Holds each search until both requests are inside retrieve_many."""
+
+    def __init__(self, name, hits, barrier):
+        super().__init__(name, hits)
+        self.barrier = barrier
+
+    def retrieve(self, query, k, filters=None):
+        self.barrier.wait()
+        return super().retrieve(query, k, filters)
+
+
+def test_concurrent_requests_each_read_their_own_trace():
+    """One retriever serves every request; a shared last_trace gave request A the queries of
+    request B in its trace (code review, 2026-10-14)."""
+    c1, _, _ = _chunks()
+    hybrid = HybridRetriever([_MeetingStub("dense", [_sc(c1, 0.9, "dense")], threading.Barrier(2))],
+                             RRFFuser(60), NoopReranker(), k_leg=5, k_fused=5)
+
+    def run(query):
+        hybrid.retrieve_many([query], k=1)
+        return set(hybrid.last_trace)
+
+    with ThreadPoolExecutor(2) as pool:
+        traces = list(pool.map(run, ["qa", "qb"]))
+    assert traces == [{"dense:qa", "fused", "reranked"}, {"dense:qb", "fused", "reranked"}]
 
 # --- leg floor --------------------------------------------------------------------------
 

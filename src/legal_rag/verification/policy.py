@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from legal_rag.schemas import Confidence, LegalAnswer, VerificationAction, VerificationReport
 from legal_rag.textutil.sentences import split_sentences
 
@@ -34,10 +36,12 @@ class VerificationPolicy:
                     bad_ids.add(source_id)
             else:
                 bad_refs.add(issue.detail)
-        needles = {needle for ref in bad_refs for needle in (ref, article_only(ref)) if needle}
+        # 제3조 must not match 제3조의3, as in citation_guard.
+        needles = [re.compile(re.escape(needle) + r"(?!\s*의\s*\d)")
+                   for needle in {needle for ref in bad_refs for needle in (ref, article_only(ref)) if needle}]
 
         def tainted(text: str) -> bool:
-            return any(needle in text for needle in needles)
+            return any(needle.search(text) for needle in needles)
 
         def clean(text: str) -> str:
             return " ".join(sentence for sentence in split_sentences(text) if not tainted(sentence))
