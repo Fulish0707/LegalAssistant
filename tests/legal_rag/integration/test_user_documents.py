@@ -8,8 +8,7 @@ is prompted exactly as before.
 from legal_rag.llm import FakeChatModel
 from legal_rag.schemas import Citation, CitationKind, QueryAnalysis, UserDocument
 from tests.legal_rag.integration.test_api import _client
-from tests.legal_rag.integration.test_chat_turn import _answer, _orchestrator, retriever  # noqa: F401
-from tests.legal_rag.integration.test_ingest_to_search import indexed  # noqa: F401
+from tests.legal_rag.integration.test_chat_turn import _answer, _orchestrator
 
 QUESTION = "임차권등기명령 신청서에 적어야 하는 사항은?"
 LEASE = UserDocument(name="임대차계약서.pdf", text="제5조 임대인은 민법 제618조에 따라 계약 종료일에 보증금 1억 원을 반환한다.")

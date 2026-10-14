@@ -1,7 +1,7 @@
 from legal_rag.reranking import NoopReranker
 from legal_rag.retrieval.fusion import RRFFuser
 from legal_rag.retrieval.hybrid import HybridRetriever
-from legal_rag.schemas import ScoredChunk
+from legal_rag.schemas import Chunk, ChunkMetadata, DocumentType, ScoredChunk
 from tests.legal_rag.unit.test_store import _chunks
 
 
@@ -45,7 +45,6 @@ def test_hybrid_runs_every_query_through_every_leg_and_reranks():
 
 
 # --- leg floor --------------------------------------------------------------------------
-from legal_rag.schemas import Chunk, ChunkMetadata, DocumentType
 
 
 def _hit(chunk_id, retriever):

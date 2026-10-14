@@ -8,7 +8,6 @@ from legal_rag.rag.orchestrator import Orchestrator
 from legal_rag.schemas import Confidence, LegalAnswer, QueryAnalysis
 from legal_rag.verification import VerificationPolicy, Verifier
 from tests.legal_rag.integration.test_chat_turn import _answer
-from tests.legal_rag.integration.test_ingest_to_search import indexed  # noqa: F401
 
 
 def _client(indexed, model):

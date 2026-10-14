@@ -179,7 +179,8 @@ def flag_unsourced_citations(report_html, source_texts):
     how a report refers to the document's own clauses.
     """
     cited = unsupported_citations(re.sub(r"<[^>]+>", " ", report_html), source_texts)
-    bare = lambda citation: (match := STATUTE_RE.fullmatch(citation)) and not match.group("law")
+    def bare(citation):
+        return (match := STATUTE_RE.fullmatch(citation)) and not match.group("law")
     missing = [citation for citation in cited if not bare(citation)]
     return report_html + UNSOURCED_NOTICE.format(citations=", ".join(missing)) if missing else report_html
 
