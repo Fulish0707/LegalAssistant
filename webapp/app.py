@@ -328,6 +328,13 @@ def _case_key():
     return f"{SERVER_START}-{_conversation()}"
 
 
+def _open_new_conversation():
+    """Open a number this browser has never used: legal_rag still remembers the turns of deleted ones."""
+    held = [conversation["id"] for conversation in get_conversations_from_db(session["user_id"])]
+    session["conversation_epoch"] = session["conversation_top"] = \
+        max([session.get("conversation_top", 0), _conversation(), *held]) + 1
+
+
 def _pinned_case():
     """The case attached to the open consultation, or None: {chunk_id, title}."""
     return (session.get("cases") or {}).get(_case_key())
@@ -595,9 +602,9 @@ def get_initial_state():
 @app.route('/conversations/new', methods=['POST'])
 def new_conversation():
     """Open an empty consultation; the earlier ones stay in the list."""
-    held = [conversation["id"] for conversation in get_conversations_from_db(session["user_id"])]
-    if _conversation() in held:  # an open consultation that is still empty is reused
-        session["conversation_epoch"] = max(held) + 1
+    # An open consultation that is still empty is kept.
+    if _conversation() in [conversation["id"] for conversation in get_conversations_from_db(session["user_id"])]:
+        _open_new_conversation()
     return jsonify(_chat_state())
 
 
@@ -627,13 +634,11 @@ def attach_case():
 def delete_conversation():
     """Delete the open consultation with its messages, sources and attached case, and open an empty one."""
     user_id, conversation = session["user_id"], _conversation()
-    held = [item["id"] for item in get_conversations_from_db(user_id)]
     conn = get_db()
     conn.execute('DELETE FROM chat_history WHERE user_id=? AND conversation=?', (user_id, conversation))
     conn.commit()
     session["cases"] = {key: value for key, value in (session.get("cases") or {}).items() if key != _case_key()}
-    # A number is never used twice: legal_rag still remembers the turns of the deleted one.
-    session["conversation_epoch"] = max([conversation, *held]) + 1
+    _open_new_conversation()
     return jsonify(_chat_state())
 
 
@@ -651,8 +656,8 @@ def select_conversation():
 def clear_chat_history_endpoint():
     try:
         user_id = session["user_id"]
+        _open_new_conversation()
         clear_chat_history_in_db(user_id)
-        session["conversation_epoch"] = session.get("conversation_epoch", 0) + 1
         return jsonify({"message": "Chat history cleared successfully."}), 200
     except Exception as e:
         logging.error(f"Error clearing chat history: {e}")

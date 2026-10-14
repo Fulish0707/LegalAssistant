@@ -174,6 +174,33 @@ class ConsultationListTests(ChatStreamBase):
         self.assertNotIn(self.ask(client, "새로 묻습니다"), {first_id, first_id[:-1] + "1"})
         self.assertEqual(len(client.get("/get_initial_state").json["conversations"]), 2)
 
+    def test_a_new_consultation_after_reopening_an_older_one_never_reuses_a_deleted_number(self):
+        client = self.app_module.app.test_client()
+        used = {self.ask(client, "첫 상담")}
+        client.post("/conversations/new")
+        used.add(self.ask(client, "둘째 상담"))
+        client.post("/conversations/new")
+        used.add(self.ask(client, "셋째 상담"))
+        client.post("/conversations/delete")
+        second = client.get("/get_initial_state").json["conversations"][0]["id"]
+        client.post("/conversations/select", json={"id": second})
+
+        client.post("/conversations/new")
+
+        self.assertNotIn(self.ask(client, "새로 묻습니다"), used)
+
+    def test_clearing_after_reopening_an_older_consultation_never_reuses_a_number(self):
+        client = self.app_module.app.test_client()
+        used = {self.ask(client, "첫 상담")}
+        client.post("/conversations/new")
+        used.add(self.ask(client, "둘째 상담"))
+        first = client.get("/get_initial_state").json["conversations"][-1]["id"]
+        client.post("/conversations/select", json={"id": first})
+
+        client.post("/clear_chat_history_endpoint")
+
+        self.assertNotIn(self.ask(client, "새로 묻습니다"), used)
+
     def test_deleting_an_empty_consultation_changes_nothing_that_is_stored(self):
         client = self.app_module.app.test_client()
         self.ask(client, "전세 보증금을 못 받았어요")
