@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Protocol
 
 from legal_rag.reranking import Reranker
@@ -26,7 +27,17 @@ class HybridRetriever:
         self.reranker = reranker
         self.k_leg = k_leg
         self.k_fused = k_fused
-        self.last_trace: dict[str, list[tuple[str, float]]] = {}
+        self._trace = threading.local()
+
+    @property
+    def last_trace(self) -> dict[str, list[tuple[str, float]]]:
+        """What this thread's last retrieve_many saw. One retriever serves concurrent requests,
+        each on its own thread, and the orchestrator reads the trace on the thread that searched."""
+        return getattr(self._trace, "value", {})
+
+    @last_trace.setter
+    def last_trace(self, value: dict[str, list[tuple[str, float]]]) -> None:
+        self._trace.value = value
 
     def neighbor_chunks(self, chunk: Chunk, radius: int) -> list[Chunk]:
         """Use the hit's corpus store; the dense/sparse legs share that store."""

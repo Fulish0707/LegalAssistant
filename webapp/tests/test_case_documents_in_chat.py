@@ -33,6 +33,12 @@ class AskWithDocumentsTests(unittest.TestCase):
     def test_documents_are_sent_by_name_and_text_only(self):
         self.assertEqual(self.sent([LEASE])["user_documents"], [{"name": LEASE["name"], "text": LEASE["text"]}])
 
+    def test_a_long_file_name_is_cut_to_the_backend_limit(self):
+        """legal_rag refuses a name over 200 characters with 422, shown as 'service unavailable'
+        on every turn the file matched (code review, 2026-10-14)."""
+        sent = self.sent([{**LEASE, "name": "임대차계약서" * 50 + ".pdf"}])["user_documents"][0]
+        self.assertEqual(sent["name"], ("임대차계약서" * 50)[:200])
+
 
 class RenderWithDocumentsTests(unittest.TestCase):
     def body(self, analysis):

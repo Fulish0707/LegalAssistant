@@ -299,6 +299,9 @@ def _sse(payload):
 
 LEGAL_BACKEND_UNSET = "법률 답변 서비스가 설정되지 않았습니다. LEGAL_RAG_URL을 설정한 뒤 다시 시작하세요."
 LEGAL_BACKEND_DOWN = "법률 답변 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."
+# legal_rag refuses a longer message (ChatRequest in src/legal_rag/api/models.py).
+MESSAGE_MAX_CHARS = 4000
+MESSAGE_TOO_LONG = "질문이 너무 깁니다. 4,000자 이하로 줄여 주세요. 계약서 같은 긴 자료는 사건 자료 탭에 올리면 답변에 쓰입니다."
 
 
 def _conversation():
@@ -387,14 +390,18 @@ def _generate_legal_response_stream(user_input):
             yield _sse({'type': 'error', 'content': LEGAL_BACKEND_UNSET})
             return
 
-        quota_result = reserve_ai_request()
-        if not quota_result.allowed:
-            yield _sse({'type': 'error', 'content': 'Daily AI request quota exceeded.', 'error': 'daily_ai_quota_exceeded', 'limit': quota_result.limit})
+        if len(user_input) > MESSAGE_MAX_CHARS:
+            yield _sse({'type': 'error', 'content': MESSAGE_TOO_LONG})
             return
 
         # POST /chat stored this message before the stream began, so an earlier turn makes more than one.
         fixed = _fixed_reply(user_input, len(get_chat_history_from_db(session["user_id"], _conversation())) > 1)
         if fixed is None:
+            # A canned reply calls no model, so only a real turn uses the daily quota.
+            quota_result = reserve_ai_request()
+            if not quota_result.allowed:
+                yield _sse({'type': 'error', 'content': 'Daily AI request quota exceeded.', 'error': 'daily_ai_quota_exceeded', 'limit': quota_result.limit})
+                return
             yield _sse({'type': 'thought', 'content': '법령·판례 검색 및 답변 작성 중'})
             documents = _case_documents(user_input)
             if documents:
@@ -513,6 +520,8 @@ def chat():
 
         if not user_input:
             return jsonify({"error": "No message provided"}), 400
+        if len(user_input) > MESSAGE_MAX_CHARS:
+            return jsonify({"error": MESSAGE_TOO_LONG}), 400
 
         add_chat_message_to_db(session["user_id"], "user", user_input, _conversation())
         # The POST request now just acknowledges receipt.
