@@ -43,6 +43,10 @@
 - [답변 의미 검증](experiments/semantic-verification-2026-10-12.md)
 - [요약 필드 우선 생성](experiments/summary-first-2026-10-12.md)
 
+코드 리뷰와 후속 시험 (2026-10-14 ~ 10-16).
+
+- [코드 리뷰 지적, 법령 이름 인용 검사, Ollama 0.40.4](experiments/code-review-fixes-2026-10-14.md)
+
 구조 청크.
 
 - [구조 청크 시험](experiments/structural-civil.md): 채택하지 않았다. Qdrant 컬렉션은 2026-10-14에 삭제했다.
