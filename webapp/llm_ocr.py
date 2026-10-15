@@ -170,6 +170,17 @@ def clean_html_response(report_html):
 UNSOURCED_NOTICE = ("<p>※ 확인 필요: {citations}은(는) 올리신 문서에 없는 조문·사건번호입니다. 이 분석은 법령을 검색하지 않고 "
                     "작성되어 실제 법령과 다를 수 있습니다. 국가법령정보센터(law.go.kr)나 대법원 종합법률정보에서 직접 확인하세요.</p>")
 
+# Ollama drops the start of a prompt that does not fit num_ctx (12288), mode instructions included,
+# and the model then reports the dropped clauses as absent. Legal text is about 0.75 tokens a character,
+# so 8,000 characters leave room for the instructions and a reasoning report.
+DOCUMENT_ANALYSIS_MAX_CHARS = 8000
+CUT_DOCUMENT_NOTICE = ("<p>※ 문서가 길어 앞 {kept:,}자(전체 {total:,}자)만 분석했습니다. 뒷부분의 조항은 이 분석에 "
+                       "반영되지 않았습니다. 필요한 부분을 나눠 올리면 따로 분석할 수 있습니다.</p>")
+
+CUT_DOCUMENT_MARK = ("\n[여기서 문서가 잘렸습니다. 문서의 뒷부분은 길이 제한 때문에 보이지 않습니다. 찾는 조항·금액·날짜가 위에 없으면 "
+                     "'문서에 없다'거나 '명시되지 않았다'고 쓰지 말고, '제공된 앞부분에서는 찾을 수 없으며 문서 뒷부분은 분석하지 "
+                     "않았다'고 쓰세요.]")
+
 
 def flag_unsourced_citations(report_html, source_texts):
     """Append a notice naming the statute articles and case numbers the report cites that the document does not contain.
@@ -235,7 +246,7 @@ def analyze_document(file_path, file_extension, user_instructions, llm, prompt_t
 
         analysis_mode = analysis_mode if analysis_mode in DOCUMENT_ANALYSIS_MODES else "report"
         report_generation_input = build_document_analysis_prompt(
-            extracted_text=extracted_text,
+            extracted_text=extracted_text[:DOCUMENT_ANALYSIS_MAX_CHARS] + (CUT_DOCUMENT_MARK if len(extracted_text) > DOCUMENT_ANALYSIS_MAX_CHARS else ""),
             user_instructions=user_instructions,
             analysis_mode=analysis_mode,
             question=question,
@@ -257,6 +268,8 @@ def analyze_document(file_path, file_extension, user_instructions, llm, prompt_t
         report_html = ai_response.content if hasattr(ai_response, 'content') else str(ai_response)
         report_html = clean_html_response(report_html)
         report_html = flag_unsourced_citations(report_html, [extracted_text, user_instructions, question])
+        if len(extracted_text) > DOCUMENT_ANALYSIS_MAX_CHARS:
+            report_html = CUT_DOCUMENT_NOTICE.format(kept=DOCUMENT_ANALYSIS_MAX_CHARS, total=len(extracted_text)) + report_html
         
         result = {
             "report_html": report_html,
