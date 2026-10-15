@@ -337,7 +337,7 @@ def _open_new_conversation():
 
 def _pinned_case():
     """The case attached to the open consultation, or None: {chunk_id, title}."""
-    return (session.get("cases") or {}).get(_case_key())
+    return dict(session.get("cases") or []).get(_case_key())
 
 
 def _chat_state():
@@ -622,11 +622,12 @@ def attach_case():
     data = request.get_json(silent=True) or {}
     chunk_id, title = data.get("chunk_id"), data.get("title")
     # Entries of earlier server starts point at consultations that no longer exist.
-    cases = {key: value for key, value in (session.get("cases") or {}).items() if key.startswith(SERVER_START + "-")}
+    cases = {key: value for key, value in dict(session.get("cases") or []).items() if key.startswith(SERVER_START + "-")}
     cases.pop(_case_key(), None)
     if isinstance(chunk_id, str) and chunk_id.strip():
         cases[_case_key()] = {"chunk_id": chunk_id.strip()[:512], "title": str(title or "").strip()[:200]}
-    session["cases"] = dict(list(cases.items())[-PINNED_CASES_KEPT:])
+    # A list of pairs, oldest first: the session cookie sorts a dict's keys, and "-10" sorts before "-2".
+    session["cases"] = list(cases.items())[-PINNED_CASES_KEPT:]
     return jsonify(_chat_state())
 
 
@@ -637,7 +638,7 @@ def delete_conversation():
     conn = get_db()
     conn.execute('DELETE FROM chat_history WHERE user_id=? AND conversation=?', (user_id, conversation))
     conn.commit()
-    session["cases"] = {key: value for key, value in (session.get("cases") or {}).items() if key != _case_key()}
+    session["cases"] = [(key, value) for key, value in dict(session.get("cases") or []).items() if key != _case_key()]
     _open_new_conversation()
     return jsonify(_chat_state())
 

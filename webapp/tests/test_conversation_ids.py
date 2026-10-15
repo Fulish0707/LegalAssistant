@@ -200,6 +200,22 @@ class ConsultationListTests(ChatStreamBase):
         client.post("/clear_chat_history_endpoint")
 
         self.assertNotIn(self.ask(client, "새로 묻습니다"), used)
+    def test_the_most_recently_attached_cases_are_the_ones_kept(self):
+        """The session cookie sorts its keys, so "-10" came before "-2" and a recent case was dropped first."""
+        client = self.app_module.app.test_client()
+        opened = []
+        for number in range(self.app_module.PINNED_CASES_KEPT + 4):
+            self.ask(client, f"상담 {number}")
+            client.post("/conversations/case", json={"chunk_id": f"chunk-{number}", "title": f"사건 {number}"})
+            opened.append(client.get("/get_initial_state").json["conversation"])
+            client.post("/conversations/new")
+        kept = []
+        for conversation in opened:
+            client.post("/conversations/select", json={"id": conversation})
+            case = client.get("/get_initial_state").json["case"]
+            kept.append(case and case["chunk_id"])
+        expected = [None] * 4 + [f"chunk-{n}" for n in range(4, self.app_module.PINNED_CASES_KEPT + 4)]
+        self.assertEqual(kept, expected)
 
     def test_deleting_an_empty_consultation_changes_nothing_that_is_stored(self):
         client = self.app_module.app.test_client()
