@@ -48,3 +48,29 @@ def test_failed_warmup_leaves_the_api_serving():
     body = _run(Settings(api={"warmup": True}), retriever)
     assert body["status"] == "ok"
     assert body["warm"] is False
+
+
+def test_a_request_during_warmup_does_not_stall_health(monkeypatch):
+    """Building the retriever holds a lock for ~10 s. A route that waits for it on the event loop
+    stalled every other request, /health included (review finding, 2026-10-15)."""
+    import threading
+    import time
+
+    import legal_rag.api.app as api_app
+
+    def slow_build(settings):
+        time.sleep(1.5)
+        return _FakeRetriever()
+
+    monkeypatch.setattr(api_app, "build_hybrid_retriever", slow_build)
+    app = create_app(settings=Settings(api={"warmup": True}))
+    with TestClient(app) as client:
+        time.sleep(0.2)  # the warm-up thread now holds the lock
+        search = threading.Thread(target=client.post, args=("/v1/search",), kwargs={"json": {"query": "보증금"}})
+        search.start()
+        time.sleep(0.2)  # the search request is waiting for the retriever
+        started = time.perf_counter()
+        assert client.get("/health").status_code == 200
+        waited = time.perf_counter() - started
+        search.join(timeout=5)
+    assert waited < 0.5

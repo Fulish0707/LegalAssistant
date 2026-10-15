@@ -51,7 +51,8 @@ def health(request: Request) -> HealthResponse:
 
 @router.post("/v1/search", response_model=SearchResponse)
 async def search(body: SearchRequest, request: Request) -> SearchResponse:
-    retriever = request.app.state.get_retriever()
+    # The getters wait on a lock while the retriever is built (~10 s at start); off the event loop.
+    retriever = await run_in_threadpool(request.app.state.get_retriever)
     hits = await run_in_threadpool(retriever.retrieve, body.query, body.k, body.filters)
     labels = await run_in_threadpool(document_labels, hits, _stores(retriever))
     return SearchResponse(hits=hits, labels=labels)
@@ -60,7 +61,7 @@ async def search(body: SearchRequest, request: Request) -> SearchResponse:
 @router.get("/v1/document", response_model=DocumentResponse)
 async def document(request: Request, chunk_id: str = Query(min_length=1, max_length=512)) -> DocumentResponse:
     """The whole document that holds one chunk, for reading a source an answer cited."""
-    stores = list(_stores(request.app.state.get_retriever()).values())
+    stores = list(_stores(await run_in_threadpool(request.app.state.get_retriever)).values())
     found = await run_in_threadpool(find_document, stores, chunk_id)
     if found is None:
         raise HTTPException(status_code=404, detail="No indexed document holds this chunk.")
@@ -97,11 +98,11 @@ async def law(request: Request, name: str = Query(min_length=1, max_length=200))
 
 @router.post("/v1/chat", response_model=ChatResponse, response_model_exclude_none=True)
 async def chat(body: ChatRequest, request: Request) -> ChatResponse:
-    orchestrator = request.app.state.get_orchestrator()
+    orchestrator = await run_in_threadpool(request.app.state.get_orchestrator)
     conversation_id = body.conversation_id or uuid.uuid4().hex
     pinned = []
     if body.pinned_chunk_ids:
-        stores = list(_stores(request.app.state.get_retriever()).values())
+        stores = list(_stores(await run_in_threadpool(request.app.state.get_retriever)).values())
         pinned = await run_in_threadpool(pinned_chunks, stores, body.pinned_chunk_ids)
     response = await run_in_threadpool(orchestrator.handle, body.message, conversation_id=conversation_id,
                                          user_documents=body.user_documents, pinned=pinned)
