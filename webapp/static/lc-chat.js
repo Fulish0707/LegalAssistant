@@ -200,10 +200,11 @@
     });
   }
 
-  /* 초안의 근거 표시 (S1), [S1, S2], S1은 지운다. 최종 번호 [1]은 답이 끝나야 정해진다 */
+  /* 초안의 인용 괄호 (S1), (S1, S2)는 지운다. 최종 번호 [1]은 답이 끝나야 정해진다.
+     "S1은"처럼 문장 안에서 이름으로 쓴 ID는 지우면 조사만 남으므로 S1로 둔다 */
   const stripSourceIds = text => text
-    .replace(/\s*[(\[]\s*(?:(?:LEGAL SOURCE |USER DOCUMENT )?[SD]\d+\s*,?\s*)+[)\]]/g, '')
-    .replace(/(?<![A-Za-z0-9])[SD]\d+(?![A-Za-z0-9])/g, '');
+    .replace(/\s*[(]\s*(?:[SD]\d+\s*,?\s*)+[)]/g, '')
+    .replace(/\[(?:LEGAL SOURCE |USER DOCUMENT )?([SD]\d+)\]/g, '$1');
 
   /* 서버의 근거 목록을 우측 패널의 카드로 */
   const sourceCards = sources => (sources || []).map((h, i) => ({ id: String(i + 1), kind: h.kind || '내 문서', title: h.source, quote: h.quote, score: h.score, chunkId: h.chunk_id }));
