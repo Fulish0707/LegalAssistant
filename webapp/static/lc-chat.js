@@ -87,7 +87,7 @@
       </div>` : ''}
 
       ${P.thinking && P.writing ? `
-      <div style="display:flex;justify-content:flex-start"><div style="max-width:100%;padding:18px 22px;border-radius:5px 16px 16px 16px;border:1px dashed #e6e3dd;background:#faf9f6;color:#767d83;font-size:14px;line-height:1.85;white-space:pre-wrap;text-wrap:pretty"><div style="margin-bottom:8px;font-size:11px;letter-spacing:.08em;color:#9aa0a5">작성 중 · 검증 전</div><span id="draftText">${esc(stripSourceIds(P.writing))}</span></div></div>` : ''}
+      <div style="display:flex;justify-content:flex-start"><div style="max-width:100%;padding:18px 22px;border-radius:5px 16px 16px 16px;border:1px dashed #e6e3dd;background:#faf9f6;color:#767d83;font-size:14px;line-height:1.85;white-space:pre-wrap;text-wrap:pretty"><div style="margin-bottom:8px;font-size:11px;letter-spacing:.08em;color:#9aa0a5">작성 중 · 검증 전</div><span id="draftText">${esc(shownDraft())}</span></div></div>` : ''}
 
       ${P.thinking ? `
       <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border:1px solid #e6e3dd;border-radius:14px;background:#fff;font-size:12.5px;color:#767d83">
@@ -216,9 +216,17 @@
     if (started || !node) { LC.pinThread = true; renderKeepingInput(); return; }
     const thread = document.getElementById('thread');
     const following = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 40;
-    node.textContent = stripSourceIds(P.writing);
+    node.textContent = shownDraft();
     if (following) thread.scrollTop = thread.scrollHeight;
   }
+
+  /* 분석은 보통 1,400자를 넘지 않는다(57개 중 최대 1,387자, 2026-10-17). 그보다 길면 모델이 같은 말을
+     되풀이하는 중일 수 있으므로 초안을 더 늘리지 않는다. 상태 줄은 계속 단계를 보여 준다 */
+  const DRAFT_SHOW = 1500;
+  const shownDraft = () => {
+    const text = stripSourceIds(P.writing);
+    return text.length > DRAFT_SHOW ? text.slice(0, DRAFT_SHOW) + ' …' : text;
+  };
 
   /* 초안이 나타나거나 지워질 때는 다시 그린다. 쓰고 있던 입력창의 포커스와 커서는 되돌린다.
      조합 중인 한글 한 글자는 그 자리에서 확정된다 */

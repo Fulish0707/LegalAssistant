@@ -128,6 +128,13 @@ class ChatStreamingTests(ChatStreamBase):
         self.assertIn({"type": "draft", "content": "분석"}, events)
         self.assertEqual(self.final(events)["chat_response"], "요약입니다.\n\n분석입니다.")
 
+    def test_each_backend_stage_becomes_a_status_line(self):
+        stages = [{"type": "stage", "stage": name} for name in ("analyze", "search", "write", "verify", "rewrite")]
+        events = self.collect(mock.Mock(return_value=[*stages, *turn(backend_answer())]))
+
+        self.assertEqual([e["content"] for e in events if e["type"] == "thought"][1:6],
+                         ["질문 분석 중", "법령·판례 검색 중", "답변 작성 중", "근거 확인 중", "근거가 맞지 않아 다시 쓰는 중"])
+
     def test_final_response_carries_the_answer(self):
         final = self.final(self.collect(backend_answer("요약입니다.", "분석입니다.")))
 

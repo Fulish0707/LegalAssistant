@@ -42,7 +42,7 @@ class LegalBackendUnavailable(Exception):
 
 
 def ask(base_url, message, conversation_id, documents=(), pinned=()):
-    """One chat turn, read as it streams. Yields the service's {"type": "draft" | "draft_reset"}
+    """One chat turn, read as it streams. Yields the service's {"type": "stage" | "draft" | "draft_reset"}
     events, then {"type": "response", "body": <the /v1/chat body>}.
     `documents` are passages of the user's own files: [{name, text, ...}].
     `pinned` are ids of passages the user chose to ask about; the service puts them first in the evidence."""

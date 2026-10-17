@@ -316,3 +316,20 @@ def test_a_clarification_streams_no_draft(retriever):
     events = []
     assert _orchestrator(settings, r, model).handle("어떻게 되나요?", conversation_id="d2", on_draft=events.append).kind == "clarification"
     assert events == []
+
+
+def test_each_stage_is_announced_as_it_starts(retriever):
+    settings, r = retriever
+    bad = _answer(source_id="S9", reference="민법 제839조의2", analysis="민법 제839조의2에 따라 청구할 수 있습니다. 보증금은 반환되어야 합니다.")
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(issues=["보증금 반환"])], "LegalAnswer": [bad, _answer()]})
+    stages = []
+    _orchestrator(settings, r, model).handle("보증금을 못 받았어요", conversation_id="s1", on_stage=stages.append)
+    assert stages == ["analyze", "search", "write", "verify", "rewrite", "verify"]
+
+
+def test_a_clarification_announces_only_the_analysis(retriever):
+    settings, r = retriever
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(needs_more_info=True, missing_facts=["보증금 액수"])]})
+    stages = []
+    _orchestrator(settings, r, model).handle("어떻게 되나요?", conversation_id="s2", on_stage=stages.append)
+    assert stages == ["analyze"]

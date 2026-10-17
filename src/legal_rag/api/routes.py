@@ -124,9 +124,10 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
 
 @router.post("/v1/chat/stream")
 async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
-    """/v1/chat as NDJSON: {"type": "draft", "text"} pieces of the analysis while the model writes it,
-    {"type": "draft_reset"} before each new attempt, then {"type": "response", "body"} with the
-    /v1/chat body, or {"type": "error"}. The draft has not been verified; only the body has."""
+    """/v1/chat as NDJSON: {"type": "stage", "stage"} as each stage starts (see Orchestrator.handle),
+    {"type": "draft", "text"} pieces of the analysis while the model writes it, {"type": "draft_reset"}
+    before each new attempt, then {"type": "response", "body"} with the /v1/chat body, or
+    {"type": "error"}. The draft has not been verified; only the body has."""
     orchestrator, conversation_id, pinned = await _turn(body, request)
     events: queue.Queue = queue.Queue()
 
@@ -136,7 +137,8 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
     def run():
         try:
             response = orchestrator.handle(body.message, conversation_id=conversation_id, user_documents=body.user_documents,
-                                           pinned=pinned, on_draft=draft)
+                                           pinned=pinned, on_draft=draft,
+                                           on_stage=lambda stage: events.put({"type": "stage", "stage": stage}))
             if not body.include_trace:
                 response = response.model_copy(update={"trace": None})
             events.put({"type": "response", "body": response.model_dump(mode="json", exclude_none=True)})

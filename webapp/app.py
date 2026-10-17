@@ -384,10 +384,25 @@ def _case_documents(user_input):
             for hit in found.get("results", []) if hit.get("quote") and hit["score"] >= CASE_DOCUMENT_MIN_SCORE]
 
 
+# The status line while legal_rag works on a stage (Orchestrator.handle announces them).
+STAGE_TEXT = {"analyze": "질문 분석 중", "search": "법령·판례 검색 중", "write": "답변 작성 중",
+              "verify": "근거 확인 중", "rewrite": "근거가 맞지 않아 다시 쓰는 중"}
+
+
+def _stream_event(event):
+    """The SSE event for a /v1/chat/stream line other than the response."""
+    if event["type"] == "stage":
+        return {'type': 'thought', 'content': STAGE_TEXT.get(event["stage"], event["stage"])}
+    if event["type"] == "draft":
+        return {'type': 'draft', 'content': event["text"]}
+    return {'type': 'draft_reset'}
+
+
 def _generate_legal_response_stream(user_input):
     """Stream a chat turn as SSE events; legal_rag's /v1/chat/stream writes the answer.
 
-    The service retrieves, generates and verifies. While its model writes, the analysis
+    The service retrieves, generates and verifies, and names each stage as it starts; the
+    status line shows it (STAGE_TEXT). While its model writes, the analysis
     comes through as `draft` events, unverified: the browser shows them only as a
     labelled draft and drops them when the answer arrives. Only that final answer
     passes both citation checks and is stored. There is no fallback to a local model:
@@ -412,7 +427,7 @@ def _generate_legal_response_stream(user_input):
             if not quota_result.allowed:
                 yield _sse({'type': 'error', 'content': 'Daily AI request quota exceeded.', 'error': 'daily_ai_quota_exceeded', 'limit': quota_result.limit})
                 return
-            yield _sse({'type': 'thought', 'content': '법령·판례 검색 및 답변 작성 중'})
+            yield _sse({'type': 'thought', 'content': '질문 확인 중'})
             documents = _case_documents(user_input)
             if documents:
                 yield _sse({'type': 'thought', 'content': f'사건 자료 {len(documents)}건 참고'})
@@ -426,9 +441,9 @@ def _generate_legal_response_stream(user_input):
                     body = event["body"]
                 elif not left:
                     try:
-                        yield _sse({'type': 'draft', 'content': event["text"]} if event["type"] == "draft" else {'type': 'draft_reset'})
+                        yield _sse(_stream_event(event))
                     except GeneratorExit:
-                        # A reload mid-draft: finish the turn without sending, so its reply is still
+                        # A reload mid-turn: finish it without sending, so its reply is still
                         # stored, as it was when nothing was sent until the answer was ready.
                         left = True
             chat_response, sources = legal_backend.render(body, documents)

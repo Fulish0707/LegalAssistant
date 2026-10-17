@@ -106,7 +106,10 @@ def test_chat_stream_sends_the_draft_then_the_same_body_as_chat(indexed):
     with client().stream("POST", "/v1/chat/stream", json=message) as response:
         assert response.headers["content-type"].startswith("application/x-ndjson")
         events = [json.loads(line) for line in response.iter_lines() if line]
-    assert events[0] == {"type": "draft_reset"} and events[-1]["type"] == "response"
+    stages = [event["stage"] for event in events if event["type"] == "stage"]
+    assert stages == ["analyze", "search", "write", "verify"] and events[-1]["type"] == "response"
+    drafts = [event for event in events if event["type"] != "stage"]
+    assert drafts[0] == {"type": "draft_reset"}
     body = events[-1]["body"]
     assert "".join(event["text"] for event in events if event["type"] == "draft") == body["answer"]["analysis"]
     assert body == client().post("/v1/chat", json=message).json()
@@ -115,7 +118,8 @@ def test_chat_stream_sends_the_draft_then_the_same_body_as_chat(indexed):
 def test_a_failed_stream_turn_ends_with_an_error_line(indexed):
     # The model has no answer scripted, so the turn raises inside the worker thread once generation starts.
     with _client(indexed, FakeChatModel({})).stream("POST", "/v1/chat/stream", json={"message": "x"}) as response:
-        assert [json.loads(line) for line in response.iter_lines() if line] == [{"type": "draft_reset"}, {"type": "error"}]
+        events = [json.loads(line) for line in response.iter_lines() if line]
+    assert [event for event in events if event["type"] != "stage"] == [{"type": "draft_reset"}, {"type": "error"}]
 
 
 def test_chat_validation_error_needs_no_backends():
