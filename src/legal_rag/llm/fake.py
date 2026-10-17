@@ -23,13 +23,15 @@ class FakeChatModel:
     name: str = "fake"
     calls: list[FakeCall] = field(default_factory=list)
 
-    def generate(self, messages, *, response_schema=None, temperature=0.2, max_tokens=1024) -> ModelResponse:
+    def generate(self, messages, *, response_schema=None, temperature=0.2, max_tokens=1024, on_text=None) -> ModelResponse:
         self.calls.append(FakeCall(list(messages), response_schema, temperature, max_tokens))
         key = response_schema.__name__ if response_schema else "text"
         queue = self.responses.get(key) or []
         if not queue:
             raise AssertionError(f"FakeChatModel has no scripted response for {key!r}")
         scripted = queue.pop(0)
+        if on_text is not None:
+            on_text(scripted.model_dump_json() if isinstance(scripted, BaseModel) else str(scripted))
         if isinstance(scripted, BaseModel):
             return ModelResponse(text=scripted.model_dump_json(), parsed=scripted)
         if response_schema is not None:

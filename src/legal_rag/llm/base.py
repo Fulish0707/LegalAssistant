@@ -1,7 +1,11 @@
-"""Chat model protocol. Backends return text and, when asked, a parsed Pydantic object."""
+"""Chat model protocol. Backends return text and, when asked, a parsed Pydantic object.
+
+With `on_text`, a backend that can stream passes each piece of output text to it.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,4 +44,5 @@ class ChatModel(Protocol):
         response_schema: type[BaseModel] | None = None,
         temperature: float = 0.2,
         max_tokens: int = 1024,
+        on_text: Callable[[str], None] | None = None,
     ) -> ModelResponse: ...

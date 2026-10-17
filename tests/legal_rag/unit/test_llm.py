@@ -69,3 +69,33 @@ def test_prompts_load():
     assert "LEGAL SOURCE" in load_prompt("answer_system")
     assert "needs_more_info" in load_prompt("analyze_system")
     assert "search_queries" in load_prompt("rewrite_system")
+
+
+def test_ollama_streams_content_to_the_callback_and_parses_the_whole():
+    seen, pieces = {}, []
+    lines = [{"message": {"content": '{"answer": '}}, {"message": {"content": '"ok"}'}},
+             {"message": {"content": ""}, "done": True, "eval_count": 2}]
+
+    def handler(request: httpx.Request):
+        seen.update(json.loads(request.read()))
+        return httpx.Response(200, content="".join(json.dumps(line) + "\n" for line in lines))
+
+    m = OllamaChatModel(model="m", base_url="http://t", transport=httpx.MockTransport(handler))
+    r = m.generate([Message(role="user", content="q")], response_schema=Out, on_text=pieces.append)
+    assert seen["stream"] is True and pieces == ['{"answer": ', '"ok"}']
+    assert r.parsed.answer == "ok" and r.raw["eval_count"] == 2
+
+
+def test_ollama_stream_error_line_raises():
+    def handler(request: httpx.Request):
+        return httpx.Response(200, content=json.dumps({"error": "model crashed"}) + "\n")
+
+    m = OllamaChatModel(model="m", base_url="http://t", transport=httpx.MockTransport(handler))
+    with pytest.raises(RuntimeError, match="model crashed"):
+        m.generate([Message(role="user", content="q")], response_schema=Out, on_text=lambda piece: None)
+
+
+def test_fake_model_passes_its_text_to_the_callback():
+    pieces = []
+    FakeChatModel({"Out": ['{"answer": "x"}']}).generate([Message(role="user", content="q")], response_schema=Out, on_text=pieces.append)
+    assert pieces == ['{"answer": "x"}']

@@ -85,6 +85,7 @@ class TransformersChatModel:
         response_schema: type[BaseModel] | None = None,
         temperature: float = 0.2,
         max_tokens: int = 1024,
+        on_text=None,
     ) -> ModelResponse:
         import torch
 
