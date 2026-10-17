@@ -1,16 +1,18 @@
-"""Client for legal_rag's /v1/chat, which writes the web chat's answers.
+"""Client for legal_rag's /v1/chat/stream, which writes the web chat's answers.
 
 The service retrieves, generates with its configured model (LEGAL_RAG__LLM__BACKEND)
 and verifies citations; this module only calls it and turns the structured response
 into the chat text and source cards the front end shows.
 """
 
+import json
 import re
 
 import httpx
 
 # A turn with one regeneration measured up to 45 s (2026-10-05); the first request
-# after a start also loads the reranker.
+# after a start also loads the reranker. httpx applies it to each read: in a streamed
+# turn the longest gap is before the first draft line (analysis and search come first).
 TIMEOUT = 180.0
 QUOTE_CHARS = 400
 
@@ -40,9 +42,11 @@ class LegalBackendUnavailable(Exception):
 
 
 def ask(base_url, message, conversation_id, documents=(), pinned=()):
-    """One chat turn. `documents` are passages of the user's own files: [{name, text, ...}].
+    """One chat turn, read as it streams. Yields the service's {"type": "draft" | "draft_reset"}
+    events, then {"type": "response", "body": <the /v1/chat body>}.
+    `documents` are passages of the user's own files: [{name, text, ...}].
     `pinned` are ids of passages the user chose to ask about; the service puts them first in the evidence."""
-    endpoint = base_url.rstrip("/") + "/v1/chat"
+    endpoint = base_url.rstrip("/") + "/v1/chat/stream"
     payload = {"message": message, "conversation_id": conversation_id}
     if documents:
         # legal_rag refuses a name over 200 characters (UserDocument in src/legal_rag/schemas/evidence.py).
@@ -50,11 +54,20 @@ def ask(base_url, message, conversation_id, documents=(), pinned=()):
     if pinned:
         payload["pinned_chunk_ids"] = list(pinned)
     try:
-        response = httpx.post(endpoint, json=payload, timeout=TIMEOUT)
-        response.raise_for_status()
-        return response.json()
-    except (httpx.HTTPError, ValueError) as error:
+        with httpx.stream("POST", endpoint, json=payload, timeout=TIMEOUT) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                event = json.loads(line)
+                if event["type"] == "error":
+                    raise LegalBackendUnavailable("the service failed the turn")
+                yield event
+                if event["type"] == "response":
+                    return
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
         raise LegalBackendUnavailable(f"{type(error).__name__}: {error}") from error
+    raise LegalBackendUnavailable("the stream ended without an answer")
 
 
 def _read(base_url, path, shape, **params):

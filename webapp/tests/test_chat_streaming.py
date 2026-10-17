@@ -1,7 +1,7 @@
 """SSE contract tests for /chat.
 
 The subject here is the event contract static/lc-chat.js consumes, not answer
-quality: every test stubs legal_backend.ask, the call to legal_rag's /v1/chat.
+quality: every test stubs legal_backend.ask, the call to legal_rag's /v1/chat/stream.
 A real call would need the service, its indexes and a model.
 """
 
@@ -19,10 +19,17 @@ from unittest import mock
 # Exactly the set static/lc-chat.js branches on (sendMessage, sse.onmessage).
 FRONTEND_EVENT_TYPES = {
     "thought",
+    "draft",
+    "draft_reset",
     "final_response",
     "error",
     "stream_end",
 }
+
+
+def turn(body):
+    """What legal_backend.ask yields for a turn whose /v1/chat body is `body`, without draft events."""
+    return [{"type": "response", "body": body}]
 
 
 def backend_answer(summary="보증금은 돌려받을 수 있습니다.", analysis="", items=()):
@@ -82,7 +89,7 @@ class ChatStreamBase(unittest.TestCase):
         """Stream one turn; `backend` is a /v1/chat body, an exception to raise, or a Mock."""
         ask = backend if isinstance(backend, mock.Mock) else mock.Mock(
             side_effect=backend if isinstance(backend, Exception) else None,
-            return_value=backend_answer() if backend is None else backend,
+            return_value=turn(backend_answer() if backend is None else backend),
         )
         self.ask = ask
         with mock.patch.dict(os.environ, {"LEGAL_RAG_URL": url}), \
@@ -108,6 +115,18 @@ class ChatStreamingTests(ChatStreamBase):
         self.assertEqual(events[0]["type"], "thought")
         self.assertEqual(events[-2]["type"], "final_response")
         self.assertEqual(events[-1]["type"], "stream_end")
+
+    def test_the_draft_is_forwarded_before_the_answer_and_the_answer_is_unchanged(self):
+        drafts = [{"type": "draft_reset"}, {"type": "draft", "text": "분석"}]
+        streamed = mock.Mock(return_value=[*drafts, *turn(backend_answer("요약입니다.", "분석입니다."))])
+
+        events = self.collect(streamed)
+
+        kinds = [event["type"] for event in events]
+        self.assertLess(kinds.index("draft"), kinds.index("final_response"))
+        self.assertIn({"type": "draft_reset"}, events)
+        self.assertIn({"type": "draft", "content": "분석"}, events)
+        self.assertEqual(self.final(events)["chat_response"], "요약입니다.\n\n분석입니다.")
 
     def test_final_response_carries_the_answer(self):
         final = self.final(self.collect(backend_answer("요약입니다.", "분석입니다.")))

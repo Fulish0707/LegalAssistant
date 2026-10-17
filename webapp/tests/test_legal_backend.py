@@ -1,4 +1,4 @@
-"""The web chat's client for legal_rag's /v1/chat: one call, and a renderer.
+"""The web chat's client for legal_rag: the streamed chat turn, the renderer, and the reader calls.
 
 The service is stubbed with an httpx transport; nothing here starts a server or a model.
 """
@@ -43,45 +43,76 @@ def served(handler):
     return mock.patch.object(legal_backend.httpx, "post", client.post)
 
 
+def asked(handler):
+    """Route legal_backend's streamed chat turn (httpx.stream) through `handler`."""
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    return mock.patch.object(legal_backend.httpx, "stream", client.stream)
+
+
+def streamed(*events):
+    """A /v1/chat/stream response: one JSON event per line."""
+    return httpx.Response(200, content="".join(json.dumps(event, ensure_ascii=False) + "\n" for event in events))
+
+
+def answered(body=ANSWER):
+    return streamed({"type": "response", "body": body})
+
+
 class AskTests(unittest.TestCase):
-    def test_posts_the_message_and_conversation_to_the_chat_endpoint(self):
+    def test_posts_the_message_and_conversation_to_the_stream_endpoint(self):
         seen = {}
 
         def handler(request):
             seen["url"] = str(request.url)
-            seen["json"] = __import__("json").loads(request.content)
-            return httpx.Response(200, json=ANSWER)
+            seen["json"] = json.loads(request.content)
+            return answered()
 
-        with served(handler):
-            body = legal_backend.ask("http://legal:8000/", "해고당했어요", "browser-1")
+        with asked(handler):
+            events = list(legal_backend.ask("http://legal:8000/", "해고당했어요", "browser-1"))
 
-        self.assertEqual(seen["url"], "http://legal:8000/v1/chat")
+        self.assertEqual(seen["url"], "http://legal:8000/v1/chat/stream")
         self.assertEqual(seen["json"], {"message": "해고당했어요", "conversation_id": "browser-1"})
-        self.assertEqual(body["kind"], "answer")
+        self.assertEqual(events, [{"type": "response", "body": ANSWER}])
+
+    def test_draft_events_come_through_in_order_before_the_answer(self):
+        drafts = [{"type": "draft_reset"}, {"type": "draft", "text": "근로기준법"}, {"type": "draft", "text": " 제28조"}]
+
+        with asked(lambda request: streamed(*drafts, {"type": "response", "body": ANSWER})):
+            self.assertEqual(list(legal_backend.ask("http://legal:8000", "q", "c")), [*drafts, {"type": "response", "body": ANSWER}])
 
     def test_an_unreachable_service_is_unavailable(self):
         def handler(request):
             raise httpx.ConnectError("refused")
 
-        with served(handler), self.assertRaises(legal_backend.LegalBackendUnavailable):
-            legal_backend.ask("http://legal:8000", "q", "c")
+        with asked(handler), self.assertRaises(legal_backend.LegalBackendUnavailable):
+            list(legal_backend.ask("http://legal:8000", "q", "c"))
 
     def test_a_timeout_is_unavailable(self):
         def handler(request):
             raise httpx.ReadTimeout("slow")
 
-        with served(handler), self.assertRaises(legal_backend.LegalBackendUnavailable):
-            legal_backend.ask("http://legal:8000", "q", "c")
+        with asked(handler), self.assertRaises(legal_backend.LegalBackendUnavailable):
+            list(legal_backend.ask("http://legal:8000", "q", "c"))
 
     def test_an_error_status_is_unavailable(self):
-        with served(lambda request: httpx.Response(500, text="boom")), \
+        with asked(lambda request: httpx.Response(500, text="boom")), \
                 self.assertRaises(legal_backend.LegalBackendUnavailable):
-            legal_backend.ask("http://legal:8000", "q", "c")
+            list(legal_backend.ask("http://legal:8000", "q", "c"))
+
+    def test_a_turn_the_service_failed_is_unavailable(self):
+        with asked(lambda request: streamed({"type": "draft_reset"}, {"type": "error"})), \
+                self.assertRaises(legal_backend.LegalBackendUnavailable):
+            list(legal_backend.ask("http://legal:8000", "q", "c"))
+
+    def test_a_stream_that_ends_without_an_answer_is_unavailable(self):
+        with asked(lambda request: streamed({"type": "draft", "text": "가"})), \
+                self.assertRaises(legal_backend.LegalBackendUnavailable):
+            list(legal_backend.ask("http://legal:8000", "q", "c"))
 
     def test_a_body_that_is_not_json_is_unavailable(self):
-        with served(lambda request: httpx.Response(200, text="<html>")), \
+        with asked(lambda request: httpx.Response(200, text="<html>")), \
                 self.assertRaises(legal_backend.LegalBackendUnavailable):
-            legal_backend.ask("http://legal:8000", "q", "c")
+            list(legal_backend.ask("http://legal:8000", "q", "c"))
 
 
 class DocumentTests(unittest.TestCase):
@@ -118,11 +149,11 @@ class PinnedPassageTests(unittest.TestCase):
 
         def handler(request):
             sent.append(json.loads(request.content))
-            return httpx.Response(200, json=ANSWER)
+            return answered()
 
-        with served(handler):
-            legal_backend.ask("http://legal:8000", "이 판례가 제 사건에도 적용되나요?", "c1", pinned=["서울중앙지방법원-2023가단5103393_chunk_0001"])
-            legal_backend.ask("http://legal:8000", "보증금 문의", "c1")
+        with asked(handler):
+            list(legal_backend.ask("http://legal:8000", "이 판례가 제 사건에도 적용되나요?", "c1", pinned=["서울중앙지방법원-2023가단5103393_chunk_0001"]))
+            list(legal_backend.ask("http://legal:8000", "보증금 문의", "c1"))
 
         self.assertEqual(sent[0]["pinned_chunk_ids"], ["서울중앙지방법원-2023가단5103393_chunk_0001"])
         self.assertNotIn("pinned_chunk_ids", sent[1])

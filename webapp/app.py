@@ -385,11 +385,13 @@ def _case_documents(user_input):
 
 
 def _generate_legal_response_stream(user_input):
-    """Stream a chat turn as SSE events; legal_rag's /v1/chat writes the answer.
+    """Stream a chat turn as SSE events; legal_rag's /v1/chat/stream writes the answer.
 
-    The service retrieves, generates and verifies, so the reply arrives whole and
-    there are no token chunks. There is no fallback to a local model: an answer that
-    skipped verification must not look like one that passed it.
+    The service retrieves, generates and verifies. While its model writes, the analysis
+    comes through as `draft` events, unverified: the browser shows them only as a
+    labelled draft and drops them when the answer arrives. Only that final answer
+    passes both citation checks and is stored. There is no fallback to a local model:
+    an answer that skipped verification must not look like one that passed it.
     """
     try:
         legal_rag_url = os.getenv("LEGAL_RAG_URL", "").strip()
@@ -416,8 +418,15 @@ def _generate_legal_response_stream(user_input):
             case = _pinned_case()
             if case:
                 yield _sse({'type': 'thought', 'content': f"붙인 판례 참고: {case['title']}"})
-            body = legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id(), documents,
-                                     pinned=[case["chunk_id"]] if case else ())
+            body = None
+            for event in legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id(), documents,
+                                           pinned=[case["chunk_id"]] if case else ()):
+                if event["type"] == "response":
+                    body = event["body"]
+                elif event["type"] == "draft":
+                    yield _sse({'type': 'draft', 'content': event["text"]})
+                else:
+                    yield _sse({'type': 'draft_reset'})
             chat_response, sources = legal_backend.render(body, documents)
             questions = legal_backend.questions(body)
             yield _sse({'type': 'thought', 'content': f'근거 {len(sources)}건 확인'})
