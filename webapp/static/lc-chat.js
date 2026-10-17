@@ -87,7 +87,7 @@
       </div>` : ''}
 
       ${P.thinking && P.writing ? `
-      <div style="display:flex;justify-content:flex-start"><div style="max-width:100%;padding:18px 22px;border-radius:5px 16px 16px 16px;border:1px dashed #e6e3dd;background:#faf9f6;color:#767d83;font-size:14px;line-height:1.85;white-space:pre-wrap;text-wrap:pretty"><div style="margin-bottom:8px;font-size:11px;letter-spacing:.08em;color:#9aa0a5">작성 중 · 검증 전</div>${esc(stripSourceIds(P.writing))}</div></div>` : ''}
+      <div style="display:flex;justify-content:flex-start"><div style="max-width:100%;padding:18px 22px;border-radius:5px 16px 16px 16px;border:1px dashed #e6e3dd;background:#faf9f6;color:#767d83;font-size:14px;line-height:1.85;white-space:pre-wrap;text-wrap:pretty"><div style="margin-bottom:8px;font-size:11px;letter-spacing:.08em;color:#9aa0a5">작성 중 · 검증 전</div><span id="draftText">${esc(stripSourceIds(P.writing))}</span></div></div>` : ''}
 
       ${P.thinking ? `
       <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border:1px solid #e6e3dd;border-radius:14px;background:#fff;font-size:12.5px;color:#767d83">
@@ -170,7 +170,7 @@
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'thought') { LC.S.traceLines.push(data.content); LC.render(); }
-          else if (data.type === 'draft') { P.writing += data.content; LC.render(); }
+          else if (data.type === 'draft') { growDraft(data.content); }
           else if (data.type === 'draft_reset') { P.writing = ''; LC.render(); }
           else if (data.type === 'final_response') {
             P.extra.push({ role:'agent', text: data.chat_response });
@@ -205,6 +205,19 @@
   const stripSourceIds = text => text
     .replace(/\s*[(]\s*(?:[SD]\d+\s*,?\s*)+[)]/g, '')
     .replace(/\[(?:LEGAL SOURCE |USER DOCUMENT )?([SD]\d+)\]/g, '$1');
+
+  /* 초안은 글자마다 온다. 화면 전체를 다시 그리면 입력창이 새로 만들어져 쓰던 글의 포커스와
+     한글 조합이 끊기므로, 처음 한 번만 그리고 그 뒤로는 초안 글자만 바꾼다 */
+  function growDraft(piece){
+    const started = !P.writing;
+    P.writing += piece;
+    const node = document.getElementById('draftText');
+    if (started || !node) { LC.pinThread = true; LC.render(); return; }
+    const thread = document.getElementById('thread');
+    const following = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 40;
+    node.textContent = stripSourceIds(P.writing);
+    if (following) thread.scrollTop = thread.scrollHeight;
+  }
 
   /* 서버의 근거 목록을 우측 패널의 카드로 */
   const sourceCards = sources => (sources || []).map((h, i) => ({ id: String(i + 1), kind: h.kind || '내 문서', title: h.source, quote: h.quote, score: h.score, chunkId: h.chunk_id }));
