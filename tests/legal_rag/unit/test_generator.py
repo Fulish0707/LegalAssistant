@@ -95,3 +95,41 @@ def test_figures_of_another_case_can_be_hidden_from_the_model():
     Generator(model, mask_case_figures=True).generate("q", bundle)
     Generator(model).generate("q", bundle)
     assert "110,000,000" not in model.calls[0].messages[1].content and "110,000,000" in model.calls[1].messages[1].content
+
+
+_TRICKY = "첫 줄\n\"인용\" \\ 끝 😀 가"
+
+
+def _draft_of(fragments):
+    from legal_rag.rag.generator import AnalysisDraft
+
+    pieces = []
+    decoder = AnalysisDraft(pieces.append)
+    for fragment in fragments:
+        decoder.feed(fragment)
+    return "".join(pieces)
+
+
+@pytest.mark.parametrize("ascii_only", [True, False])
+def test_analysis_draft_is_exact_wherever_the_json_is_split(ascii_only):
+    import json
+
+    text = json.dumps({"legal_issues": ["\"analysis\": 함정"], "analysis": _TRICKY, "summary": "요약"}, ensure_ascii=ascii_only)
+    for cut in range(len(text) + 1):
+        assert _draft_of([text[:cut], text[cut:]]) == _TRICKY, cut
+    assert _draft_of(list(text)) == _TRICKY
+
+
+def test_analysis_draft_ignores_text_after_the_analysis_ends():
+    assert _draft_of(['{"analysis": "가"', ', "summary": "나"}']) == "가"
+
+
+def test_generator_streams_the_draft_and_restarts_it_on_the_repair_retry():
+    import json
+
+    events = []
+    good = json.dumps({"analysis": "분석", "summary": "요약", "confidence": "medium"}, ensure_ascii=False)
+    model = FakeChatModel({"LegalAnswer": ['{"analysis": "잘린', good]})
+    answer = Generator(model).generate("질문", EvidenceBundle(items=[]), on_draft=events.append)
+    assert answer.analysis == "분석"
+    assert events == [None, "잘린", None, "분석"]
