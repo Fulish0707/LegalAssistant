@@ -393,6 +393,7 @@ def _generate_legal_response_stream(user_input):
     passes both citation checks and is stored. There is no fallback to a local model:
     an answer that skipped verification must not look like one that passed it.
     """
+    left = False  # the browser closed the stream during the draft
     try:
         legal_rag_url = os.getenv("LEGAL_RAG_URL", "").strip()
         if not legal_rag_url:
@@ -423,13 +424,17 @@ def _generate_legal_response_stream(user_input):
                                            pinned=[case["chunk_id"]] if case else ()):
                 if event["type"] == "response":
                     body = event["body"]
-                elif event["type"] == "draft":
-                    yield _sse({'type': 'draft', 'content': event["text"]})
-                else:
-                    yield _sse({'type': 'draft_reset'})
+                elif not left:
+                    try:
+                        yield _sse({'type': 'draft', 'content': event["text"]} if event["type"] == "draft" else {'type': 'draft_reset'})
+                    except GeneratorExit:
+                        # A reload mid-draft: finish the turn without sending, so its reply is still
+                        # stored, as it was when nothing was sent until the answer was ready.
+                        left = True
             chat_response, sources = legal_backend.render(body, documents)
             questions = legal_backend.questions(body)
-            yield _sse({'type': 'thought', 'content': f'근거 {len(sources)}건 확인'})
+            if not left:
+                yield _sse({'type': 'thought', 'content': f'근거 {len(sources)}건 확인'})
             # Second check on the shown text, whatever the service's verifier decided. It reads
             # the full evidence; the source cards carry only an excerpt. Of the user's documents it
             # reads what they cite by name; their own clause numbers vouch only for a bare 제5조.
@@ -442,6 +447,8 @@ def _generate_legal_response_stream(user_input):
             chat_response, sources, questions = fixed, [], []
 
         add_chat_message_to_db(session["user_id"], "assistant", chat_response, _conversation(), sources)
+        if left:
+            return
         yield _sse({
             "type": "final_response",
             "chat_response": chat_response,
@@ -452,14 +459,17 @@ def _generate_legal_response_stream(user_input):
     except legal_backend.LegalBackendUnavailable:
         logging.exception("legal_rag /v1/chat is unavailable")
         add_chat_message_to_db(session["user_id"], "assistant", LEGAL_BACKEND_DOWN, _conversation())
-        yield _sse({'type': 'error', 'content': LEGAL_BACKEND_DOWN})
+        if not left:
+            yield _sse({'type': 'error', 'content': LEGAL_BACKEND_DOWN})
     except Exception:
         logging.exception("Error during AI processing stream (_generate_legal_response_stream)")
         error_response_content = "An error occurred while processing your request. Please check server logs."
         add_chat_message_to_db(session["user_id"], "assistant", error_response_content, _conversation())
-        yield _sse({'type': 'error', 'content': error_response_content})
+        if not left:
+            yield _sse({'type': 'error', 'content': error_response_content})
     finally:
-        yield _sse({'type': 'stream_end'})
+        if not left:
+            yield _sse({'type': 'stream_end'})
 
 
 @app.route('/')

@@ -267,6 +267,22 @@ class ChatStreamingTests(ChatStreamBase):
         history = self.client.get("/get_initial_state").json["chat_history"]
         self.assertEqual(history[-1], {"role": "assistant", "content": "저장되는 답변입니다."})
 
+    def test_the_reply_is_stored_when_the_browser_leaves_during_the_draft(self):
+        """Before the draft streamed, the reply was stored before anything after the status lines was
+        sent; a browser that reloads mid-draft must still find the answer in its history."""
+        self.as_browser("leaving-browser")
+        backend = [{"type": "draft_reset"}, {"type": "draft", "text": "분석"}, *turn(backend_answer("떠나도 저장되는 답변입니다."))]
+        with mock.patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
+                mock.patch.object(self.app_module.legal_backend, "ask", mock.Mock(return_value=iter(backend))):
+            response = self.client.get("/chat?message=보증금 문의", buffered=False)
+            for chunk in response.response:
+                if b'"draft"' in chunk:
+                    break
+            response.close()
+
+        history = self.client.get("/get_initial_state").json["chat_history"]
+        self.assertEqual(history[-1], {"role": "assistant", "content": "떠나도 저장되는 답변입니다."})
+
     def test_missing_message_still_ends_the_stream(self):
         response = self.client.get("/chat")
         body = response.get_data(as_text=True)
