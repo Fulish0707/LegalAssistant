@@ -153,6 +153,9 @@
     P.answering = '';
     P.thinking = true;
     P.writing = '';
+    /* 이전 답변의 근거 카드는 내린다. 초안이 나오는 동안 남아 있으면 새 답의 근거처럼 읽힌다 */
+    LC.SOURCES = [];
+    P.railTab = '전체';
     LC.S.traceLines = [];
     LC.pinThread = true;
     LC.render();
