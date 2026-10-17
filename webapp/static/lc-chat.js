@@ -171,7 +171,7 @@
           const data = JSON.parse(event.data);
           if (data.type === 'thought') { LC.S.traceLines.push(data.content); LC.render(); }
           else if (data.type === 'draft') { growDraft(data.content); }
-          else if (data.type === 'draft_reset') { P.writing = ''; LC.render(); }
+          else if (data.type === 'draft_reset') { if (P.writing) { P.writing = ''; renderKeepingInput(); } }
           else if (data.type === 'final_response') {
             P.extra.push({ role:'agent', text: data.chat_response });
             P.questions = data.questions || [];
@@ -209,14 +209,25 @@
   /* 초안은 글자마다 온다. 화면 전체를 다시 그리면 입력창이 새로 만들어져 쓰던 글의 포커스와
      한글 조합이 끊기므로, 처음 한 번만 그리고 그 뒤로는 초안 글자만 바꾼다 */
   function growDraft(piece){
+    if (!P.thinking) return;
     const started = !P.writing;
     P.writing += piece;
     const node = document.getElementById('draftText');
-    if (started || !node) { LC.pinThread = true; LC.render(); return; }
+    if (started || !node) { LC.pinThread = true; renderKeepingInput(); return; }
     const thread = document.getElementById('thread');
     const following = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 40;
     node.textContent = stripSourceIds(P.writing);
     if (following) thread.scrollTop = thread.scrollHeight;
+  }
+
+  /* 초안이 나타나거나 지워질 때는 다시 그린다. 쓰고 있던 입력창의 포커스와 커서는 되돌린다.
+     조합 중인 한글 한 글자는 그 자리에서 확정된다 */
+  function renderKeepingInput(){
+    const typing = document.activeElement && document.activeElement.id === 'userInput';
+    const start = typing ? document.activeElement.selectionStart : 0, end = typing ? document.activeElement.selectionEnd : 0;
+    LC.render();
+    const input = typing && document.getElementById('userInput');
+    if (input) { input.focus(); input.setSelectionRange(start, end); }
   }
 
   /* 서버의 근거 목록을 우측 패널의 카드로 */
