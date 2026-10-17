@@ -8,6 +8,7 @@
     railTab: '전체',
     draft: '',
     thinking: false,
+    writing: '',     /* 답변 초안 — 검증 전. /chat draft 이벤트로 쌓이고 최종 답이 오면 사라진다 */
     extra: [],
     questions: [],   /* 최신 답변이 사용자에게 묻는 질문 — /chat final_response.questions */
     answering: '',   /* 사용자가 답하려고 고른 질문 */
@@ -85,6 +86,9 @@
         ${P.questions.map(q => `<button class="lc-outline" data-act="answer" data-key="${esc(q)}" style="text-align:left;padding:9px 13px;border:1px solid ${P.answering === q ? a : '#e6e3dd'};border-radius:11px;background:#fff;font-size:13px;line-height:1.6;color:#3d4348;cursor:pointer">${esc(q)}</button>`).join('')}
       </div>` : ''}
 
+      ${P.thinking && P.writing ? `
+      <div style="display:flex;justify-content:flex-start"><div style="max-width:100%;padding:18px 22px;border-radius:5px 16px 16px 16px;border:1px dashed #e6e3dd;background:#faf9f6;color:#767d83;font-size:14px;line-height:1.85;white-space:pre-wrap;text-wrap:pretty"><div style="margin-bottom:8px;font-size:11px;letter-spacing:.08em;color:#9aa0a5">작성 중 · 검증 전</div>${esc(stripSourceIds(P.writing))}</div></div>` : ''}
+
       ${P.thinking ? `
       <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border:1px solid #e6e3dd;border-radius:14px;background:#fff;font-size:12.5px;color:#767d83">
         <span style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px">${esc(LC.S.traceLines[LC.S.traceLines.length - 1] || LC.TRACE_FALLBACK[0])}</span>
@@ -148,6 +152,7 @@
     P.questions = [];
     P.answering = '';
     P.thinking = true;
+    P.writing = '';
     LC.S.traceLines = [];
     LC.pinThread = true;
     LC.render();
@@ -165,33 +170,40 @@
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'thought') { LC.S.traceLines.push(data.content); LC.render(); }
+          else if (data.type === 'draft') { P.writing += data.content; LC.render(); }
+          else if (data.type === 'draft_reset') { P.writing = ''; LC.render(); }
           else if (data.type === 'final_response') {
             P.extra.push({ role:'agent', text: data.chat_response });
             P.questions = data.questions || [];
             LC.SOURCES = sourceCards(data.sources);
-            P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
+            P.thinking = false; P.writing = ''; sse.close(); LC.pinThread = true; LC.render();
           }
           else if (data.type === 'error') {
-            P.extra.push({ role:'agent', text:'오류: ' + data.content }); P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
+            P.extra.push({ role:'agent', text:'오류: ' + data.content }); P.thinking = false; P.writing = ''; sse.close(); LC.pinThread = true; LC.render();
           }
-          else if (data.type === 'stream_end') { P.thinking = false; sse.close(); LC.render(); }
+          else if (data.type === 'stream_end') { P.thinking = false; P.writing = ''; sse.close(); LC.render(); }
         } catch (err) {
           console.error('SSE parse error:', err);
           P.extra.push({ role:'agent', text:'응답을 해석하는 중 오류가 발생했습니다.' });
-          P.thinking = false; LC.pinThread = true; LC.render();
+          P.thinking = false; P.writing = ''; LC.pinThread = true; LC.render();
         }
       };
 
       sse.onerror = () => {
         P.extra.push({ role:'agent', text:'서버 연결이 끊어졌습니다.' });
-        P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
+        P.thinking = false; P.writing = ''; sse.close(); LC.pinThread = true; LC.render();
       };
     }).catch((err) => {
       console.error('Message send error:', err);
       P.extra.push({ role:'agent', text:'메시지를 보내는 중 오류가 발생했습니다.' });
-      P.thinking = false; LC.pinThread = true; LC.render();
+      P.thinking = false; P.writing = ''; LC.pinThread = true; LC.render();
     });
   }
+
+  /* 초안의 근거 표시 (S1), [S1, S2], S1은 지운다. 최종 번호 [1]은 답이 끝나야 정해진다 */
+  const stripSourceIds = text => text
+    .replace(/\s*[(\[]\s*(?:(?:LEGAL SOURCE |USER DOCUMENT )?[SD]\d+\s*,?\s*)+[)\]]/g, '')
+    .replace(/(?<![A-Za-z0-9])[SD]\d+(?![A-Za-z0-9])/g, '');
 
   /* 서버의 근거 목록을 우측 패널의 카드로 */
   const sourceCards = sources => (sources || []).map((h, i) => ({ id: String(i + 1), kind: h.kind || '내 문서', title: h.source, quote: h.quote, score: h.score, chunkId: h.chunk_id }));
@@ -237,7 +249,7 @@
       const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
       if (!r.ok) throw new Error(r.statusText);
       applyState(await r.json());
-      Object.assign(P, { draft: '', thinking: false, railTab: '전체', questions: [], answering: '' });
+      Object.assign(P, { draft: '', thinking: false, writing: '', railTab: '전체', questions: [], answering: '' });
       LC.S.traceLines = [];
     } catch (err) {
       console.error('Conversation open error:', err);
