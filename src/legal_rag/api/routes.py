@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import queue
+import threading
 import uuid
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 
 from legal_rag.retrieval.document import find_document, pinned_chunks
 from legal_rag.retrieval.labels import document_labels
@@ -16,6 +21,7 @@ from .models import (CasesRequest, CasesResponse, ChatRequest, CitedArticle, Doc
                      LawResponse, SearchRequest, SearchResponse)
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _stores(retriever) -> dict:
@@ -96,16 +102,55 @@ async def law(request: Request, name: str = Query(min_length=1, max_length=200))
     return LawResponse(name=name, articles=articles(await run_in_threadpool(store.law_chunks, name)))
 
 
-@router.post("/v1/chat", response_model=ChatResponse, response_model_exclude_none=True)
-async def chat(body: ChatRequest, request: Request) -> ChatResponse:
+async def _turn(body: ChatRequest, request: Request):
+    """The orchestrator, the conversation id and the pinned passages for one chat turn."""
     orchestrator = await run_in_threadpool(request.app.state.get_orchestrator)
-    conversation_id = body.conversation_id or uuid.uuid4().hex
     pinned = []
     if body.pinned_chunk_ids:
         stores = list(_stores(await run_in_threadpool(request.app.state.get_retriever)).values())
         pinned = await run_in_threadpool(pinned_chunks, stores, body.pinned_chunk_ids)
+    return orchestrator, body.conversation_id or uuid.uuid4().hex, pinned
+
+
+@router.post("/v1/chat", response_model=ChatResponse, response_model_exclude_none=True)
+async def chat(body: ChatRequest, request: Request) -> ChatResponse:
+    orchestrator, conversation_id, pinned = await _turn(body, request)
     response = await run_in_threadpool(orchestrator.handle, body.message, conversation_id=conversation_id,
                                          user_documents=body.user_documents, pinned=pinned)
     if not body.include_trace:
         response = response.model_copy(update={"trace": None})
     return response
+
+
+@router.post("/v1/chat/stream")
+async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
+    """/v1/chat as NDJSON: {"type": "draft", "text"} pieces of the analysis while the model writes it,
+    {"type": "draft_reset"} before each new attempt, then {"type": "response", "body"} with the
+    /v1/chat body, or {"type": "error"}. The draft has not been verified; only the body has."""
+    orchestrator, conversation_id, pinned = await _turn(body, request)
+    events: queue.Queue = queue.Queue()
+
+    def draft(text):
+        events.put({"type": "draft_reset"} if text is None else {"type": "draft", "text": text})
+
+    def run():
+        try:
+            response = orchestrator.handle(body.message, conversation_id=conversation_id, user_documents=body.user_documents,
+                                           pinned=pinned, on_draft=draft)
+            if not body.include_trace:
+                response = response.model_copy(update={"trace": None})
+            events.put({"type": "response", "body": response.model_dump(mode="json", exclude_none=True)})
+        except Exception:
+            logger.exception("chat turn failed")
+            events.put({"type": "error"})
+        finally:
+            events.put(None)
+
+    threading.Thread(target=run, daemon=True).start()
+
+    def lines():
+        # Starlette runs this iterator in its thread pool, so the wait never blocks the event loop.
+        while (event := events.get()) is not None:
+            yield json.dumps(event, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson")

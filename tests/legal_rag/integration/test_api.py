@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from legal_rag.api import create_app
@@ -94,6 +96,26 @@ def test_chat_endpoint_round_trip(indexed):
     assert client.post("/v1/chat", json={"message": "x", "pinned_chunk_ids": ["a", "b", "c"]}).status_code == 422
     traced = client.post("/v1/chat", json={"message": "후속 질문", "conversation_id": body["conversation_id"], "include_trace": True}).json()
     assert traced["trace"]["policy_action"] in {"accept", "strip"} and traced["conversation_id"] == body["conversation_id"]
+
+
+def test_chat_stream_sends_the_draft_then_the_same_body_as_chat(indexed):
+    def client():
+        return _client(indexed, FakeChatModel({"QueryAnalysis": [QueryAnalysis(issues=["보증금 반환"])], "LegalAnswer": [_answer()]}))
+
+    message = {"message": "임차권등기명령 신청서에 적어야 하는 사항은?", "conversation_id": "s1"}
+    with client().stream("POST", "/v1/chat/stream", json=message) as response:
+        assert response.headers["content-type"].startswith("application/x-ndjson")
+        events = [json.loads(line) for line in response.iter_lines() if line]
+    assert events[0] == {"type": "draft_reset"} and events[-1]["type"] == "response"
+    body = events[-1]["body"]
+    assert "".join(event["text"] for event in events if event["type"] == "draft") == body["answer"]["analysis"]
+    assert body == client().post("/v1/chat", json=message).json()
+
+
+def test_a_failed_stream_turn_ends_with_an_error_line(indexed):
+    # The model has no answer scripted, so the turn raises inside the worker thread once generation starts.
+    with _client(indexed, FakeChatModel({})).stream("POST", "/v1/chat/stream", json={"message": "x"}) as response:
+        assert [json.loads(line) for line in response.iter_lines() if line] == [{"type": "draft_reset"}, {"type": "error"}]
 
 
 def test_chat_validation_error_needs_no_backends():
