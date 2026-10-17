@@ -21,6 +21,7 @@ from unittest.mock import Mock, patch
 from urllib.parse import quote
 
 from quota import guest_ip_identity, reserve_daily_quota
+from tests.test_chat_streaming import turn
 
 
 class ExplodingChatModel:
@@ -240,7 +241,7 @@ class AppContractTests(unittest.TestCase):
 
     def test_chat_sse_reports_quota_exhaustion_without_calling_the_backend(self):
         self.exhaust_ip_quota("127.0.0.1")
-        ask = Mock(return_value={"kind": "rejected"})
+        ask = Mock(return_value=turn({"kind": "rejected"}))
         env, stub = self.backend(ask)
         with env, stub:
             response = self.app_module.app.test_client().get("/chat?message=" + quote("전세 보증금을 못 받았어요"))
@@ -254,7 +255,7 @@ class AppContractTests(unittest.TestCase):
         """The quota was reserved before the canned reply was chosen (code review, 2026-10-14)."""
         identity = self.exhaust_ip_quota("127.0.0.1")
         used = self.quota_row(identity)[0]
-        ask = Mock(return_value={"kind": "rejected"})
+        ask = Mock(return_value=turn({"kind": "rejected"}))
         env, stub = self.backend(ask)
         with env, stub:
             body = self.app_module.app.test_client().get("/chat?message=" + quote("안녕하세요")).get_data(as_text=True)
@@ -272,7 +273,7 @@ class AppContractTests(unittest.TestCase):
         used = (self.quota_row(identity) or [0])[0]
         client = self.app_module.app.test_client()
         posted = client.post("/chat", json={"message": long_message})
-        ask = Mock(return_value={"kind": "rejected"})
+        ask = Mock(return_value=turn({"kind": "rejected"}))
         env, stub = self.backend(ask)
         with env, stub:
             body = client.get("/chat?message=" + quote(long_message)).get_data(as_text=True)
@@ -287,7 +288,7 @@ class AppContractTests(unittest.TestCase):
     def test_quota_is_shared_per_ip_and_survives_a_cleared_cookie(self):
         shared_ip, other_ip = "203.0.113.10", "203.0.113.11"
         self.exhaust_ip_quota(shared_ip, count=19)
-        ask = Mock(return_value={"kind": "rejected"})
+        ask = Mock(return_value=turn({"kind": "rejected"}))
 
         first = self.app_module.app.test_client()
         second = self.app_module.app.test_client()

@@ -10,12 +10,12 @@ import os
 import tempfile
 from unittest.mock import Mock, patch
 
-from tests.test_chat_streaming import STATUTE_ITEM, ChatStreamBase, backend_answer
+from tests.test_chat_streaming import STATUTE_ITEM, ChatStreamBase, backend_answer, turn
 
 
 class ConversationIdTests(ChatStreamBase):
     def conversation_of(self, client):
-        ask = Mock(return_value={"kind": "rejected"})
+        ask = Mock(return_value=turn({"kind": "rejected"}))
         with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
                 patch.object(self.app_module.legal_backend, "ask", ask):
             client.get("/chat?message=보증금 문의").get_data()
@@ -48,7 +48,7 @@ class ConsultationListTests(ChatStreamBase):
     def ask(self, client, message, body=None):
         client.post("/chat", json={"message": message})
         with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
-                patch.object(self.app_module.legal_backend, "ask", Mock(return_value=body or {"kind": "rejected"})) as backend:
+                patch.object(self.app_module.legal_backend, "ask", Mock(return_value=turn(body or {"kind": "rejected"}))) as backend:
             client.get("/chat", query_string={"message": message}).get_data()
         return backend.call_args.args[2]
 
@@ -125,7 +125,7 @@ class ConsultationListTests(ChatStreamBase):
     def pinned(self, client, message="이 판례가 제 사건에도 적용될 수 있나요?"):
         client.post("/chat", json={"message": message})
         with patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
-                patch.object(self.app_module.legal_backend, "ask", Mock(return_value={"kind": "rejected"})) as backend:
+                patch.object(self.app_module.legal_backend, "ask", Mock(return_value=turn({"kind": "rejected"}))) as backend:
             client.get("/chat", query_string={"message": message}).get_data()
         return list(backend.call_args.kwargs["pinned"])
 

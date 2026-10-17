@@ -8,6 +8,9 @@ for a QLoRA adapter trained on plain-text legal QA.
 
 from __future__ import annotations
 
+import json
+import re
+
 from legal_rag.llm import ChatModel, Message, StructuredOutputError
 from legal_rag.llm.prompts import load_prompt
 from collections.abc import Sequence
@@ -35,6 +38,54 @@ def _repair_request(error: StructuredOutputError) -> str:
     return f"출력이 JSON 스키마에 맞지 않았습니다: {error}. 스키마에 맞는 JSON 객체만 출력하세요."
 
 
+_ANALYSIS_KEY = re.compile(r'"analysis"\s*:\s*"')
+_ESCAPES = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
+
+
+class AnalysisDraft:
+    """Decodes the "analysis" string of a LegalAnswer while its JSON is still arriving.
+
+    The model writes analysis first (LegalAnswer field order), so this is the first prose
+    the web chat can show. An escape cut between two pieces waits for the next piece.
+    """
+
+    def __init__(self, emit) -> None:
+        self.emit, self.buffer, self.at, self.done = emit, "", None, False
+
+    def feed(self, piece: str) -> None:
+        self.buffer += piece
+        if self.at is None:
+            # Inside a JSON string a quote is escaped, so this matches only the key itself.
+            match = _ANALYSIS_KEY.search(self.buffer)
+            if match is None:
+                return
+            self.at = match.end()
+        text, at, buffer = [], self.at, self.buffer
+        while at < len(buffer) and not self.done:
+            char = buffer[at]
+            if char == '"':
+                self.done = True
+            elif char != "\\":
+                text.append(char)
+                at += 1
+            elif at + 1 >= len(buffer):
+                break
+            elif buffer[at + 1] != "u":
+                text.append(_ESCAPES.get(buffer[at + 1], buffer[at + 1]))
+                at += 2
+            else:
+                # \uXXXX, or a surrogate pair \uD83D\uDE00 for a character outside the BMP. A piece
+                # that ends inside the first four digits counts as a pair, so it waits rather than splits.
+                size = 12 if buffer[at + 2:at + 3].lower() in ("", "d") and buffer[at + 3:at + 4].lower() in "89ab" else 6
+                if at + size > len(buffer):
+                    break
+                text.append(json.loads(f'"{buffer[at:at + size]}"'))
+                at += size
+        self.at = at
+        if text:
+            self.emit("".join(text))
+
+
 class GenerationError(RuntimeError):
     """The model could not produce a schema-valid answer even after a repair attempt."""
 
@@ -52,11 +103,12 @@ class Generator:
         self.plain_text = plain_text
 
     def generate(self, message: str, bundle: EvidenceBundle, *, feedback: str | None = None, history: list[Turn] | None = None,
-                 open_questions: list[str] | None = None, user_documents: Sequence[UserDocument] = ()) -> LegalAnswer:
+                 open_questions: list[str] | None = None, user_documents: Sequence[UserDocument] = (), on_draft=None) -> LegalAnswer:
+        """`on_draft` receives the analysis as the model writes it, and None before each model call."""
         if self.plain_text:
             return self._generate_plain(message, bundle, feedback=feedback)
         return self._generate_structured(message, bundle, feedback=feedback, history=history, open_questions=open_questions,
-                                         user_documents=user_documents)
+                                         user_documents=user_documents, on_draft=on_draft)
 
     # ── plain text mode (for QLoRA adapter) ─────────────────────────────────
 
@@ -93,7 +145,7 @@ class Generator:
     # ── structured JSON mode (for Ollama / large models) ────────────────────
 
     def _generate_structured(self, message: str, bundle: EvidenceBundle, *, feedback: str | None = None, history: list[Turn] | None = None,
-                             open_questions: list[str] | None = None, user_documents: Sequence[UserDocument] = ()) -> LegalAnswer:
+                             open_questions: list[str] | None = None, user_documents: Sequence[UserDocument] = (), on_draft=None) -> LegalAnswer:
         evidence = bundle.render(mask_case_figures=self.mask_case_figures) if bundle.items else "(검색된 법률 근거가 없습니다. 근거 없이 조문이나 판례를 언급하지 마세요.)"
         system = load_prompt("answer_system")
         if self.answer_style == "concise":
@@ -119,8 +171,13 @@ class Generator:
             messages.append(Message(role="user", content=feedback))
         last_error: StructuredOutputError | None = None
         for _ in range(2):
+            stream = None
+            if on_draft is not None:
+                on_draft(None)  # a new model call: what the last one wrote is thrown away
+                stream = AnalysisDraft(on_draft).feed
             try:
-                response = self.model.generate(messages, response_schema=LegalAnswer, temperature=self.temperature, max_tokens=self.max_tokens)
+                response = self.model.generate(messages, response_schema=LegalAnswer, temperature=self.temperature,
+                                               max_tokens=self.max_tokens, on_text=stream)
             except StructuredOutputError as exc:
                 last_error = exc
                 messages = messages + [Message(role="user", content=_repair_request(exc))]

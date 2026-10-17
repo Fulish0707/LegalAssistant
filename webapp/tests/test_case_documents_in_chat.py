@@ -5,11 +5,10 @@ import json
 import unittest
 from unittest import mock
 
-import httpx
 
 import legal_backend
 from tests.test_chat_streaming import ChatStreamBase, backend_answer
-from tests.test_legal_backend import ANSWER, served
+from tests.test_legal_backend import ANSWER, answered, asked
 
 LEASE = {"name": "임대차계약서.pdf", "text": "제5조 임대인은 계약 종료일에 보증금 1억 원을 반환한다.", "score": 0.82}
 
@@ -20,10 +19,10 @@ class AskWithDocumentsTests(unittest.TestCase):
 
         def handler(request):
             seen.update(json.loads(request.content))
-            return httpx.Response(200, json=ANSWER)
+            return answered()
 
-        with served(handler):
-            legal_backend.ask("http://legal:8000", "보증금 문의", "browser-1", *args)
+        with asked(handler):
+            list(legal_backend.ask("http://legal:8000", "보증금 문의", "browser-1", *args))
         return seen
 
     def test_no_documents_sends_the_same_body_as_before(self):

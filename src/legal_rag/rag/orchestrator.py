@@ -80,8 +80,11 @@ class Orchestrator:
         )
 
     def handle(self, message: str, *, conversation_id: str, user_documents: Sequence[UserDocument] = (),
-               pinned: Sequence[Chunk] = ()) -> ChatResponse:
-        """One chat turn. `pinned` are passages the user chose to ask about; they lead the evidence."""
+               pinned: Sequence[Chunk] = (), on_draft=None, on_stage=None) -> ChatResponse:
+        """One chat turn. `pinned` are passages the user chose to ask about; they lead the evidence.
+        `on_draft` receives the analysis as the model writes it, and None before each new attempt (see Generator).
+        `on_stage` receives each stage as it starts: analyze, search, write, verify, and rewrite for a regeneration."""
+        announce = on_stage or (lambda stage: None)
         recorder = TraceRecorder(
             conversation_id=conversation_id,
             user_text=message,
@@ -93,6 +96,7 @@ class Orchestrator:
         history = self.store.get(conversation_id).turns
         self.store.append(conversation_id, Turn(role="user", content=message, created_at=_now()))
 
+        announce("analyze")
         with recorder.stage("analyze"):
             analysis = self.analyzer.analyze(message, history)
         trace.analysis = analysis
@@ -105,6 +109,7 @@ class Orchestrator:
         # Retrieval and generation work on a question that stands alone; the user's own words
         # (and so the verifier's user_refs) stay `message`.
         recent = history[-self.settings.rag.history_turns :] if self.settings.rag.history_turns > 0 else []
+        announce("search")
         with recorder.stage("condense"):
             question = self.condenser.condense(message, history) if self.condenser else message
 
@@ -139,7 +144,8 @@ class Orchestrator:
         said = " ".join(turn.content for turn in recent if turn.role == "assistant" and turn.evidence_ids)
         prior_refs = [*(ref.render() for ref in extract_statute_refs(said) if ref.law_name), *extract_case_refs(said)]
 
-        answer, report, action = self._generate_verified(question, bundle, analysis, recent, open_questions, recorder, user_documents, prior_refs)
+        answer, report, action = self._generate_verified(question, bundle, analysis, recent, open_questions, recorder, user_documents, prior_refs,
+                                                         on_draft, announce)
 
         if answer is None or report is None:
             recorder.finish(policy_action=VerificationAction.reject.value)
@@ -163,7 +169,7 @@ class Orchestrator:
     def _generate_verified(
         self, question: str, bundle: EvidenceBundle, analysis: QueryAnalysis, recent: list[Turn],
         open_questions: list[str], recorder: TraceRecorder, user_documents: Sequence[UserDocument] = (),
-        prior_refs: Sequence[str] = (),
+        prior_refs: Sequence[str] = (), on_draft=None, announce=lambda stage: None,
     ) -> tuple[LegalAnswer | None, VerificationReport | None, VerificationAction]:
         """Generate, verify, and regenerate with the verifier's feedback while the policy asks for it."""
         answer: LegalAnswer | None = None
@@ -181,14 +187,16 @@ class Orchestrator:
                      *(case for document in user_documents for case in extract_case_refs(document.text))]
         for attempt in range(self.settings.rag.max_regenerations + 1):
             try:
+                announce("rewrite" if attempt else "write")
                 with recorder.stage(f"generate[{attempt}]"):
                     draft = self.generator.generate(question, bundle, feedback=feedback, history=recent, open_questions=open_questions,
-                                                    user_documents=user_documents)
+                                                    user_documents=user_documents, on_draft=on_draft)
             except GenerationError:
                 # The model broke the JSON twice, e.g. by looping past max_tokens. Strip the
                 # draft that asked for this regeneration, or refuse; either beats a 500.
                 action = VerificationAction.strip if answer is not None else VerificationAction.reject
                 break
+            announce("verify")
             with recorder.stage(f"verify[{attempt}]"):
                 draft = draft.model_copy(update={"citations": [c for c in draft.citations if c.source_id not in document_ids]})
                 answer = backfill_citations(draft, bundle)

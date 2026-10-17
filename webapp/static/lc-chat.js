@@ -8,6 +8,7 @@
     railTab: '전체',
     draft: '',
     thinking: false,
+    writing: '',     /* 답변 초안 — 검증 전. /chat draft 이벤트로 쌓이고 최종 답이 오면 사라진다 */
     extra: [],
     questions: [],   /* 최신 답변이 사용자에게 묻는 질문 — /chat final_response.questions */
     answering: '',   /* 사용자가 답하려고 고른 질문 */
@@ -85,6 +86,9 @@
         ${P.questions.map(q => `<button class="lc-outline" data-act="answer" data-key="${esc(q)}" style="text-align:left;padding:9px 13px;border:1px solid ${P.answering === q ? a : '#e6e3dd'};border-radius:11px;background:#fff;font-size:13px;line-height:1.6;color:#3d4348;cursor:pointer">${esc(q)}</button>`).join('')}
       </div>` : ''}
 
+      ${P.thinking && P.writing ? `
+      <div style="display:flex;justify-content:flex-start"><div style="max-width:100%;padding:18px 22px;border-radius:5px 16px 16px 16px;border:1px dashed #e6e3dd;background:#faf9f6;color:#767d83;font-size:14px;line-height:1.85;white-space:pre-wrap;text-wrap:pretty"><div style="margin-bottom:8px;font-size:11px;letter-spacing:.08em;color:#9aa0a5">작성 중 · 검증 전</div><span id="draftText">${esc(shownDraft())}</span></div></div>` : ''}
+
       ${P.thinking ? `
       <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border:1px solid #e6e3dd;border-radius:14px;background:#fff;font-size:12.5px;color:#767d83">
         <span style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px">${esc(LC.S.traceLines[LC.S.traceLines.length - 1] || LC.TRACE_FALLBACK[0])}</span>
@@ -148,6 +152,10 @@
     P.questions = [];
     P.answering = '';
     P.thinking = true;
+    P.writing = '';
+    /* 이전 답변의 근거 카드는 내린다. 초안이 나오는 동안 남아 있으면 새 답의 근거처럼 읽힌다 */
+    LC.SOURCES = [];
+    P.railTab = '전체';
     LC.S.traceLines = [];
     LC.pinThread = true;
     LC.render();
@@ -165,32 +173,72 @@
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'thought') { LC.S.traceLines.push(data.content); LC.render(); }
+          else if (data.type === 'draft') { growDraft(data.content); }
+          else if (data.type === 'draft_reset') { if (P.writing) { P.writing = ''; renderKeepingInput(); } }
           else if (data.type === 'final_response') {
             P.extra.push({ role:'agent', text: data.chat_response });
             P.questions = data.questions || [];
             LC.SOURCES = sourceCards(data.sources);
-            P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
+            P.thinking = false; P.writing = ''; sse.close(); LC.pinThread = true; LC.render();
           }
           else if (data.type === 'error') {
-            P.extra.push({ role:'agent', text:'오류: ' + data.content }); P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
+            P.extra.push({ role:'agent', text:'오류: ' + data.content }); P.thinking = false; P.writing = ''; sse.close(); LC.pinThread = true; LC.render();
           }
-          else if (data.type === 'stream_end') { P.thinking = false; sse.close(); LC.render(); }
+          else if (data.type === 'stream_end') { P.thinking = false; P.writing = ''; sse.close(); LC.render(); }
         } catch (err) {
           console.error('SSE parse error:', err);
           P.extra.push({ role:'agent', text:'응답을 해석하는 중 오류가 발생했습니다.' });
-          P.thinking = false; LC.pinThread = true; LC.render();
+          P.thinking = false; P.writing = ''; LC.pinThread = true; LC.render();
         }
       };
 
       sse.onerror = () => {
         P.extra.push({ role:'agent', text:'서버 연결이 끊어졌습니다.' });
-        P.thinking = false; sse.close(); LC.pinThread = true; LC.render();
+        P.thinking = false; P.writing = ''; sse.close(); LC.pinThread = true; LC.render();
       };
     }).catch((err) => {
       console.error('Message send error:', err);
       P.extra.push({ role:'agent', text:'메시지를 보내는 중 오류가 발생했습니다.' });
-      P.thinking = false; LC.pinThread = true; LC.render();
+      P.thinking = false; P.writing = ''; LC.pinThread = true; LC.render();
     });
+  }
+
+  /* 초안의 인용 괄호 (S1), (S1, S2)는 지운다. 최종 번호 [1]은 답이 끝나야 정해진다.
+     "S1은"처럼 문장 안에서 이름으로 쓴 ID는 지우면 조사만 남으므로 S1로 둔다 */
+  const stripSourceIds = text => text
+    .replace(/\s*[(]\s*(?:[SD]\d+\s*,?\s*)+[)]/g, '')
+    .replace(/\[(?:LEGAL SOURCE |USER DOCUMENT )?([SD]\d+)\]/g, '$1');
+
+  /* 초안은 글자마다 온다. 화면 전체를 다시 그리면 입력창이 새로 만들어져 쓰던 글의 포커스와
+     한글 조합이 끊기므로, 처음 한 번만 그리고 그 뒤로는 초안 글자만 바꾼다 */
+  function growDraft(piece){
+    if (!P.thinking) return;
+    const started = !P.writing;
+    P.writing += piece;
+    const node = document.getElementById('draftText');
+    if (started || !node) { LC.pinThread = true; renderKeepingInput(); return; }
+    const thread = document.getElementById('thread');
+    const following = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 40;
+    node.textContent = shownDraft();
+    if (following) thread.scrollTop = thread.scrollHeight;
+  }
+
+  /* 분석은 보통 1,400자를 넘지 않는다(57개 중 최대 1,387자, 2026-10-17). 그보다 길면 모델이 같은 말을
+     되풀이하는 중일 수 있으므로 초안을 더 늘리지 않는다. 상태 줄은 계속 단계를 보여 준다 */
+  const DRAFT_SHOW = 1500;
+  const shownDraft = () => {
+    const text = stripSourceIds(P.writing);
+    return text.length > DRAFT_SHOW ? text.slice(0, DRAFT_SHOW) + ' …' : text;
+  };
+
+  /* 초안이 나타나거나 지워질 때는 다시 그린다. 쓰고 있던 입력창의 포커스와 커서는 되돌린다.
+     조합 중인 한글 한 글자는 그 자리에서 확정된다 */
+  function renderKeepingInput(){
+    const typing = document.activeElement && document.activeElement.id === 'userInput';
+    const start = typing ? document.activeElement.selectionStart : 0, end = typing ? document.activeElement.selectionEnd : 0;
+    LC.render();
+    const input = typing && document.getElementById('userInput');
+    if (input) { input.focus(); input.setSelectionRange(start, end); }
   }
 
   /* 서버의 근거 목록을 우측 패널의 카드로 */
@@ -237,7 +285,7 @@
       const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
       if (!r.ok) throw new Error(r.statusText);
       applyState(await r.json());
-      Object.assign(P, { draft: '', thinking: false, railTab: '전체', questions: [], answering: '' });
+      Object.assign(P, { draft: '', thinking: false, writing: '', railTab: '전체', questions: [], answering: '' });
       LC.S.traceLines = [];
     } catch (err) {
       console.error('Conversation open error:', err);

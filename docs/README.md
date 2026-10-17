@@ -46,6 +46,7 @@
 코드 리뷰와 후속 시험 (2026-10-14 ~ 10-16).
 
 - [코드 리뷰 지적, 법령 이름 인용 검사, Ollama 0.40.4](experiments/code-review-fixes-2026-10-14.md)
+- [답변 초안 스트리밍](experiments/answer-streaming-2026-10-17.md) (2026-10-17)
 
 구조 청크.
 

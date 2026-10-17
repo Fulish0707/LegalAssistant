@@ -24,11 +24,12 @@ class OllamaChatModel:
         self.think = think
         self._client = httpx.Client(base_url=base_url, timeout=timeout, transport=transport)
 
-    def generate(self, messages, *, response_schema: type[BaseModel] | None = None, temperature: float = 0.2, max_tokens: int = 1024) -> ModelResponse:
+    def generate(self, messages, *, response_schema: type[BaseModel] | None = None, temperature: float = 0.2, max_tokens: int = 1024,
+                 on_text=None) -> ModelResponse:
         payload: dict = {
             "model": self.model,
             "messages": [message.model_dump() for message in messages],
-            "stream": False,
+            "stream": on_text is not None,
             "think": self.think,
             "options": {"temperature": temperature, "num_predict": max_tokens},
         }
@@ -37,9 +38,26 @@ class OllamaChatModel:
         if self.num_ctx is not None:
             payload["options"]["num_ctx"] = self.num_ctx
         started = time.perf_counter()
-        response = self._client.post("/api/chat", json=payload)
-        response.raise_for_status()
-        body = response.json()
+        if on_text is None:
+            response = self._client.post("/api/chat", json=payload)
+            response.raise_for_status()
+            body = response.json()
+        else:
+            body, pieces = {}, []
+            with self._client.stream("POST", "/api/chat", json=payload) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    body = json.loads(line)
+                    if "error" in body:
+                        raise RuntimeError(f"ollama: {body['error']}")
+                    piece = (body.get("message") or {}).get("content", "")
+                    if piece:
+                        pieces.append(piece)
+                        on_text(piece)
+            # The last line carries the counters the log reads; the text is all the pieces.
+            body["message"] = {"content": "".join(pieces)}
         # Counters only: legal documents, questions, and model output stay out of logs.
         logger.info(
             "ollama_generation model=%s schema=%s wall_ms=%.1f total_ms=%.1f "

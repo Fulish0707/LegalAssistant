@@ -297,3 +297,39 @@ def test_a_chosen_passage_that_retrieval_also_found_is_listed_once(retriever):
 
     ids = [item.chunk_id for item in response.evidence.items]
     assert ids[0] == found.id and ids.count(found.id) == 1
+
+
+def test_the_draft_streams_each_attempt_and_the_answer_is_unchanged(retriever):
+    settings, r = retriever
+    bad = _answer(source_id="S9", reference="민법 제839조의2", analysis="민법 제839조의2에 따라 청구할 수 있습니다. 보증금은 반환되어야 합니다.")
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(issues=["보증금 반환"])], "LegalAnswer": [bad, _answer()]})
+    events = []
+    resp = _orchestrator(settings, r, model).handle("보증금을 못 받았어요", conversation_id="d1", on_draft=events.append)
+    assert resp.kind == "answer" and resp.trace.regenerations == 1
+    # Only the analysis streams, and the regeneration throws the first draft away.
+    assert events == [None, bad.analysis, None, resp.answer.analysis]
+
+
+def test_a_clarification_streams_no_draft(retriever):
+    settings, r = retriever
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(needs_more_info=True, missing_facts=["보증금 액수"])]})
+    events = []
+    assert _orchestrator(settings, r, model).handle("어떻게 되나요?", conversation_id="d2", on_draft=events.append).kind == "clarification"
+    assert events == []
+
+
+def test_each_stage_is_announced_as_it_starts(retriever):
+    settings, r = retriever
+    bad = _answer(source_id="S9", reference="민법 제839조의2", analysis="민법 제839조의2에 따라 청구할 수 있습니다. 보증금은 반환되어야 합니다.")
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(issues=["보증금 반환"])], "LegalAnswer": [bad, _answer()]})
+    stages = []
+    _orchestrator(settings, r, model).handle("보증금을 못 받았어요", conversation_id="s1", on_stage=stages.append)
+    assert stages == ["analyze", "search", "write", "verify", "rewrite", "verify"]
+
+
+def test_a_clarification_announces_only_the_analysis(retriever):
+    settings, r = retriever
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(needs_more_info=True, missing_facts=["보증금 액수"])]})
+    stages = []
+    _orchestrator(settings, r, model).handle("어떻게 되나요?", conversation_id="s2", on_stage=stages.append)
+    assert stages == ["analyze"]

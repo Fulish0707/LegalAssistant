@@ -1,7 +1,7 @@
 """SSE contract tests for /chat.
 
 The subject here is the event contract static/lc-chat.js consumes, not answer
-quality: every test stubs legal_backend.ask, the call to legal_rag's /v1/chat.
+quality: every test stubs legal_backend.ask, the call to legal_rag's /v1/chat/stream.
 A real call would need the service, its indexes and a model.
 """
 
@@ -19,10 +19,17 @@ from unittest import mock
 # Exactly the set static/lc-chat.js branches on (sendMessage, sse.onmessage).
 FRONTEND_EVENT_TYPES = {
     "thought",
+    "draft",
+    "draft_reset",
     "final_response",
     "error",
     "stream_end",
 }
+
+
+def turn(body):
+    """What legal_backend.ask yields for a turn whose /v1/chat body is `body`, without draft events."""
+    return [{"type": "response", "body": body}]
 
 
 def backend_answer(summary="보증금은 돌려받을 수 있습니다.", analysis="", items=()):
@@ -82,7 +89,7 @@ class ChatStreamBase(unittest.TestCase):
         """Stream one turn; `backend` is a /v1/chat body, an exception to raise, or a Mock."""
         ask = backend if isinstance(backend, mock.Mock) else mock.Mock(
             side_effect=backend if isinstance(backend, Exception) else None,
-            return_value=backend_answer() if backend is None else backend,
+            return_value=turn(backend_answer() if backend is None else backend),
         )
         self.ask = ask
         with mock.patch.dict(os.environ, {"LEGAL_RAG_URL": url}), \
@@ -108,6 +115,25 @@ class ChatStreamingTests(ChatStreamBase):
         self.assertEqual(events[0]["type"], "thought")
         self.assertEqual(events[-2]["type"], "final_response")
         self.assertEqual(events[-1]["type"], "stream_end")
+
+    def test_the_draft_is_forwarded_before_the_answer_and_the_answer_is_unchanged(self):
+        drafts = [{"type": "draft_reset"}, {"type": "draft", "text": "분석"}]
+        streamed = mock.Mock(return_value=[*drafts, *turn(backend_answer("요약입니다.", "분석입니다."))])
+
+        events = self.collect(streamed)
+
+        kinds = [event["type"] for event in events]
+        self.assertLess(kinds.index("draft"), kinds.index("final_response"))
+        self.assertIn({"type": "draft_reset"}, events)
+        self.assertIn({"type": "draft", "content": "분석"}, events)
+        self.assertEqual(self.final(events)["chat_response"], "요약입니다.\n\n분석입니다.")
+
+    def test_each_backend_stage_becomes_a_status_line(self):
+        stages = [{"type": "stage", "stage": name} for name in ("analyze", "search", "write", "verify", "rewrite")]
+        events = self.collect(mock.Mock(return_value=[*stages, *turn(backend_answer())]))
+
+        self.assertEqual([e["content"] for e in events if e["type"] == "thought"][1:6],
+                         ["질문 분석 중", "법령·판례 검색 중", "답변 작성 중", "근거 확인 중", "근거가 맞지 않아 다시 쓰는 중"])
 
     def test_final_response_carries_the_answer(self):
         final = self.final(self.collect(backend_answer("요약입니다.", "분석입니다.")))
@@ -247,6 +273,22 @@ class ChatStreamingTests(ChatStreamBase):
 
         history = self.client.get("/get_initial_state").json["chat_history"]
         self.assertEqual(history[-1], {"role": "assistant", "content": "저장되는 답변입니다."})
+
+    def test_the_reply_is_stored_when_the_browser_leaves_during_the_draft(self):
+        """Before the draft streamed, the reply was stored before anything after the status lines was
+        sent; a browser that reloads mid-draft must still find the answer in its history."""
+        self.as_browser("leaving-browser")
+        backend = [{"type": "draft_reset"}, {"type": "draft", "text": "분석"}, *turn(backend_answer("떠나도 저장되는 답변입니다."))]
+        with mock.patch.dict(os.environ, {"LEGAL_RAG_URL": "http://legal:8000"}), \
+                mock.patch.object(self.app_module.legal_backend, "ask", mock.Mock(return_value=iter(backend))):
+            response = self.client.get("/chat?message=보증금 문의", buffered=False)
+            for chunk in response.response:
+                if b'"draft"' in chunk:
+                    break
+            response.close()
+
+        history = self.client.get("/get_initial_state").json["chat_history"]
+        self.assertEqual(history[-1], {"role": "assistant", "content": "떠나도 저장되는 답변입니다."})
 
     def test_missing_message_still_ends_the_stream(self):
         response = self.client.get("/chat")

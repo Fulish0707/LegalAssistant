@@ -26,7 +26,7 @@ class GeminiChatModel:
             headers={"x-goog-api-key": api_key}, timeout=timeout, transport=transport,
         )
 
-    def generate(self, messages, *, response_schema=None, temperature=0.2, max_tokens=1024) -> ModelResponse:
+    def generate(self, messages, *, response_schema=None, temperature=0.2, max_tokens=1024, on_text=None) -> ModelResponse:
         system = [message.content for message in messages if message.role == "system"]
         contents = []
         for message in messages:
