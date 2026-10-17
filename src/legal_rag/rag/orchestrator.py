@@ -80,8 +80,9 @@ class Orchestrator:
         )
 
     def handle(self, message: str, *, conversation_id: str, user_documents: Sequence[UserDocument] = (),
-               pinned: Sequence[Chunk] = ()) -> ChatResponse:
-        """One chat turn. `pinned` are passages the user chose to ask about; they lead the evidence."""
+               pinned: Sequence[Chunk] = (), on_draft=None) -> ChatResponse:
+        """One chat turn. `pinned` are passages the user chose to ask about; they lead the evidence.
+        `on_draft` receives the analysis as the model writes it, and None before each new attempt (see Generator)."""
         recorder = TraceRecorder(
             conversation_id=conversation_id,
             user_text=message,
@@ -139,7 +140,8 @@ class Orchestrator:
         said = " ".join(turn.content for turn in recent if turn.role == "assistant" and turn.evidence_ids)
         prior_refs = [*(ref.render() for ref in extract_statute_refs(said) if ref.law_name), *extract_case_refs(said)]
 
-        answer, report, action = self._generate_verified(question, bundle, analysis, recent, open_questions, recorder, user_documents, prior_refs)
+        answer, report, action = self._generate_verified(question, bundle, analysis, recent, open_questions, recorder, user_documents, prior_refs,
+                                                         on_draft)
 
         if answer is None or report is None:
             recorder.finish(policy_action=VerificationAction.reject.value)
@@ -163,7 +165,7 @@ class Orchestrator:
     def _generate_verified(
         self, question: str, bundle: EvidenceBundle, analysis: QueryAnalysis, recent: list[Turn],
         open_questions: list[str], recorder: TraceRecorder, user_documents: Sequence[UserDocument] = (),
-        prior_refs: Sequence[str] = (),
+        prior_refs: Sequence[str] = (), on_draft=None,
     ) -> tuple[LegalAnswer | None, VerificationReport | None, VerificationAction]:
         """Generate, verify, and regenerate with the verifier's feedback while the policy asks for it."""
         answer: LegalAnswer | None = None
@@ -183,7 +185,7 @@ class Orchestrator:
             try:
                 with recorder.stage(f"generate[{attempt}]"):
                     draft = self.generator.generate(question, bundle, feedback=feedback, history=recent, open_questions=open_questions,
-                                                    user_documents=user_documents)
+                                                    user_documents=user_documents, on_draft=on_draft)
             except GenerationError:
                 # The model broke the JSON twice, e.g. by looping past max_tokens. Strip the
                 # draft that asked for this regeneration, or refuse; either beats a 500.
