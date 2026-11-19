@@ -11,8 +11,8 @@ import threading
 from legal_rag.config import Settings
 from legal_rag.llm import ChatModel
 from legal_rag.retrieval.hybrid import HybridRetriever, Retriever
-from legal_rag.schemas import (ChatResponse, Chunk, EvidenceBundle, LegalAnswer, QueryAnalysis, ScoredChunk, Turn, UserDocument,
-                               VerificationAction, VerificationReport)
+from legal_rag.schemas import (ChatResponse, Chunk, Confidence, EvidenceBundle, LegalAnswer, QueryAnalysis, ScoredChunk, Turn,
+                               UserDocument, VerificationAction, VerificationReport)
 from legal_rag.textutil.refs import extract_case_refs, extract_statute_refs
 from legal_rag.verification import VerificationPolicy, Verifier, backfill_citations
 
@@ -28,6 +28,13 @@ from .trace import TraceRecorder
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _unconfirmed_case_sources(bundle: EvidenceBundle, support_roles: dict[str, str]) -> list[str]:
+    """Case/interpretation passages not confirmed as reasoning or a legal rule at a cited quote:
+    unknown roles and passages the assessment never cited. Statutes need no role."""
+    return [item.source_id for item in bundle.items
+            if item.header.get("Type") != "Statute" and support_roles.get(item.source_id) not in {"finding", "legal_rule"}]
 
 
 class Orchestrator:
@@ -252,6 +259,9 @@ class Orchestrator:
             else:
                 raise RuntimeError("Policy exhausted its bounded decision loop without a terminal action")
             open_questions = []
+            unconfirmed = _unconfirmed_case_sources(bundle, assessed.support_roles)
+        else:
+            unconfirmed = []
 
         # A stored answer has passed verification and stripping, so what it still cites was grounded
         # in its own turn. A clarification is the analyzer's unchecked text; it has no evidence ids.
@@ -259,7 +269,8 @@ class Orchestrator:
         prior_refs = [*(ref.render() for ref in extract_statute_refs(said) if ref.law_name), *extract_case_refs(said)]
 
         answer, report, action = self._generate_verified(question, bundle, analysis, recent, open_questions, recorder, user_documents, prior_refs,
-                                                         on_draft, announce, suppress_followup_questions=policy_scope is not None)
+                                                         on_draft, announce, suppress_followup_questions=policy_scope is not None,
+                                                         unconfirmed_case_sources=unconfirmed)
 
         if answer is None or report is None:
             recorder.finish(policy_action=VerificationAction.reject.value)
@@ -276,6 +287,16 @@ class Orchestrator:
             self._remember(history_id, "근거를 확인할 수 없어 답변을 제공하지 못했습니다.", trace.evidence_ids)
             return ChatResponse(kind="rejected", conversation_id=conversation_id, reason="unsupported citations", evidence=bundle, verification=report, trace=trace)
 
+        cited = sorted({citation.source_id for citation in answer.citations} & set(unconfirmed))
+        if cited:
+            # Deterministic, whatever the writer did with the instruction: say it, and never "high".
+            notice = (f"인용한 판례·결정례 중 {', '.join(cited)}은 법원·기관이 판단한 부분인지 자동으로 확인되지 않았습니다. "
+                      "비슷한 사건에서 같은 결과가 나온다고 단정할 수 없으니, 판결문 원문을 확인하거나 전문가와 상담하세요.")
+            answer = answer.model_copy(update={
+                "uncertainty": "\n".join(part for part in (notice, answer.uncertainty) if part),
+                "confidence": Confidence.medium if answer.confidence == Confidence.high else answer.confidence,
+            })
+            trace.unverified_case_sources = cited
         self._remember(history_id, f"{answer.summary}\n{answer.analysis}".strip(), trace.evidence_ids)
         return ChatResponse(kind="answer", conversation_id=conversation_id, answer=answer, evidence=bundle, verification=report,
                             prior_refs=prior_refs, trace=trace, suppress_followup_questions=policy_scope is not None)
@@ -306,6 +327,7 @@ class Orchestrator:
         self, question: str, bundle: EvidenceBundle, analysis: QueryAnalysis, recent: list[Turn],
         open_questions: list[str], recorder: TraceRecorder, user_documents: Sequence[UserDocument] = (),
         prior_refs: Sequence[str] = (), on_draft=None, announce=lambda stage: None, suppress_followup_questions: bool = False,
+        unconfirmed_case_sources: Sequence[str] = (),
     ) -> tuple[LegalAnswer | None, VerificationReport | None, VerificationAction]:
         """Generate, verify, and regenerate with the verifier's feedback while the policy asks for it."""
         answer: LegalAnswer | None = None
@@ -315,6 +337,12 @@ class Orchestrator:
             "이 쟁점은 검색 후 정책이 필요한 사실을 확인했습니다. 후속 질문을 다시 요청하지 마세요. "
             "additional_information_needed는 빈 목록으로 두고, 남은 한계는 uncertainty에 설명하세요."
         ) if suppress_followup_questions else ""
+        if unconfirmed_case_sources:
+            no_followup += (
+                f" 다음 판례·결정례 출처는 인용 부분이 법원·기관의 판단인지 확인되지 않았습니다: {', '.join(unconfirmed_case_sources)}. "
+                "이 출처만으로 사용자 사건의 결론을 단정하지 마세요. '비슷한 사건에서 …라고 본 사례가 있다'처럼 쓰고, "
+                "사건마다 결과가 달라질 수 있음을 uncertainty에 적으세요."
+            )
         feedback: str | None = no_followup or None
         # A document is not a legal source: listing one under citations is dropped, not treated as
         # a fabricated source. An article it names with its law, or a case number, counts as the

@@ -229,3 +229,79 @@ def test_real_api_pipeline_preserves_withheld_reason_and_replay(retriever, strea
         calls = len(model.calls)
         assert send("모르겠어요", "second") == second
         assert len(model.calls) == calls
+
+
+CASE_TEXT = ("3. 판단\n임차인이 중도에 퇴거하더라도 계약이 종료되지 않은 이상 차임을 지급할 의무가 있다.\n"
+             "다만 임대인이 새 임차인을 구하는 데 협력하지 않았다면 사정이 다를 수 있다.")
+
+
+def case_hit(text=CASE_TEXT):
+    from legal_rag.schemas import Chunk, ChunkMetadata, DocumentType, ScoredChunk
+    chunk = Chunk(id="case::1#0", document_id="case::1", document_type=DocumentType.judgment, path="0", order=0,
+                  text=text, title="임대차보증금", metadata=ChunkMetadata(dataset="test", corpus_version="civil-test",
+                                                                  court="서울중앙지방법원", case_number="2020가단12345"))
+    return ScoredChunk(chunk=chunk, score=1.0, retriever="test")
+
+
+def case_answer(confidence="high"):
+    from legal_rag.schemas import Citation, CitationKind, Confidence
+    return _answer().model_copy(update={
+        "analysis": "서울중앙지방법원 2020가단12345 판결은 중도 퇴거 뒤에도 차임 지급 의무가 남는다고 보았습니다.",
+        "citations": [Citation(source_id="S1", kind=CitationKind.case, reference="2020가단12345")],
+        "uncertainty": "사건마다 다를 수 있습니다.", "confidence": Confidence(confidence)})
+
+
+def assessment_citing(quote):
+    return SufficiencyAssessment(
+        facts=[FactFinding(key="termination_agreement", status="known", value="합의함", reason="사용자 진술",
+                           observations=[FactObservation(locator="M0", quote="합의했습니다")])],
+        evidence=[EvidenceFinding(key="deduction_basis", proposition="중도 퇴거 뒤 차임 지급 의무", reason="판례",
+                                  status="supported", supports=[LegalSupport(source_id="S1", quote=quote)])])
+
+
+def _case_turn(settings, hit, quote, *, confidence="high"):
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis()],
+                           "SufficiencyAssessment": [assessment_citing(quote)],
+                           "LegalAnswer": [case_answer(confidence)]})
+    orch = _orchestrator(settings, SequenceRetriever([[hit]]), model)
+    response = orch.handle(QUESTION + " 합의했습니다", conversation_id="pilot-case", user_documents=[DOCUMENT],
+                           policy_scope=SCOPE, request_id="case")
+    prompts = "\n".join(m.content for c in model.calls if c.response_schema.__name__ == "LegalAnswer" for m in c.messages)
+    return response, prompts
+
+
+def test_answer_resting_on_an_unconfirmed_case_passage_carries_a_fixed_notice(retriever):
+    """The window has no heading, so the quoted sentence's role is unknown: allowed, but not as a certainty."""
+    settings, _ = retriever
+    text = "임차인이 중도에 퇴거하더라도 계약이 종료되지 않은 이상 차임을 지급할 의무가 있다."
+    response, prompts = _case_turn(settings, case_hit(text), "차임을 지급할 의무가 있다")
+    assert response.kind == "answer"
+    assert response.trace.post_retrieval[-1].support_roles == {"S1": "unknown"}
+    assert response.trace.unverified_case_sources == ["S1"]
+    assert response.answer.uncertainty.startswith("인용한 판례·결정례 중 S1은")
+    assert response.answer.uncertainty.endswith("사건마다 다를 수 있습니다.")  # the model's own caveat is kept
+    assert response.answer.confidence.value == "medium"  # never "high" on an unconfirmed passage
+    assert "S1" in prompts and "단정하지" in prompts  # the writer was told before writing
+
+
+def test_answer_resting_on_the_courts_confirmed_reasoning_is_unchanged(retriever):
+    settings, _ = retriever
+    response, prompts = _case_turn(settings, case_hit(), "차임을 지급할 의무가 있다")
+    assert response.kind == "answer"
+    assert response.trace.post_retrieval[-1].support_roles == {"S1": "finding"}
+    assert response.trace.unverified_case_sources == []
+    assert response.answer.uncertainty == "사건마다 다를 수 있습니다."
+    assert response.answer.confidence.value == "high"
+    assert "확인되지 않았습니다" not in prompts
+
+
+def test_default_chat_path_is_not_changed_by_case_roles(retriever):
+    settings, _ = retriever
+    text = "임차인이 중도에 퇴거하더라도 계약이 종료되지 않은 이상 차임을 지급할 의무가 있다."
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis()], "LegalAnswer": [case_answer()]})
+    response = _orchestrator(settings, SequenceRetriever([[case_hit(text)]]), model).handle(
+        QUESTION, conversation_id="default-case")
+    assert response.kind == "answer"
+    assert response.answer.uncertainty == "사건마다 다를 수 있습니다."
+    assert response.answer.confidence.value == "high"
+    assert response.trace.unverified_case_sources == []

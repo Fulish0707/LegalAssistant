@@ -41,4 +41,7 @@ class Trace(BaseModel):
     policy_action: str | None = None
     regenerations: int = 0
     post_retrieval: list[PostRetrievalDecision] = Field(default_factory=list)
+    # Case/interpretation sources the pilot answer cites whose quoted role is not confirmed
+    # reasoning or a legal rule; the answer then carries a fixed notice.
+    unverified_case_sources: list[str] = Field(default_factory=list)
     user_text: str | None = None
