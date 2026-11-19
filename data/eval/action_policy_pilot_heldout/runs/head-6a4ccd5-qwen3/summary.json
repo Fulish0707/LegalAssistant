@@ -1,0 +1,7 @@
+{
+  "attempted_arms": 10,
+  "completed_arms": 5,
+  "technical_errors": 5,
+  "assessment_errors": 5,
+  "human_legal_review": false
+}
