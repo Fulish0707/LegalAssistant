@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from legal_rag.schemas import RetrievalFilters, ScoredChunk, UserDocument
+from legal_rag.schemas.action import PolicyScope
 
 
 class ChatRequest(BaseModel):
@@ -13,6 +14,17 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     conversation_id: str | None = Field(default=None, max_length=128)
     include_trace: bool = False
+    policy_scope: PolicyScope | None = None
+    request_id: str | None = Field(default=None, max_length=128)
+
+    @model_validator(mode="after")
+    def require_pilot_identity(self):
+        if self.policy_scope is not None:
+            if not (self.request_id and self.request_id.strip()):
+                raise ValueError("policy_scope requires a nonblank request_id")
+            if not (self.conversation_id and self.conversation_id.strip()):
+                raise ValueError("policy_scope requires a stable conversation_id")
+        return self
     # Passages of the caller's own files that bear on this message; the service holds no user files.
     user_documents: list[UserDocument] = Field(default_factory=list, max_length=3)
     # Passages the user chose to ask about, such as a case from a search: they lead the evidence

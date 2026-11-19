@@ -15,6 +15,17 @@ class StageTiming(BaseModel):
     ms: float
 
 
+class PostRetrievalDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: str
+    reason: str
+    bundle_revision: int
+    evidence_ids: list[str] = Field(default_factory=list)
+    # Source id -> role at each cited case/interpretation quote (quote_roles); "unknown" is allowed.
+    support_roles: dict[str, str] = Field(default_factory=dict)
+
+
 class Trace(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -29,4 +40,5 @@ class Trace(BaseModel):
     verification: VerificationReport | None = None
     policy_action: str | None = None
     regenerations: int = 0
+    post_retrieval: list[PostRetrievalDecision] = Field(default_factory=list)
     user_text: str | None = None

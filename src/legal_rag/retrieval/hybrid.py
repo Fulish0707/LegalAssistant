@@ -47,6 +47,14 @@ class HybridRetriever:
                 return leg.store.chunks_near(chunk, radius)
         raise ValueError(f"No neighbor store for corpus {version!r}.")
 
+    def document_text(self, chunk_id: str) -> str | None:
+        """The whole document holding ``chunk_id``, rebuilt from the corpus stores (a few ms)."""
+        from .document import find_document
+        legs_stores = [store for leg in self.legs if (store := getattr(leg, "store", None)) is not None]
+        stores = list({id(store): store for store in legs_stores}.values())  # dense and sparse share one
+        found = find_document(stores, chunk_id)
+        return found[1] if found else None
+
     def retrieve(self, query: str, k: int, filters: RetrievalFilters | None = None) -> list[ScoredChunk]:
         return self.retrieve_many([query], k, filters)
 
