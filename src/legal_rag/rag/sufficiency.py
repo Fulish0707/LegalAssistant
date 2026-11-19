@@ -48,12 +48,31 @@ class FactFinding(_Schema):
     value: str = Field(default="", max_length=40)  # a label; enforced while decoding
 
 
+QUOTE_LIMIT = 80
+# Near maxLength the grammar admits only tokens that still fit, so a model copying a longer
+# passage bends the last characters ("것으로 보아" -> "것으로보"). Live runs: 6 of 6 failed
+# 80-character quotes differed only in the final character.
+_BENT_TAIL, _MIN_ANCHOR = 4, 25
+
+
 class LegalSupport(_Schema):
     # No chunk_id: the server maps source_id to its chunk. Copying long ids only adds errors.
     source_id: str
-    # An anchor, not the evidence: answers still get the whole passage. Decoding stops at the
-    # limit, so a correctly copied prefix of a longer passage stays an exact substring.
-    quote: str = Field(max_length=80)
+    # An anchor, not the evidence: answers still get the whole passage.
+    quote: str = Field(max_length=QUOTE_LIMIT)
+
+
+def _anchor(quote: str, text: str) -> str | None:
+    """The exact part of ``quote`` found in ``text``. A quote below the limit must match whole;
+    one at the limit may lose up to four bent final characters, and the rest is the anchor."""
+    if quote in text:
+        return quote
+    if len(quote) >= QUOTE_LIMIT:
+        for cut in range(1, _BENT_TAIL + 1):
+            prefix = quote[:-cut]
+            if len(prefix) >= _MIN_ANCHOR and prefix in text:
+                return prefix
+    return None
 
 
 # A chunk header names its role only in structure-chunked corpora; operational chunks say unknown.
@@ -181,10 +200,10 @@ class SufficiencyAssessor:
                 item = by_id.get(support.source_id)
                 valid = valid and item is not None and bool(support.quote.strip())
                 if item is not None:
-                    quoted = support.quote in item.shown_text(mask_case_figures=mask_case_figures)
-                    valid = valid and quoted
-                    if quoted and item.header.get("Type") != "Statute":
-                        role = self._support_role(item, support.quote, mask_case_figures)
+                    anchor = _anchor(support.quote, item.shown_text(mask_case_figures=mask_case_figures))
+                    valid = valid and anchor is not None
+                    if anchor is not None and item.header.get("Type") != "Statute":
+                        role = self._support_role(item, anchor, mask_case_figures)
                         previous = support_roles.get(support.source_id)
                         # Several quotes from one passage: a blocking role is what the record must show.
                         if previous is None or (previous in LEGAL_SUPPORT_ROLES and role not in LEGAL_SUPPORT_ROLES):

@@ -312,3 +312,38 @@ def test_interpretations_get_the_same_claim_filter_as_cases():
         document_type="legal_interpretation", header={"Type": "Interpretation"}, text=doc[at:at + 30], score=1.0)])
     result = _assess_with_documents(s, "차임 지급 의무가 없다", bundle, _Documents(doc))
     assert result.support_roles == {"S1": "party_claim"}
+
+
+_LONG = "임대차는 당사자 일방이 상대방에게 목적물을 사용, 수익하게 할 것을 약정하고 상대방이 이에 대하여 차임을 지급할 것을 약정함으로써 그 효력이 생긴다."
+
+
+def _law_bundle():
+    return EvidenceBundle(items=[Evidence(source_id="S1", chunk_id="law1", document_id="law",
+        document_type="statute", header={"Type": "Statute"}, text=_LONG, score=1.0)])
+
+
+@pytest.mark.parametrize("quote,expected", [
+    (_LONG[:79] + "X", "valid"),        # at the limit: the grammar bent only the last character
+    (_LONG[:76] + "XXXX", "valid"),     # at most four bent characters
+    (_LONG[:75] + "XXXXX", "invalid"),  # more than the forced boundary explains
+    (_LONG[:39] + "X", "invalid"),      # below the limit a copy must be exact
+    (_LONG[:20] + "X" * 60, "invalid"), # a short true prefix is not an anchor
+])
+def test_a_quote_cut_by_the_length_limit_may_differ_only_at_its_last_characters(quote, expected):
+    """Live runs: six 80-character quotes were exact but for the final character ("것으로보" for "것으로 보아"),
+    because near maxLength decoding can only pick tokens that still fit."""
+    s = module()
+    assert len(quote) <= 80
+    assert _assess_with_documents(s, quote, _law_bundle(), None).policy_input.assessment_status == expected
+
+
+def test_role_of_a_bent_quote_is_read_at_its_exact_prefix():
+    s = module()
+    doc = _DOC + ("임차인이 계약기간 중에 중도 퇴거하더라도 계약이 당사자의 합의로 종료되지 않은 이상, "
+                  "그 이후의 기간에 대한 차임을 지급할 의무는 계속 남는다고 보아야 한다.")
+    tail = doc[doc.index("임차인이 계약기간"):]
+    assert len(tail) > 80
+    quote = tail[:79] + "X"
+    result = _assess_with_documents(s, quote, _windowed_case(doc, doc.index("임차인이 계약기간"), len(doc)), _Documents(doc))
+    assert result.policy_input.assessment_status == "valid"
+    assert result.support_roles == {"S1": "finding"}
