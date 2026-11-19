@@ -41,23 +41,37 @@ class MeteredModel:
             row["elapsed_ms"] = (time.perf_counter() - started) * 1000
 
 
-def run_comparison(settings, model, inputs, out, *, factory=None):
-    from legal_rag.rag.orchestrator import Orchestrator
-    from legal_rag.rag.conversation import InMemoryConversationStore
-    from legal_rag.schemas import Chunk, ChunkMetadata, ScoredChunk
-    from legal_rag.verification import Verifier, VerificationPolicy
+FICTIONAL_CASE_MARK = "실제 판례가 아님"
 
-    inputs, out = Path(inputs), Path(out)
-    cases = json.loads((inputs / "cases.json").read_text())
-    sources = json.loads((inputs / "sources.json").read_text())
-    chunks = {}
-    hashes = {}
-    for source in sources:
+
+def load_sources(inputs):
+    """Fixed evidence: official statute extracts, or windows of fictional judgments.
+
+    A case source is a short window (``quote``) of a whole fictional judgment file. The
+    window carries no heading, like an operational fixed-window chunk; the whole file is
+    served through ``FixedRetriever.document_text`` as the vector stores would serve it.
+    Real rulings are never stored here: every case file must say it is fictional.
+    """
+    from legal_rag.schemas import Chunk, ChunkMetadata, ScoredChunk
+
+    inputs = Path(inputs)
+    chunks, documents, hashes = {}, {}, {}
+    for source in json.loads((inputs / "sources.json").read_text()):
         content = (inputs / source["extraction_file"]).read_text()
         digest = hashlib.sha256(content.encode()).hexdigest()
         if digest != source["sha256"] or source["quote"] not in content:
             raise ValueError("source extraction hash or literal quote mismatch")
         hashes[source["extraction_file"]] = digest
+        if source.get("kind") == "case":
+            if FICTIONAL_CASE_MARK not in content:
+                raise ValueError("case source must be marked fictional: " + source["extraction_file"])
+            chunk = Chunk(id=source["chunk_id"], document_id=source["id"], document_type="judgment",
+                          path="window:0", order=0, text=source["quote"], title=source["title"],
+                          metadata=ChunkMetadata(dataset="fictional-eval", corpus_version="action-policy-caselaw-v1",
+                                                 court=source["court"], case_number=source["case_number"]))
+            documents[source["chunk_id"]] = content
+            chunks[source["id"]] = ScoredChunk(chunk=chunk, score=1, retriever="fixed-fictional")
+            continue
         chunk = Chunk(id=source["chunk_id"], document_id=source["id"], document_type="statute",
                       path="art:" + source["article"], order=0, text=source["quote"],
                       title=source["law_name"] + " " + source["article"],
@@ -66,8 +80,20 @@ def run_comparison(settings, model, inputs, out, *, factory=None):
                                              effective_date=source["effective_date"],
                                              original={"url": source["url"], "retrieved_at": source["retrieved_at"]}))
         chunks[source["id"]] = ScoredChunk(chunk=chunk, score=1, retriever="fixed-official")
+    return chunks, documents, hashes
+
+
+def run_comparison(settings, model, inputs, out, *, factory=None):
+    from legal_rag.rag.orchestrator import Orchestrator
+    from legal_rag.rag.conversation import InMemoryConversationStore
+    from legal_rag.verification import Verifier, VerificationPolicy
+
+    inputs, out = Path(inputs), Path(out)
+    cases = json.loads((inputs / "cases.json").read_text())
+    chunks, documents, hashes = load_sources(inputs)
     for name in ("cases.json", "sources.json", "retrieval.json"):
-        hashes[name] = hashlib.sha256((inputs / name).read_bytes()).hexdigest()
+        if (inputs / name).exists():
+            hashes[name] = hashlib.sha256((inputs / name).read_bytes()).hexdigest()
     out.mkdir(parents=True, exist_ok=False)
     # Freeze actual bytes with this run; later curation never changes a prior manifest.
     frozen = out / "inputs"
@@ -88,7 +114,8 @@ def run_comparison(settings, model, inputs, out, *, factory=None):
         for index, case in enumerate(cases):
             arms = ("baseline", "candidate") if index % 2 == 0 else ("candidate", "baseline")
             for arm in arms:
-                retriever = FixedRetriever([chunks[key] for key in case["first"]], [chunks[key] for key in case["extra"]])
+                retriever = FixedRetriever([chunks[key] for key in case["first"]], [chunks[key] for key in case["extra"]],
+                                           documents=documents)
                 metered = MeteredModel(model)
                 orch = build(settings=settings, model=metered, retriever=retriever,
                              store=InMemoryConversationStore(), verifier=Verifier(),
@@ -137,10 +164,15 @@ class FixedRetriever:
 
     name = "fixed-official"
 
-    def __init__(self, first, extra):
+    def __init__(self, first, extra, *, documents=None):
         self.bundles = (first, extra)
+        self.documents = documents or {}
         self.calls = []
         self.last_trace = {}
+
+    def document_text(self, chunk_id):
+        """Whole fictional document for a case window, as HybridRetriever.document_text serves it."""
+        return self.documents.get(chunk_id)
 
     def retrieve(self, query, k, filters=None):
         if len(self.calls) >= 2:

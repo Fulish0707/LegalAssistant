@@ -121,3 +121,47 @@ def test_retriever_trace_matches_schema():
     retriever = m.FixedRetriever([hit("first")], [])
     retriever.retrieve("q", 5)
     assert retriever.last_trace == {"fixed": [("first", 1.0)]}
+
+
+FICTIONAL = "[가상 판결 발췌: 평가용으로 작성한 문서이며 실제 판례가 아님]\n"
+DOCUMENT = FICTIONAL + "가상지방법원 2026가단90001\n2. 당사자의 주장\n피고는 공제할 수 있다고 주장한다.\n3. 판단\n피고의 주장은 이유 없다.\n"
+
+
+def _case_inputs(tmp_path, text=DOCUMENT, window="피고의 주장은 이유 없다."):
+    import hashlib
+    import json
+    (tmp_path / "case.txt").write_text(text)
+    (tmp_path / "sources.json").write_text(json.dumps([{
+        "id": "case-a", "kind": "case", "chunk_id": "fictional:case-a#w0", "court": "가상지방법원",
+        "case_number": "2026가단90001", "title": "보증금반환", "quote": window, "extraction_file": "case.txt",
+        "sha256": hashlib.sha256(text.encode()).hexdigest()}], ensure_ascii=False))
+    return tmp_path
+
+
+def test_case_source_is_a_window_of_a_fictional_document_whose_whole_text_the_retriever_serves(tmp_path):
+    m = pilot()
+    chunks, documents, _ = m.load_sources(_case_inputs(tmp_path))
+    hit = chunks["case-a"]
+    assert hit.chunk.document_type.value == "judgment"
+    assert hit.chunk.text == "피고의 주장은 이유 없다."  # the window carries no heading, like operational chunks
+    assert hit.chunk.metadata.case_number == "2026가단90001"
+    retriever = m.FixedRetriever([hit], [], documents=documents)
+    assert retriever.document_text("fictional:case-a#w0") == DOCUMENT
+    assert retriever.document_text("unknown") is None
+
+
+@pytest.mark.parametrize("text,window,problem", [
+    ("가상지방법원 판단\n이유 없다.\n", "이유 없다.", "fictional"),  # unmarked text could be a real ruling
+    (DOCUMENT, "문서에 없는 문장", "quote"),
+])
+def test_case_source_must_be_marked_fictional_and_its_window_must_be_in_it(tmp_path, text, window, problem):
+    m = pilot()
+    with pytest.raises(ValueError, match=problem):
+        m.load_sources(_case_inputs(tmp_path, text, window))
+
+
+def test_statute_sources_load_as_before():
+    m = pilot()
+    chunks, documents, hashes = m.load_sources(ROOT / "data/eval/action_policy_pilot")
+    assert {hit.chunk.document_type.value for hit in chunks.values()} == {"statute"}
+    assert documents == {} and len(hashes) == 3
