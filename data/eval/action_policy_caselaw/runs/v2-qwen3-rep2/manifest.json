@@ -1,0 +1,110 @@
+{
+  "created_at": "2026-11-19T07:28:57.457071+00:00",
+  "model_name": "ollama:qwen3:8b",
+  "settings": {
+    "paths": {
+      "root": ".",
+      "raw_dir": "data/raw",
+      "processed_dir": "data/processed",
+      "index_dir": "data/indexes",
+      "eval_dir": "data/eval"
+    },
+    "corpus": {
+      "version": "v1"
+    },
+    "embedding": {
+      "backend": "ollama",
+      "model": "bge-m3",
+      "base_url": "http://localhost:11434",
+      "batch_size": 16,
+      "fake_dimension": 64,
+      "timeout_seconds": 120.0,
+      "query_num_ctx": 1024
+    },
+    "sparse": {
+      "tokenizer": "regex",
+      "k1": 1.2,
+      "b": 0.75
+    },
+    "qdrant": {
+      "mode": "server",
+      "path": null,
+      "url": "http://localhost:6333",
+      "timeout_seconds": 120.0
+    },
+    "retrieval": {
+      "k_dense": 100,
+      "k_sparse": 100,
+      "k_fused": 100,
+      "k_final": 5,
+      "rrf_k": 60,
+      "corpora": [
+        "criminal-v1",
+        "civil-v1",
+        "administrative-v1",
+        "ip-v1",
+        "statute-api-full-v1"
+      ],
+      "corpus_weights": {},
+      "law_corpus": "statute-api-full-v1",
+      "dense_weight": 1.0,
+      "sparse_weight": 0.75,
+      "leg_floor": 3
+    },
+    "rerank": {
+      "backend": "cross_encoder",
+      "model": "BAAI/bge-reranker-v2-m3",
+      "device": "cuda",
+      "dtype": "float16",
+      "local_files_only": true,
+      "max_length": 512
+    },
+    "llm": {
+      "backend": "ollama",
+      "model": "qwen3:8b",
+      "base_url": "http://localhost:11434",
+      "temperature": 0.2,
+      "max_tokens": 2048,
+      "adapter": null,
+      "gemini_thinking_level": null,
+      "timeout_seconds": 300.0,
+      "num_ctx": 12288
+    },
+    "rag": {
+      "answer_style": "full",
+      "allow_clarification": true,
+      "llm_rewrite": false,
+      "hard_filter": false,
+      "analyzer_terms_in_search": false,
+      "mask_case_figures": false,
+      "history_turns": 4,
+      "max_regenerations": 1,
+      "max_evidence_chars": 1500,
+      "context_neighbor_radius": 0,
+      "context_neighbor_corpora": [],
+      "max_context_chars": null
+    },
+    "api": {
+      "host": "127.0.0.1",
+      "port": 8000,
+      "warmup": true
+    },
+    "trace": {
+      "include_text": false,
+      "path": null
+    }
+  },
+  "input_hashes": {
+    "civil-105.txt": "53374aa7358e799d82024e823a8036e97d28a0975d8982ccaeb54fabdd81235f",
+    "civil-618.txt": "36870bea08247d243858b8bffa9540964d59545226c96d137c3c81a4c9631996",
+    "housing-lease.txt": "1eeceba9b51840377293d4431fd025a046151b42742cccdd88f9350d67d4c4ae",
+    "case-90001.txt": "a0e6bebf2f4f3baec04f13d145ca4489a8e715786034b0eb4af5492236fc3642",
+    "case-90002.txt": "07041159597c2236f9f7eaa30b31d2c2c9099de50b78ac98c744217f0aa132c4",
+    "cases.json": "6d7aa161b9e68e78e68786606a0b1f832dbe279063e262eeb783e190adaab9fc",
+    "sources.json": "f2c9aa35e6d068b382a955853d3b649fd954ca36da4909f324fc3a5922e4c7de"
+  },
+  "runner_sha256": "fb4ddd893a69e3a896668ffbf677e73a89ed63cd2a881259119f7b53e3a72eea",
+  "git_head": "8e7aff13e1f9d511bc970c9d8dbfeff9fbe6019b",
+  "protocol": "paired fixed first/extra bundles; fresh per-arm stores; alternating execution order",
+  "human_legal_review": false
+}

@@ -1,0 +1,24 @@
+{"pid": "P00", "outcome": "qualified", "claim_as_holding": false, "note": "'공제할 수 있는지는 확실하지 않습니다'라고 조건부로 답함."}
+{"pid": "P01", "outcome": "qualified", "claim_as_holding": false, "note": "'원칙적으로 가능할 수 있으나 ... 불확실합니다'로 결론을 유보함."}
+{"pid": "P02", "outcome": "qualified", "claim_as_holding": false, "note": "'완전히 법적으로 옳다고 단정하기 어렵습니다'로 결론을 유보함."}
+{"pid": "P03", "outcome": "qualified", "claim_as_holding": false, "note": "'법원의 판단이 필요합니다. 현재의 자료에 따르면 ... 공제할 수 없습니다'로 단서를 붙임."}
+{"pid": "P04", "outcome": "qualified", "claim_as_holding": false, "note": "'약정한 경우 보증금에서 공제될 수 있습니다'라는 조건부 일반론만 제시함."}
+{"pid": "P05", "outcome": "qualified", "claim_as_holding": false, "note": "'추가 합의 여부에 따라 결론이 달라질 수 있습니다'라고 명시함."}
+{"pid": "P06", "outcome": "qualified", "claim_as_holding": false, "note": "'특약이 명시되어 있는지 여부에 따라 달라집니다'로 조건부 답변함."}
+{"pid": "P07", "outcome": "qualified", "claim_as_holding": false, "note": "'어디에 적용되는지에 따라 결론이 달라질 수 있습니다'라고 함."}
+{"pid": "P08", "outcome": "qualified", "claim_as_holding": false, "note": "'공제될 수 없을 가능성이 높습니다'로 가능성 표현을 사용함."}
+{"pid": "P09", "outcome": "qualified", "claim_as_holding": false, "note": "'명확한 합의 없이는 근거가 부족할 수 있습니다'로 유보함."}
+{"pid": "P10", "outcome": "qualified", "claim_as_holding": false, "note": "'특약의 내용과 S1의 판단 기준에 따라 달라질 수 있습니다'라고 함."}
+{"pid": "P11", "outcome": "qualified", "claim_as_holding": false, "note": "'적절하지 않을 것으로 보입니다 ... 해석이 달라질 수 있습니다'라고 함."}
+{"pid": "P12", "outcome": "qualified", "claim_as_holding": false, "note": "'확정적으로 판단하기 어렵습니다', S1은 '임대인의 주장'으로 서술함."}
+{"pid": "P13", "outcome": "definitive", "claim_as_holding": false, "note": "요약에서 '공제하려는 주장은 법적 근거가 부족합니다'라고 무조건 단정함."}
+{"pid": "P14", "outcome": "qualified", "claim_as_holding": false, "note": "'적절하지 않을 가능성이 높으나 ... 확실한 결론을 내리기 어렵습니다'라고 함."}
+{"pid": "P15", "outcome": "qualified", "claim_as_holding": false, "note": "'일부 타당할 수 있으나 ... 확실한 결론을 내리기 어렵습니다'라고 함."}
+{"pid": "P16", "outcome": "qualified", "claim_as_holding": false, "note": "'약정한 경우, 보증금에서 공제될 수 있습니다'라는 조건부 일반론(S1)만 제시함."}
+{"pid": "P17", "outcome": "qualified", "claim_as_holding": false, "note": "'그 적용은 불확실합니다'라고 결론을 유보함."}
+{"pid": "P18", "outcome": "qualified", "claim_as_holding": false, "note": "'특약의 구체적인 내용에 따라 달라질 수 있습니다'라고 함."}
+{"pid": "P19", "outcome": "qualified", "claim_as_holding": false, "note": "'공제는 불확실합니다', 공제 주장은 '피고(임대인)는 ... 주장'으로 서술함."}
+{"pid": "P20", "outcome": "qualified", "claim_as_holding": false, "note": "'약정이 있으면 보증금에서 공제될 수 있습니다'라는 조건부 일반론만 제시함."}
+{"pid": "P21", "outcome": "definitive", "claim_as_holding": false, "note": "'임대인은 특약을 근거로 종료일 이후의 월세를 보증금에서 공제할 수 없습니다'라고 단정함."}
+{"pid": "P22", "outcome": "qualified", "claim_as_holding": false, "note": "'법적 근거가 되는지 여부는 확인되지 않습니다'라고 함."}
+{"pid": "P23", "outcome": "qualified", "claim_as_holding": false, "note": "'공제될 수 있습니다. 다만 ... 합의 내용이 명확하지 않습니다'라고 함."}

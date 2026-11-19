@@ -16,6 +16,7 @@ from legal_rag.retrieval.document import find_document, pinned_chunks
 from legal_rag.retrieval.labels import document_labels
 from legal_rag.retrieval.laws import articles, compact_names, statutes_cited
 from legal_rag.schemas import ChatResponse, CitationKind, RetrievalFilters
+from legal_rag.rag.policy_state import PolicyRequestError, RequestConflict, RequestInProgress, RequestFailed
 
 from .models import (CasesRequest, CasesResponse, ChatRequest, CitedArticle, DocumentResponse, HealthResponse,
                      LawResponse, SearchRequest, SearchResponse)
@@ -104,7 +105,10 @@ async def law(request: Request, name: str = Query(min_length=1, max_length=200))
 
 async def _turn(body: ChatRequest, request: Request):
     """The orchestrator, the conversation id and the pinned passages for one chat turn."""
-    orchestrator = await run_in_threadpool(request.app.state.get_orchestrator)
+    try:
+        orchestrator = await run_in_threadpool(request.app.state.get_orchestrator)
+    except PolicyRequestError as error:
+        raise HTTPException(status_code=409, detail=_policy_reason(error)) from None
     pinned = []
     if body.pinned_chunk_ids:
         stores = list(_stores(await run_in_threadpool(request.app.state.get_retriever)).values())
@@ -112,11 +116,24 @@ async def _turn(body: ChatRequest, request: Request):
     return orchestrator, body.conversation_id or uuid.uuid4().hex, pinned
 
 
+def _policy_reason(error):
+    # Never serialize exception text: it can contain user facts or internal identifiers.
+    return {RequestConflict: "policy_request_conflict", RequestInProgress: "policy_request_in_progress",
+            RequestFailed: "policy_request_failed"}.get(type(error), "policy_request_error")
+
+
+def _policy_kwargs(body):
+    return {"policy_scope": body.policy_scope, "request_id": body.request_id} if body.policy_scope is not None else {}
+
+
 @router.post("/v1/chat", response_model=ChatResponse, response_model_exclude_none=True)
 async def chat(body: ChatRequest, request: Request) -> ChatResponse:
     orchestrator, conversation_id, pinned = await _turn(body, request)
-    response = await run_in_threadpool(orchestrator.handle, body.message, conversation_id=conversation_id,
-                                         user_documents=body.user_documents, pinned=pinned)
+    try:
+        response = await run_in_threadpool(orchestrator.handle, body.message, conversation_id=conversation_id,
+                                          user_documents=body.user_documents, pinned=pinned, **_policy_kwargs(body))
+    except PolicyRequestError as error:
+        raise HTTPException(status_code=409, detail=_policy_reason(error)) from None
     if not body.include_trace:
         response = response.model_copy(update={"trace": None})
     return response
@@ -138,10 +155,13 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
         try:
             response = orchestrator.handle(body.message, conversation_id=conversation_id, user_documents=body.user_documents,
                                            pinned=pinned, on_draft=draft,
-                                           on_stage=lambda stage: events.put({"type": "stage", "stage": stage}))
+                                           on_stage=lambda stage: events.put({"type": "stage", "stage": stage}),
+                                           **_policy_kwargs(body))
             if not body.include_trace:
                 response = response.model_copy(update={"trace": None})
             events.put({"type": "response", "body": response.model_dump(mode="json", exclude_none=True)})
+        except PolicyRequestError as error:
+            events.put({"type": "error", "reason": _policy_reason(error)})
         except Exception:
             logger.exception("chat turn failed")
             events.put({"type": "error"})

@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .answer import LegalAnswer
+from .action import WithheldDetails
 from .evidence import EvidenceBundle
 from .trace import Trace
 from .verification import VerificationReport
@@ -15,7 +16,9 @@ from .verification import VerificationReport
 class ChatResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["answer", "clarification", "rejected"]
+    kind: Literal["answer", "clarification", "rejected", "withheld"]
+    withheld: WithheldDetails | None = None
+    suppress_followup_questions: bool = False
     conversation_id: str
     answer: LegalAnswer | None = None
     questions: list[str] = Field(default_factory=list)

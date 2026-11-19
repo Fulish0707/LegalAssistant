@@ -7,6 +7,8 @@
     tone: '쉬운 말',
     railTab: '전체',
     draft: '',
+    pilot: false,    /* 명시적으로 켠 가상 계약에만 적용. 업로드 자료로 자동 활성화하지 않는다 */
+    pilotIssue: 'rent-deduction',
     thinking: false,
     writing: '',     /* 답변 초안 — 검증 전. /chat draft 이벤트로 쌓이고 최종 답이 오면 사라진다 */
     extra: [],
@@ -119,6 +121,15 @@
         </div>
       </div>
       <div style="font-size:11px;color:#9aa0a5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">법령·판례를 근거로 답변합니다 · Enter 전송 · 중요한 결정 전에는 근거를 함께 확인하세요</div>
+      <div style="font-size:12px;color:#767d83;line-height:1.6">
+        <label><input type="checkbox" id="pilotOptIn" ${P.pilot ? 'checked' : ''} ${P.thinking ? 'disabled' : ''}> 가상 계약 검토 파일럿</label>
+        ${P.pilot ? `<label style="margin-left:10px">쟁점 <select id="pilotIssue" ${P.thinking ? 'disabled' : ''} style="border:1px solid #e6e3dd;border-radius:6px;padding:3px;background:#fff;color:#3d4348">
+          <option value="rent-deduction" ${P.pilotIssue === 'rent-deduction' ? 'selected' : ''}>보증금에서 월세 공제</option>
+          <option value="clause-explanation" ${P.pilotIssue === 'clause-explanation' ? 'selected' : ''}>특약 설명</option>
+        </select></label>
+        <div>고정된 가상 계약만 사용하며 업로드 자료·붙인 판례는 사용하지 않습니다. 실제 사건의 법적 결론을 검증하는 기능이 아닙니다. 쟁점당 확인 질문 1회, 요청당 추가 검색 1회로 제한됩니다. 서버 재시작 시 상담 식별자가 바뀌어 예산이 이어지지 않습니다.</div>
+        <details><summary style="cursor:pointer">사용할 가상 계약 보기</summary>가상 주택 임대차계약. 기간 2027-01-01부터 2028-12-31까지. 보증금 20,000,000원, 월 차임 700,000원. 특약: 임차인이 중도 퇴거하면 새 임차인이 들어올 때까지 차임을 부담하고, 임대인은 보증금에서 이를 공제할 수 있다. 별도의 중도 종료 합의는 계약서에 없음.</details>` : ''}
+      </div>
     </div>
   </div>
 </div>
@@ -146,6 +157,9 @@
     if (!typed || P.thinking) return;
     /* 고른 질문과 답을 한 메시지로 묶는다. 서버는 "두 달이요"가 어느 질문의 답인지 이 문장으로 안다. */
     const text = P.answering ? `상담의 질문: ${P.answering}\n답변: ${typed}` : typed;
+    /* 한 제출에 한 번만 생성한다. SSE 재연결은 같은 POST의 요청 식별자를 재사용한다. */
+    const payload = { message: text };
+    if (P.pilot) Object.assign(payload, {pilot: true, issue_id: P.pilotIssue, request_id: crypto.randomUUID()});
 
     P.extra.push({ role:'user', text });
     P.draft = '';
@@ -163,11 +177,15 @@
     fetch('/chat', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ message: text })
-    }).then(() => {
+      body: JSON.stringify(payload)
+    }).then(response => {
+      if (!response.ok) throw new Error('Message rejected');
       if (sse) sse.close();
       const qs = new URLSearchParams({ message: text });
-      sse = new EventSource('/chat?' + qs.toString());
+      if (payload.pilot) qs.set('request_id', payload.request_id);
+      let retried = false;
+      function connect() {
+        sse = new EventSource('/chat?' + qs.toString());
 
       sse.onmessage = (event) => {
         try {
@@ -193,9 +211,12 @@
       };
 
       sse.onerror = () => {
+        if (payload.pilot && !retried) { retried = true; sse.close(); connect(); return; }
         P.extra.push({ role:'agent', text:'서버 연결이 끊어졌습니다.' });
         P.thinking = false; P.writing = ''; sse.close(); LC.pinThread = true; LC.render();
       };
+      }
+      connect();
     }).catch((err) => {
       console.error('Message send error:', err);
       P.extra.push({ role:'agent', text:'메시지를 보내는 중 오류가 발생했습니다.' });
@@ -351,6 +372,8 @@
       });
 
       document.addEventListener('change', (e) => {
+        if (e.target.id === 'pilotOptIn' && !P.thinking) { P.pilot = e.target.checked; LC.render(); }
+        if (e.target.id === 'pilotIssue' && !P.thinking) { P.pilotIssue = e.target.value; }
         if (e.target.id === 'fileUpload' && e.target.files.length) LC.uploadFile(e.target.files[0]);
       });
 

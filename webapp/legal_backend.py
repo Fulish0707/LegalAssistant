@@ -41,13 +41,15 @@ class LegalBackendUnavailable(Exception):
     """The service could not be reached or did not return a chat response."""
 
 
-def ask(base_url, message, conversation_id, documents=(), pinned=()):
+def ask(base_url, message, conversation_id, documents=(), pinned=(), *, policy_scope=None, request_id=None):
     """One chat turn, read as it streams. Yields the service's {"type": "stage" | "draft" | "draft_reset"}
     events, then {"type": "response", "body": <the /v1/chat body>}.
     `documents` are passages of the user's own files: [{name, text, ...}].
     `pinned` are ids of passages the user chose to ask about; the service puts them first in the evidence."""
     endpoint = base_url.rstrip("/") + "/v1/chat/stream"
     payload = {"message": message, "conversation_id": conversation_id}
+    if policy_scope is not None:
+        payload.update(policy_scope=policy_scope, request_id=request_id)
     if documents:
         # legal_rag refuses a name over 200 characters (UserDocument in src/legal_rag/schemas/evidence.py).
         payload["user_documents"] = [{"name": document["name"][:200], "text": document["text"]} for document in documents]
@@ -172,6 +174,8 @@ def evidence_texts(body):
 
 def questions(body):
     """What the turn asks the user: the facts an answer still needs, or a clarification's questions."""
+    if body.get("kind") == "withheld" or body.get("suppress_followup_questions"):
+        return []
     if body.get("kind") == "clarification":
         return list(body.get("questions") or [])
     if body.get("kind") == "answer":
@@ -191,6 +195,14 @@ def render(body, documents=()):
     `documents` are the user's passages sent with the turn, in the order sent (D1, D2, ...).
     """
     kind = body.get("kind")
+    if kind == "withheld":
+        details = body.get("withheld") or {}
+        parts = ["판단 보류", details.get("explanation") or "확인되지 않은 내용이 있어 결론을 보류합니다."]
+        if details.get("reason_code"):
+            parts.append("보류 사유: " + details["reason_code"])
+        parts += _bullets("확인된 사실", details.get("known_facts"))
+        parts += _bullets("미해결 사항·판단의 한계", details.get("unresolved_items"))
+        return "\n\n".join(parts), []
     if kind == "clarification":
         return CLARIFY_TEXT + "\n" + "\n".join(f"- {question}" for question in body.get("questions") or []), []
     answer = body.get("answer")

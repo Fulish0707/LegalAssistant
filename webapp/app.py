@@ -17,6 +17,7 @@ import logging
 
 from citation_guard import annotate_figures, annotate_unsupported, named_citations, unsupported_citations
 import legal_backend
+import pilot_requests
 import sqlite3
 import json
 import re
@@ -140,7 +141,7 @@ def get_db():
 
 @app.teardown_appcontext
 def close_connection(exception):
-    db = getattr(g, '_database', None)
+    db = g.pop('_database', None)
     if db is not None:
         db.close()
 
@@ -303,6 +304,14 @@ LEGAL_BACKEND_DOWN = "법률 답변 서비스를 사용할 수 없습니다. 잠
 MESSAGE_MAX_CHARS = 4000
 MESSAGE_TOO_LONG = "질문이 너무 깁니다. 4,000자 이하로 줄여 주세요. 계약서 같은 긴 자료는 사건 자료 탭에 올리면 답변에 쓰입니다."
 
+# Only this synthetic passage is used by the explicitly enabled pilot. Never infer scope
+# from an upload's name/content, and never put uploaded file contents in a session cookie.
+PILOT_DOCUMENT = {"name": "가상 임대차계약 (파일럿 전용)", "text":
+    "가상 주택 임대차계약. 기간 2027-01-01부터 2028-12-31까지. 보증금 20,000,000원, 월 차임 700,000원. "
+    "특약: 임차인이 중도 퇴거하면 새 임차인이 들어올 때까지 차임을 부담하고, 임대인은 보증금에서 이를 공제할 수 있다. "
+    "별도의 중도 종료 합의는 계약서에 없음."}
+PILOT_ISSUES = ("rent-deduction", "clause-explanation")
+
 
 def _conversation():
     """The number of the consultation this browser has open."""
@@ -386,7 +395,8 @@ def _case_documents(user_input):
 
 # The status line while legal_rag works on a stage (Orchestrator.handle announces them).
 STAGE_TEXT = {"analyze": "질문 분석 중", "search": "법령·판례 검색 중", "write": "답변 작성 중",
-              "verify": "근거 확인 중", "rewrite": "근거가 맞지 않아 다시 쓰는 중"}
+              "verify": "근거 확인 중", "rewrite": "근거가 맞지 않아 다시 쓰는 중",
+              "assess": "쟁점·사실·근거 평가 중", "research": "부족한 근거 추가 검색 중"}
 
 
 def _stream_event(event):
@@ -398,7 +408,29 @@ def _stream_event(event):
     return {'type': 'draft_reset'}
 
 
-def _generate_legal_response_stream(user_input):
+def _pilot_stream(stream, pilot):
+    """Persist the terminal event and history once, before delivery; finish after disconnect."""
+    disconnected = False
+    finished = False
+    try:
+        for line in stream:
+            event = json.loads(line[len("data: "):])
+            if event["type"] in ("final_response", "error") and not finished:
+                pilot_requests.finish(get_db(), session["user_id"], pilot["key"], pilot["request_id"],
+                                      _conversation(), event)
+                finished = True
+            if not disconnected:
+                try:
+                    yield line
+                except GeneratorExit:
+                    disconnected = True
+    finally:
+        if not finished:
+            pilot_requests.finish(get_db(), session["user_id"], pilot["key"], pilot["request_id"],
+                                  _conversation(), {"type": "error", "content": "파일럿 요청 처리가 중단되었습니다."})
+
+
+def _generate_legal_response_stream(user_input, pilot=None):
     """Stream a chat turn as SSE events; legal_rag's /v1/chat/stream writes the answer.
 
     The service retrieves, generates and verifies, and names each stage as it starts; the
@@ -420,7 +452,7 @@ def _generate_legal_response_stream(user_input):
             return
 
         # POST /chat stored this message before the stream began, so an earlier turn makes more than one.
-        fixed = _fixed_reply(user_input, len(get_chat_history_from_db(session["user_id"], _conversation())) > 1)
+        fixed = None if pilot else _fixed_reply(user_input, len(get_chat_history_from_db(session["user_id"], _conversation())) > 1)
         if fixed is None:
             # A canned reply calls no model, so only a real turn uses the daily quota.
             quota_result = reserve_ai_request()
@@ -428,15 +460,17 @@ def _generate_legal_response_stream(user_input):
                 yield _sse({'type': 'error', 'content': 'Daily AI request quota exceeded.', 'error': 'daily_ai_quota_exceeded', 'limit': quota_result.limit})
                 return
             yield _sse({'type': 'thought', 'content': '질문 확인 중'})
-            documents = _case_documents(user_input)
+            documents = [dict(PILOT_DOCUMENT)] if pilot else _case_documents(user_input)
             if documents:
                 yield _sse({'type': 'thought', 'content': f'사건 자료 {len(documents)}건 참고'})
-            case = _pinned_case()
+            case = None if pilot else _pinned_case()
             if case:
                 yield _sse({'type': 'thought', 'content': f"붙인 판례 참고: {case['title']}"})
             body = None
+            policy_kwargs = {"policy_scope": {"profile": "lease_review_v1", "matter_id": "fictional-lease-1",
+                             "issue_id": pilot["issue_id"]}, "request_id": pilot["request_id"]} if pilot else {}
             for event in legal_backend.ask(legal_rag_url, user_input, _legal_conversation_id(), documents,
-                                           pinned=[case["chunk_id"]] if case else ()):
+                                           pinned=[case["chunk_id"]] if case else (), **policy_kwargs):
                 if event["type"] == "response":
                     body = event["body"]
                 elif not left:
@@ -449,7 +483,9 @@ def _generate_legal_response_stream(user_input):
             chat_response, sources = legal_backend.render(body, documents)
             questions = legal_backend.questions(body)
             if not left:
-                yield _sse({'type': 'thought', 'content': f'근거 {len(sources)}건 확인'})
+                status = {"withheld": "판단 보류 · 미해결 사항 확인", "clarification": "추가 사실 확인 필요",
+                          "rejected": "답변 근거 확인 불가"}.get(body.get("kind"), f'근거 {len(sources)}건 확인')
+                yield _sse({'type': 'thought', 'content': status})
             # Second check on the shown text, whatever the service's verifier decided. It reads
             # the full evidence; the source cards carry only an excerpt. Of the user's documents it
             # reads what they cite by name; their own clause numbers vouch only for a bare 제5조.
@@ -461,7 +497,8 @@ def _generate_legal_response_stream(user_input):
         else:
             chat_response, sources, questions = fixed, [], []
 
-        add_chat_message_to_db(session["user_id"], "assistant", chat_response, _conversation(), sources)
+        if not pilot:
+            add_chat_message_to_db(session["user_id"], "assistant", chat_response, _conversation(), sources)
         if left:
             return
         yield _sse({
@@ -473,13 +510,15 @@ def _generate_legal_response_stream(user_input):
 
     except legal_backend.LegalBackendUnavailable:
         logging.exception("legal_rag /v1/chat is unavailable")
-        add_chat_message_to_db(session["user_id"], "assistant", LEGAL_BACKEND_DOWN, _conversation())
+        if not pilot:
+            add_chat_message_to_db(session["user_id"], "assistant", LEGAL_BACKEND_DOWN, _conversation())
         if not left:
             yield _sse({'type': 'error', 'content': LEGAL_BACKEND_DOWN})
     except Exception:
         logging.exception("Error during AI processing stream (_generate_legal_response_stream)")
         error_response_content = "An error occurred while processing your request. Please check server logs."
-        add_chat_message_to_db(session["user_id"], "assistant", error_response_content, _conversation())
+        if not pilot:
+            add_chat_message_to_db(session["user_id"], "assistant", error_response_content, _conversation())
         if not left:
             yield _sse({'type': 'error', 'content': error_response_content})
     finally:
@@ -564,7 +603,24 @@ def chat():
         if len(user_input) > MESSAGE_MAX_CHARS:
             return jsonify({"error": MESSAGE_TOO_LONG}), 400
 
-        add_chat_message_to_db(session["user_id"], "user", user_input, _conversation())
+        if data.get("pilot") is True:
+            request_id = data.get("request_id")
+            if (data.get("issue_id") not in PILOT_ISSUES or not isinstance(request_id, str)
+                    or not request_id.strip() or len(request_id) > 128):
+                return jsonify({"error": "파일럿 쟁점과 요청 식별자를 확인해 주세요."}), 400
+            # Set in POST, before SSE headers are sent. The GET can replay this exact request.
+            # SERVER_START remains part of the consultation identity: restart starts a new scope.
+            try:
+                pilot_requests.submit(get_db(), session["user_id"], _case_key(), request_id,
+                                      user_input, data["issue_id"], _conversation())
+            except ValueError:
+                return jsonify({"error": "같은 요청 식별자에 다른 내용을 사용할 수 없습니다."}), 409
+            session["pilot_turn"] = {"key": _case_key(), "issue_id": data["issue_id"], "request_id": request_id}
+        else:
+            session.pop("pilot_turn", None)
+
+        if data.get("pilot") is not True:
+            add_chat_message_to_db(session["user_id"], "user", user_input, _conversation())
         # The POST request now just acknowledges receipt.
         # The actual processing and streaming will be triggered by the frontend's GET request.
         return jsonify({"status": "message_received_ok", "message": "Proceed to connect to SSE for response."})
@@ -585,7 +641,23 @@ def chat():
         # If GET is called without a preceding POST, this could lead to inconsistencies
         # in chat history if not handled carefully. The current frontend flow (POST then GET) is assumed.
 
-        return Response(stream_with_context(_generate_legal_response_stream(user_input)), mimetype='text/event-stream')
+        pilot = None
+        requested_id = request.args.get("request_id")
+        if requested_id:
+            active = session.get("pilot_turn")
+            if not active or active.get("key") != _case_key() or active.get("request_id") != requested_id:
+                return jsonify({"error": "파일럿 요청을 다시 제출해 주세요."}), 409
+            try:
+                pilot = pilot_requests.lookup(get_db(), session["user_id"], _case_key(), requested_id, user_input)
+                replay = pilot_requests.claim(get_db(), session["user_id"], _case_key(), requested_id)
+            except ValueError:
+                return jsonify({"error": "파일럿 요청 내용과 식별자를 확인해 주세요."}), 409
+            if replay is not None:
+                return Response(_sse(replay) + _sse({"type": "stream_end"}), mimetype='text/event-stream')
+        stream = _generate_legal_response_stream(user_input, pilot)
+        if pilot:
+            stream = _pilot_stream(stream, pilot)
+        return Response(stream_with_context(stream), mimetype='text/event-stream')
 
     # Fallback to satisfy type checkers: ensure the route always returns a valid response
     return jsonify({"error": "Invalid request method."}), 405
