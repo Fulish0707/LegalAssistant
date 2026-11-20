@@ -71,6 +71,13 @@ def test_prompts_load():
     assert "search_queries" in load_prompt("rewrite_system")
 
 
+def test_answer_prompt_guides_preparations_and_cautions():
+    prompt = load_prompt("answer_system")
+    assert "준비할 증거·서류" in prompt
+    assert "주의점" in prompt
+    assert "근거에 없는 절차나 서류를 만들어 내지 마세요" in prompt
+
+
 def test_ollama_streams_content_to_the_callback_and_parses_the_whole():
     seen, pieces = {}, []
     lines = [{"message": {"content": '{"answer": '}}, {"message": {"content": '"ok"}'}},
