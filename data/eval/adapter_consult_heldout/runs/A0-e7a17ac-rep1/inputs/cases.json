@@ -1,0 +1,86 @@
+[
+  {
+    "id": "VL1-tacit-renewal-exit",
+    "domain": "lease",
+    "message": "2년 전세 계약이 끝났는데 집주인이 만료 전에 아무 연락이 없었고 저도 아무 말 안 했어요. 만료 후 4개월이 지났는데 이제 이사를 가고 싶어요. 바로 나갈 수 있나요?",
+    "sources": [
+      "law-h6",
+      "law-h6-2",
+      "case-VL1"
+    ],
+    "case_source": "case-VL1"
+  },
+  {
+    "id": "VL2-shop-renewal-refusal",
+    "domain": "lease",
+    "message": "상가를 빌려서 5년째 장사하고 있어요. 계약 만료 3개월 전에 갱신해 달라고 했더니, 예전에 월세를 두 번 밀린 적이 있다며 주인이 거절해요. 거절할 수 있는 건가요?",
+    "sources": [
+      "law-s10",
+      "case-VL2"
+    ],
+    "case_source": "case-VL2"
+  },
+  {
+    "id": "VC1-loan-limitation",
+    "domain": "civil",
+    "message": "친구에게 1,000만 원을 빌려줬는데 갚기로 한 날로부터 11년이 지났어요. 그런데 4년 전에 친구가 100만 원을 갚으면서 나머지도 꼭 갚겠다고 문자를 보냈어요. 아직 받을 수 있나요?",
+    "sources": [
+      "law-162",
+      "law-168",
+      "law-178",
+      "case-VC1"
+    ],
+    "case_source": "case-VC1"
+  },
+  {
+    "id": "VC2-falling-sign",
+    "domain": "civil",
+    "message": "길을 걷다가 건물 외벽 간판이 떨어져서 다쳤어요. 건물은 다른 사람 소유이고 간판은 1층 가게가 단 거래요. 누구에게 배상을 받아야 하나요?",
+    "sources": [
+      "law-758",
+      "case-VC2"
+    ],
+    "case_source": "case-VC2"
+  },
+  {
+    "id": "VX1-groupchat-insult",
+    "domain": "criminal",
+    "message": "20명 있는 단체 대화방에서 누가 저를 두고 심한 욕을 했어요. 처벌받게 할 수 있나요?",
+    "sources": [
+      "law-c311",
+      "law-c312",
+      "case-VX1"
+    ],
+    "case_source": "case-VX1"
+  },
+  {
+    "id": "VX2-found-wallet",
+    "domain": "criminal",
+    "message": "길에 떨어진 지갑을 주워서 안에 있던 현금 30만 원을 써 버렸어요. 어떤 처벌을 받게 되나요?",
+    "sources": [
+      "law-c360",
+      "case-VX2"
+    ],
+    "case_source": "case-VX2"
+  },
+  {
+    "id": "VA1-no-reasons",
+    "domain": "administrative",
+    "message": "구청이 제 영업허가를 취소했는데 처분서에 '관계 법령 위반'이라고만 적혀 있어요. 무슨 위반인지도 모르겠어요. 다툴 수 있나요?",
+    "sources": [
+      "law-ap23",
+      "case-VA1"
+    ],
+    "case_source": "case-VA1"
+  },
+  {
+    "id": "VA2-direct-suit",
+    "domain": "administrative",
+    "message": "건축허가 신청이 거부됐어요. 소송을 하려면 꼭 행정심판부터 거쳐야 하나요?",
+    "sources": [
+      "law-al18",
+      "case-VA2"
+    ],
+    "case_source": "case-VA2"
+  }
+]
