@@ -22,6 +22,12 @@ def test_validate_keeps_literal_quotes_and_drops_inventions():
     assert [d["reason"].split(":")[0] for d in dropped] == ["quote_not_in_passages", "foreign_authority", "duplicate"]
 
 
+def test_validate_drops_items_quoting_a_party_argument():
+    context = "원고는 제기기간이 지나 부적법하다고 주장한다. 그러나 제기기간 내에 제기되었다."
+    kept, dropped = validate_items([Item(text="기간 경과 시 부적법", quote="원고는 제기기간이 지나 부적법하다고 주장한다")], context)
+    assert kept == [] and dropped[0]["reason"] == "argument_quote"
+
+
 def test_validate_tolerates_whitespace_and_quote_marks():
     kept, _ = validate_items([Item(text="수선 요청 기록", quote="“피고는 요청을   받고도 수선하지 않았다”")], CONTEXT)
     assert len(kept) == 1 and kept[0].quote == "피고는 요청을 받고도 수선하지 않았다"
@@ -101,6 +107,14 @@ def test_assembled_target_passes_the_production_verifier():
                              citations=build_citations(row, [i.quote for i in items]))
     assert Verifier().verify(target, evidence_bundle(row)).ok
     assert target.legal_issues == ["수선비를 받을 수 있는지"]
+
+
+def test_is_material_rejects_exhibit_numbers_and_non_facts():
+    for name in ("을1", "갑 제5호증", "변론 전체의 취지", "공소사실", "구 소득세법시행령(1978.12.30 대통령령 제922"):
+        assert not is_material(name, "지출한 사실"), name
+    assert is_material("지불각서", "피고가 2억 9,000만 원을 지불하겠다고 약속한 사실")
+    for proves in ("침입한 사실을 인정할 만한 증거가 부족함", "명시·설명할 의무가 있음", "소멸시효가 시작된다"):
+        assert not is_material("계약서", proves), proves
 
 
 def test_first_sentence_and_passages():

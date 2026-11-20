@@ -116,6 +116,9 @@ def validate_items(items: list[Item], context: str) -> tuple[list[Item], list[di
         if len(quote) < 6 or quote not in haystack:
             dropped.append({"text": item.text, "reason": "quote_not_in_passages"})
             continue
+        if "주장" in quote:  # a party's argument is not the court's ruling (prompt rule); too easy to flip
+            dropped.append({"text": item.text, "reason": "argument_quote"})
+            continue
         foreign = [r.render() for r in extract_statute_refs(item.text) if r.article not in context_statutes]
         foreign += [c for c in extract_case_refs(item.text) if c not in context_cases]
         if foreign:
@@ -132,7 +135,10 @@ def validate_items(items: list[Item], context: str) -> tuple[list[Item], list[di
 
 LAW_BEFORE_ARTICLE = re.compile(r"((?:[가-힣·]+ ){0,5}[가-힣·]*(?:법률|법|령|규칙))\s*제\s*\d+\s*조")
 LEADING_NOISE = {"구", "현행", "개정", "같은", "동", "및", "또는", "즉"}
-NOT_MATERIAL = re.compile(r"판결|발췌|법률|자료$|주장|판단|요지|규정|헌법|조문|법$|제\s*\d+\s*[조항]|대법원|선고|판$|관계$|계산$|기준$|요건|수행$")
+NOT_MATERIAL = re.compile(r"판결|발췌|법률|자료$|주장|판단|요지|규정|헌법|조문|법$|제\s*\d+\s*[조항]|대법원|선고|판$|관계$|계산$|기준$|요건|수행$"
+                          r"|령|법\(|변론|취지|공소|사실$|내용$|^[갑을병]\s*(?:제\s*)?\d|호증")
+# What a preparation proves must be a fact the user can show, not a conclusion, a legal duty or a missing proof.
+NOT_A_FACT = re.compile(r"부족|인정할 수 없|볼 수 없|인정되지 않|아니|없다|없음|의무|해야|하여야|되어야|시작된다|간주|판단|적용된다|성립한다")
 
 
 def law_phrases(text: str) -> list[str]:
@@ -157,9 +163,10 @@ def answer_laws_grounded(answer: str, context: str, title: str) -> bool:
     return all(r.article in context_articles for r in extract_statute_refs(answer))
 
 
-def is_material(name: str) -> bool:
-    """A preparation must name a document, record or exhibit, not a statute, the judgment itself or a legal test."""
-    return bool(name.strip()) and not NOT_MATERIAL.search(name.strip())
+def is_material(name: str, proves: str = "") -> bool:
+    """A preparation names a document, record or object (not a statute, exhibit number, the judgment or a legal test)
+    and shows a fact (not a conclusion, a legal duty or a lack of proof)."""
+    return bool(name.strip()) and not NOT_MATERIAL.search(name.strip()) and not NOT_A_FACT.search(proves)
 
 
 def first_sentence(text: str) -> str:
@@ -379,9 +386,10 @@ def assemble(args) -> None:
             continue
         flags = list(support or [])
         prep_items = [p.item() for p in ext.preparations]
-        prep_ok = [it for it, p, ok in zip(prep_items, ext.preparations, flags[:len(prep_items)]) if ok and is_material(p.material)]
+        prep_ok = [it for it, p, ok in zip(prep_items, ext.preparations, flags[:len(prep_items)])
+                   if ok and is_material(p.material, p.proves)]
         not_material = [{"text": it.text, "reason": "not_a_material"} for it, p, ok in
-                        zip(prep_items, ext.preparations, flags[:len(prep_items)]) if ok and not is_material(p.material)]
+                        zip(prep_items, ext.preparations, flags[:len(prep_items)]) if ok and not is_material(p.material, p.proves)]
         caut_ok = [it for it, ok in zip(ext.cautions, flags[len(prep_items):]) if ok]
         unsupported = [{"text": it.text, "reason": "not_supported_by_quote"}
                        for it, ok in zip(prep_items + list(ext.cautions), flags) if not ok]
