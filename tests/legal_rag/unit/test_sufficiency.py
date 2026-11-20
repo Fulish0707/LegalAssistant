@@ -1,7 +1,8 @@
-"""Structured sufficiency assessment: per-issue fact questions and legal elements.
+"""Two-step sufficiency assessment: notes first, then fixed choices read from the notes.
 
-The model fills a schema built for each request; code derives known/missing and
-supported/insufficient from it and checks every quote against what the model was shown.
+Step 1 (AssessmentNotes): for each fact question and legal element, the model writes what it
+found and copies the sentences. Step 2 (AssessmentChoice): from those notes alone, it picks an
+answer. Code derives known/missing and supported/insufficient and checks every quote.
 """
 
 import importlib
@@ -24,24 +25,38 @@ def module():
 
 # --- scripted model output -------------------------------------------------------------
 
-def said(answer, *quotes, reason="사용자 자료"):
-    out = {"reason": reason, "answer": answer}
-    if answer != "not_stated":
-        out["observations"] = list(quotes)
+RENT_ELEMENTS = ("agreed_rent_after_end", "agreed_clause_applies", "unilateral_rent_after_move", "unilateral_clause_applies")
+AGREED = ("agreed_rent_after_end", "agreed_clause_applies")
+UNILATERAL = ("unilateral_rent_after_move", "unilateral_clause_applies")
+
+
+def fact_note(*quotes, note="사용자 자료에서 찾은 내용"):
+    return {"notes": note, "quotes": list(quotes)}
+
+
+def element_note(*supports, note="법률 자료가 말하는 내용"):
+    out = {"notes": note}
+    if supports:  # without legal sources the schema has no supports field at all
+        out["supports"] = [{"source_id": sid, "quote": quote} for sid, quote in supports]
     return out
 
 
-def addressed(*supports, reason="자료가 직접 다룸"):
-    return {"reason": reason, "verdict": "addressed",
-            "supports": [{"source_id": sid, "quote": quote} for sid, quote in supports]}
+def notes(facts=None, elements=None, issue="rent-deduction"):
+    if elements is None:
+        keys = RENT_ELEMENTS if issue == "rent-deduction" else ("agreement_effect",)
+        elements = {key: element_note() for key in keys}
+    if facts is None:
+        facts = {"termination_agreement": fact_note()} if issue == "rent-deduction" else {}
+    return json.dumps({"facts": facts, "elements": elements}, ensure_ascii=False)
 
 
-def not_addressed(reason="자료가 다루지 않음"):
-    return {"reason": reason, "verdict": "not_addressed"}
-
-
-def scripted(facts=None, elements=None):
-    return json.dumps({"facts": facts or {}, "elements": elements or {}}, ensure_ascii=False)
+def choice(facts=None, elements=None, issue="rent-deduction"):
+    if elements is None:
+        keys = RENT_ELEMENTS if issue == "rent-deduction" else ("agreement_effect",)
+        elements = {key: "not_covered" for key in keys}
+    if facts is None:
+        facts = {"termination_agreement": "not_stated"} if issue == "rent-deduction" else {}
+    return json.dumps({"facts": facts, "elements": elements})
 
 
 def law(text="임차인은 차임을 지급하여야 한다.", sid="S1"):
@@ -49,18 +64,33 @@ def law(text="임차인은 차임을 지급하여야 한다.", sid="S1"):
                     header={"Type": "Statute"}, text=text, score=1.0)
 
 
-def assess(output, *, message="공제되나요?", documents=(), bundle=None, issue="rent-deduction",
+def assess(step1, step2=None, *, message="공제되나요?", documents=(), bundle=None, issue="rent-deduction",
            document_text=None, mask=False):
+    """``step1`` holds both notes; the assessor asks for them in two calls with separate material."""
     s = module()
-    model = FakeChatModel({"StructuredAssessment": [output]})
+    try:
+        both = json.loads(step1)
+        fact_notes, legal_notes = json.dumps({"facts": both["facts"]}), json.dumps({"elements": both["elements"]})
+    except (ValueError, KeyError, TypeError):
+        fact_notes = legal_notes = step1
+    model = FakeChatModel({"FactNotes": [fact_notes], "LegalNotes": [legal_notes],
+                           "AssessmentChoice": [step2 if step2 is not None else choice(issue=issue)]})
     result = s.SufficiencyAssessor(model, document_text=document_text).assess(
         message, [], list(documents), bundle if bundle is not None else EvidenceBundle(),
         issue_id=issue, matter_id="lease-1", mask_case_figures=mask)
     return result, model
 
 
-def schema_of(model):
-    return model.calls[0].response_schema.model_json_schema()
+def call(model, name):
+    return next(c for c in model.calls if c.response_schema.__name__ == name)
+
+
+def schema_of(model, name):
+    return call(model, name).response_schema.model_json_schema()
+
+
+def sent(model, name):
+    return "\n".join(m.content for m in call(model, name).messages)
 
 
 def resolve(schema, node):
@@ -69,189 +99,233 @@ def resolve(schema, node):
     return node
 
 
-def branches(schema, node):
-    node = resolve(schema, node)
-    return [resolve(schema, b) for b in node.get("anyOf", [node])]
-
-
 def slot(schema, group, key):
-    return resolve(schema, schema["properties"][group])["properties"][key]
+    return resolve(schema, resolve(schema, schema["properties"][group])["properties"][key])
 
 
-RENT_ELEMENTS = ("rent_after_end", "clause_scope")
+def _status(result):
+    return result.policy_input.assessment_status, (result.policy_input.evidence[0].status
+                                                    if result.policy_input.evidence else None)
 
 
-def rent_elements(**override):
-    out = {key: not_addressed() for key in RENT_ELEMENTS}
-    out.update(override)
-    return out
+# --- step 1: notes ----------------------------------------------------------------------
 
-
-# --- the schema the model fills ---------------------------------------------------------
-
-def test_keys_are_fixed_by_the_issue_so_none_can_be_invented_or_repeated():
-    _, model = assess(scripted())
-    schema = schema_of(model)
-    facts = resolve(schema, schema["properties"]["facts"])
-    elements = resolve(schema, schema["properties"]["elements"])
-    assert facts["required"] == ["termination_agreement"] and facts["additionalProperties"] is False
-    assert elements["required"] == list(RENT_ELEMENTS) and elements["additionalProperties"] is False
+def test_every_step_fixes_its_keys_to_the_issue():
+    _, model = assess(notes(), bundle=EvidenceBundle(items=[law()]))
+    for name, groups in (("FactNotes", ["facts"]), ("LegalNotes", ["elements"]), ("AssessmentChoice", ["facts", "elements"])):
+        schema = schema_of(model, name)
+        assert list(schema["properties"]) == groups
+        for group, keys in (("facts", ["termination_agreement"]), ("elements", list(RENT_ELEMENTS))):
+            if group in groups:
+                node = resolve(schema, schema["properties"][group])
+                assert node["required"] == keys and node["additionalProperties"] is False
 
 
 def test_clause_explanation_asks_no_fact_question():
-    _, model = assess(scripted(), issue="clause-explanation")
-    schema = schema_of(model)
-    assert resolve(schema, schema["properties"]["facts"]).get("properties", {}) == {}
+    _, model = assess(notes(issue="clause-explanation"), issue="clause-explanation")
+    assert [c.response_schema.__name__ for c in model.calls] == ["LegalNotes", "AssessmentChoice"]
+    schema = schema_of(model, "LegalNotes")
     assert resolve(schema, schema["properties"]["elements"])["required"] == ["agreement_effect"]
+
+
+def test_fact_notes_see_only_user_material_and_legal_notes_only_legal_sources():
+    """Smoke run: given both, EXAONE answered the legal questions from the user's message."""
+    _, model = assess(notes(), documents=[UserDocument(name="계약서", text="고유한 특약 문장")],
+                      bundle=EvidenceBundle(items=[law("고유한 법령 문장이다.")]))
+    assert "고유한 특약 문장" in sent(model, "FactNotes") and "고유한 법령 문장" not in sent(model, "FactNotes")
+    assert "고유한 법령 문장" in sent(model, "LegalNotes") and "고유한 특약 문장" not in sent(model, "LegalNotes")
+    assert "공제되나요" not in sent(model, "LegalNotes")
+
+
+def test_notes_come_before_the_copied_sentences_and_carry_no_verdict():
+    _, model = assess(notes(), bundle=EvidenceBundle(items=[law()]))
+    assert list(slot(schema_of(model, "FactNotes"), "facts", "termination_agreement")["properties"]) == ["notes", "quotes"]
+    assert list(slot(schema_of(model, "LegalNotes"), "elements", "agreed_rent_after_end")["properties"]) == ["notes", "supports"]
 
 
 def test_a_legal_support_can_only_name_a_legal_source():
     bundle = EvidenceBundle(items=[law(sid="S1"), law(sid="S2")])
-    _, model = assess(scripted(), bundle=bundle, documents=[UserDocument(name="계약서", text="특약")])
-    schema = schema_of(model)
-    yes = next(b for b in branches(schema, slot(schema, "elements", "rent_after_end"))
-               if b["properties"]["verdict"].get("const") == "addressed")
-    support = resolve(schema, yes["properties"]["supports"]["items"])
+    _, model = assess(notes(), bundle=bundle, documents=[UserDocument(name="계약서", text="특약")])
+    schema = schema_of(model, "LegalNotes")
+    support = resolve(schema, slot(schema, "elements", "agreed_rent_after_end")["properties"]["supports"]["items"])
     assert support["properties"]["source_id"]["enum"] == ["S1", "S2"]
     assert "chunk_id" not in support["properties"]
     assert support["properties"]["quote"]["maxLength"] <= 80
 
 
-def test_the_model_copies_the_users_sentence_and_code_finds_where_it_is():
-    """Smoke run: EXAONE quoted the message (M0) exactly but labelled it D1, twice. Like chunk ids,
-    the locator is something the server already knows."""
-    _, model = assess(scripted(), documents=[UserDocument(name="계약서", text="특약")])
-    schema = schema_of(model)
-    yes = next(b for b in branches(schema, slot(schema, "facts", "termination_agreement"))
-               if b["properties"]["answer"].get("const") == "yes")
-    assert resolve(schema, yes["properties"]["observations"]["items"])["type"] == "string"
+def test_without_legal_sources_an_element_has_no_support_field():
+    _, model = assess(json.dumps({"facts": {"termination_agreement": fact_note()},
+                                  "elements": {key: {"notes": "자료 없음"} for key in RENT_ELEMENTS}}))
+    assert list(slot(schema_of(model, "LegalNotes"), "elements", "agreed_rent_after_end")["properties"]) == ["notes"]
 
 
-def test_an_observation_is_recorded_where_it_appears_in_the_users_material():
-    output = scripted({"termination_agreement": said("no", "합의는 없었습니다")}, rent_elements())
-    result, _ = assess(output, message="합의는 없었습니다. 공제되나요?",
-                       documents=[UserDocument(name="계약서", text="특약: 조기 퇴거 시 차임 부담")])
-    assert [(o.locator, o.quote) for o in result.assessment.facts[0].observations] == [("M0", "합의는 없었습니다")]
+def test_the_prompts_give_no_quotable_example_of_a_user_statement():
+    """qwen3:8b and EXAONE both reported the prompt's example sentence as something the user said."""
+    s = module()
+    for prompt in (s._FACT_INSTRUCTIONS, s._LEGAL_INSTRUCTIONS, s._CHOICE_INSTRUCTIONS):
+        for copied in ("'합의가 없었다'", "'별도 종료 합의 없음'"):
+            assert copied not in prompt
 
 
-def test_without_legal_sources_an_element_can_only_be_not_addressed():
-    _, model = assess(scripted())
-    schema = schema_of(model)
-    options = branches(schema, slot(schema, "elements", "rent_after_end"))
-    assert [b["properties"]["verdict"]["const"] for b in options] == ["not_addressed"]
+def test_the_prompt_does_not_treat_every_general_rule_as_too_weak():
+    """Smoke run: told that general principles never fill an element, EXAONE rejected a mandatory
+    rule (Housing Lease Act art. 10) that states the element directly."""
+    assert "일반 원칙" not in module()._LEGAL_INSTRUCTIONS
 
 
-def test_every_branch_starts_with_the_reason_so_the_verdict_comes_after_it():
-    """Spike 001: branches that opened with different fields fixed the verdict at the first key."""
-    _, model = assess(scripted(), bundle=EvidenceBundle(items=[law()]))
-    schema = schema_of(model)
-    for group, key in (("facts", "termination_agreement"), ("elements", "rent_after_end")):
-        options = branches(schema, slot(schema, group, key))
-        assert len(options) > 1
-        for branch in options:
-            assert list(branch["properties"])[0] == "reason"
-            assert branch["additionalProperties"] is False
+def test_legal_elements_are_asked_as_questions_the_law_can_answer_either_way():
+    """v2 held-out: asked whether a source "addresses" an element, EXAONE answered whether it said yes."""
+    s = module()
+    for profile in s.ISSUE_PROFILES.values():
+        for _, question, _ in profile.elements:
+            assert question.endswith("가")
 
 
-def test_not_stated_and_not_addressed_have_no_quote_field():
-    """Spike 001: a separate `missing` with quotes allowed let models cite unrelated text."""
-    _, model = assess(scripted(), bundle=EvidenceBundle(items=[law()]))
-    schema = schema_of(model)
-    for group, key, field, const in (("facts", "termination_agreement", "answer", "not_stated"),
-                                     ("elements", "rent_after_end", "verdict", "not_addressed")):
-        branch = next(b for b in branches(schema, slot(schema, group, key))
-                      if b["properties"][field].get("const") == const)
-        assert set(branch["properties"]) == {"reason", field}
+# --- step 2: choices read from the notes ------------------------------------------------
+
+def test_the_choice_step_has_only_fixed_answers():
+    _, model = assess(notes(), bundle=EvidenceBundle(items=[law()]))
+    schema = schema_of(model, "AssessmentChoice")
+    assert set(slot(schema, "facts", "termination_agreement")["enum"]) == {"yes", "no", "not_stated", "conflicting"}
+    assert set(slot(schema, "elements", "agreed_rent_after_end")["enum"]) == {"yes", "no", "not_covered"}
 
 
-# --- facts: code derives the status ------------------------------------------------------
+def test_the_choice_step_reads_the_notes_not_the_sources():
+    note = "판결은 합의로 종료되면 그 뒤 차임 의무가 없다고 한다"
+    step1 = notes(elements={key: element_note(note=note if key == "agreed_rent_after_end" else "없음")
+                            for key in RENT_ELEMENTS})
+    _, model = assess(step1, bundle=EvidenceBundle(items=[law("임차인은 차임을 지급하여야 하는 고유 문장이다.")]))
+    assert note in sent(model, "AssessmentChoice")
+    assert "고유 문장" not in sent(model, "AssessmentChoice")
+
+
+def test_a_rule_with_an_exception_is_still_an_answer_in_the_choice_instructions():
+    """Smoke run: legal notes stated the rule ("no rent after an agreed end, unless agreed otherwise")
+    and the choice step called every such note not_covered."""
+    s = module()
+    assert "근거가 부족" not in s._CHOICE_INSTRUCTIONS
+    assert "단서" in s._CHOICE_INSTRUCTIONS
+
+
+def test_a_malformed_step_is_a_failed_assessment_not_a_gap():
+    assert assess("not json", issue="clause-explanation")[0].policy_input.assessment_status == "invalid"
+    assert assess("not json")[0].policy_input.assessment_status == "invalid"
+    result, _ = assess(notes(issue="clause-explanation"), "not json", issue="clause-explanation")
+    assert result.policy_input.assessment_status == "invalid"
+
+
+# --- facts --------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("answer,quotes,status", [
     ("yes", ["합의했어요"], "known"),
     ("no", ["합의했어요"], "known"),
     ("not_stated", [], "missing"),
+    ("not_stated", ["합의했어요"], "missing"),  # quotes kept for context; the answer decides
     ("conflicting", ["합의했어요", "동의하기 어렵습니다"], "conflicting"),
 ])
 def test_fact_status_is_derived_from_the_answer(answer, quotes, status):
-    output = scripted({"termination_agreement": said(answer, *quotes)}, rent_elements())
-    result, _ = assess(output, message="합의했어요. 공제되나요?",
+    result, _ = assess(notes({"termination_agreement": fact_note(*quotes)}),
+                       choice({"termination_agreement": answer}), message="합의했어요. 공제되나요?",
                        documents=[UserDocument(name="문자", text="동의하기 어렵습니다")])
     assert result.policy_input.assessment_status == "valid"
     assert result.policy_input.facts[0].status == status
     assert result.policy_input.facts[0].question  # the one question the policy may ask
 
 
-def test_a_known_fact_keeps_which_way_the_user_answered():
-    output = scripted({"termination_agreement": said("no", "합의는 안 받았고")}, rent_elements())
-    result, _ = assess(output, message="합의는 안 받았고 먼저 나가요.")
+@pytest.mark.parametrize("answer,quotes", [
+    ("yes", []),                      # a statement needs the sentence that states it
+    ("no", []),
+    ("conflicting", ["합의했어요"]),  # a conflict needs both sides
+])
+def test_an_answer_without_the_sentences_it_needs_fails(answer, quotes):
+    result, _ = assess(notes({"termination_agreement": fact_note(*quotes)}),
+                       choice({"termination_agreement": answer}), message="합의했어요.")
+    assert result.policy_input.assessment_status == "invalid"
+
+
+def test_a_known_fact_keeps_which_way_the_user_answered_and_where_it_was_said():
+    result, _ = assess(notes({"termination_agreement": fact_note("합의는 안 받았고")}),
+                       choice({"termination_agreement": "no"}), message="합의는 안 받았고 먼저 나가요.",
+                       documents=[UserDocument(name="계약서", text="특약: 조기 퇴거 시 차임 부담")])
     fact = result.assessment.facts[0]
     assert fact.status == "known" and fact.value == "없음"
-    assert [o.quote for o in fact.observations] == ["합의는 안 받았고"]
+    assert [(o.locator, o.quote) for o in fact.observations] == [("M0", "합의는 안 받았고")]
 
 
 def test_a_fact_written_only_in_an_attachment_is_seen_and_known():
-    output = scripted({"termination_agreement": said("yes", "종료하기로 합의한다")}, rent_elements())
-    result, model = assess(output, message="첨부대로 정리했어요.",
+    result, model = assess(notes({"termination_agreement": fact_note("종료하기로 합의한다")}),
+                           choice({"termination_agreement": "yes"}), message="첨부대로 정리했어요.",
                            documents=[UserDocument(name="메모", text="2027-03-31에 종료하기로 합의한다.")])
     assert result.policy_input.facts[0].status == "known"
-    prompt = "\n".join(m.content for m in model.calls[0].messages)
-    assert "종료하기로 합의한다" in prompt and "D1" in prompt
+    assert "종료하기로 합의한다" in sent(model, "FactNotes") and "D1" in sent(model, "FactNotes")
 
 
 @pytest.mark.parametrize("quote,expected", [
     ("합의했어요", "valid"),
-    ("합의했어요 ", "valid"),      # Spike 001: trailing whitespace is not a different quote
+    ("합의했어요 ", "valid"),         # trailing whitespace is not a different quote
+    ('"합의했어요"', "valid"),        # smoke run: the sentence wrapped in quotation marks
+    ("“합의했어요”", "valid"),
     ("합의하지 않았어요", "invalid"),  # not in what the user wrote
+    ("임차인은 차임을", "invalid"),    # legal text, not user material
 ])
-def test_observation_quotes_must_be_in_the_users_text(quote, expected):
-    output = scripted({"termination_agreement": said("yes", quote)}, rent_elements())
-    result, _ = assess(output, message="합의했어요. 공제되나요?")
+def test_fact_quotes_must_be_in_the_users_text(quote, expected):
+    result, _ = assess(notes({"termination_agreement": fact_note(quote)}), choice({"termination_agreement": "yes"}),
+                       message="합의했어요. 공제되나요?", bundle=EvidenceBundle(items=[law()]))
     assert result.policy_input.assessment_status == expected
 
 
-@pytest.mark.parametrize("fact", [
-    {"reason": "진술", "answer": "yes", "observations": []},                # a statement needs its quote
-    {"reason": "진술", "answer": "yes", "observations": ["임차인은 차임을"]},  # legal text, not user material
-    {"reason": "진술", "answer": "not_stated", "observations": ["합의했어요"]},
+# --- legal elements -----------------------------------------------------------------------
+
+_BOTH = "합의로 종료되면 그 뒤 차임 의무가 없다. 특약은 일방 퇴거에 적용된다."
+
+
+def _rent(fact, answers, supported=()):
+    """answers: element key -> choice; supported: element keys whose note quotes the law."""
+    step1 = notes({"termination_agreement": fact_note("합의했어요")},
+                  {key: element_note(*([("S1", "특약은 일방 퇴거에 적용된다")] if key in supported else []))
+                   for key in RENT_ELEMENTS})
+    step2 = choice({"termination_agreement": fact}, {key: answers.get(key, "not_covered") for key in RENT_ELEMENTS})
+    return assess(step1, step2, message="합의했어요.", bundle=EvidenceBundle(items=[law(_BOTH)]))[0]
+
+
+@pytest.mark.parametrize("fact,answers,supported,expected", [
+    # an agreed ending needs only the questions about agreed endings, answered either way
+    ("yes", {"agreed_rent_after_end": "no", "agreed_clause_applies": "no"}, AGREED, "supported"),
+    ("yes", {"agreed_rent_after_end": "yes", "agreed_clause_applies": "no"}, AGREED, "supported"),
+    ("yes", {"agreed_rent_after_end": "no", "agreed_clause_applies": "not_covered"}, AGREED, "insufficient"),
+    ("yes", {"unilateral_rent_after_move": "yes", "unilateral_clause_applies": "yes"}, UNILATERAL, "insufficient"),
+    # a unilateral move-out needs only the questions about it
+    ("no", {"unilateral_rent_after_move": "yes", "unilateral_clause_applies": "yes"}, UNILATERAL, "supported"),
+    ("no", {"agreed_rent_after_end": "no", "agreed_clause_applies": "no"}, AGREED, "insufficient"),
+    # unknown facts: every question must be answered
+    ("not_stated", {"agreed_rent_after_end": "no", "agreed_clause_applies": "no"}, AGREED, "insufficient"),
+    ("not_stated", dict.fromkeys(RENT_ELEMENTS, "yes"), RENT_ELEMENTS, "supported"),
 ])
-def test_a_fact_answer_outside_its_shape_is_a_failed_assessment(fact):
-    """Grammar-constrained backends cannot emit these; the others must still fail closed."""
-    result, _ = assess(scripted({"termination_agreement": fact}, rent_elements()), message="합의했어요.",
-                       bundle=EvidenceBundle(items=[law()]))
-    assert result.policy_input.assessment_status == "invalid"
+def test_law_must_answer_the_questions_that_match_the_established_facts(fact, answers, supported, expected):
+    """Smoke run: asked about "합의 종료 또는 일방 퇴거" at once, EXAONE called the user's own case unclear."""
+    fact_quotes = [] if fact == "not_stated" else ["합의했어요"]
+    step1 = notes({"termination_agreement": fact_note(*fact_quotes)},
+                  {key: element_note(*([("S1", "특약은 일방 퇴거에 적용된다")] if key in supported else []))
+                   for key in RENT_ELEMENTS})
+    step2 = choice({"termination_agreement": fact}, {key: answers.get(key, "not_covered") for key in RENT_ELEMENTS})
+    result, _ = assess(step1, step2, message="합의했어요.", bundle=EvidenceBundle(items=[law(_BOTH)]))
+    assert _status(result) == ("valid", expected)
 
 
-# --- legal elements: code decides sufficiency --------------------------------------------
-
-def test_evidence_is_supported_only_when_every_element_is_addressed():
-    bundle = EvidenceBundle(items=[law("합의로 종료되면 그 뒤 차임 의무가 없다. 특약은 일방 퇴거에 적용된다.")])
-    both = rent_elements(rent_after_end=addressed(("S1", "그 뒤 차임 의무가 없다")),
-                         clause_scope=addressed(("S1", "특약은 일방 퇴거에 적용된다")))
-    one = rent_elements(rent_after_end=addressed(("S1", "그 뒤 차임 의무가 없다")))
-    facts = {"termination_agreement": said("yes", "합의했어요")}
-    for elements, status in ((both, "supported"), (one, "insufficient")):
-        result, _ = assess(scripted(facts, elements), message="합의했어요.", bundle=bundle)
-        assert result.policy_input.assessment_status == "valid"
-        assert result.policy_input.evidence[0].key == "deduction_basis"
-        assert result.policy_input.evidence[0].status == status
+def test_an_answer_with_no_verified_legal_sentence_leaves_the_element_open():
+    """"no" may mean "the source says no" or "found nothing": without a quote it supports nothing."""
+    result = _rent("yes", {"agreed_rent_after_end": "no", "agreed_clause_applies": "no"}, ("agreed_rent_after_end",))
+    assert _status(result) == ("valid", "insufficient")
 
 
-def test_the_research_query_names_only_the_unaddressed_elements():
+def test_the_research_query_names_only_the_open_questions_that_apply():
     s = module()
-    bundle = EvidenceBundle(items=[law("합의로 종료되면 그 뒤 차임 의무가 없다.")])
-    elements = rent_elements(rent_after_end=addressed(("S1", "그 뒤 차임 의무가 없다")))
-    result, _ = assess(scripted({"termination_agreement": said("yes", "합의했어요")}, elements),
-                       message="합의했어요.", bundle=bundle)
+    result = _rent("yes", {"agreed_rent_after_end": "no"}, ("agreed_rent_after_end",))
+    questions = {key: question for key, question, _ in s.ISSUE_PROFILES["rent-deduction"].elements}
     proposition = result.assessment.evidence[0].proposition
-    labels = dict(s.ISSUE_PROFILES["rent-deduction"].elements)
-    assert labels["clause_scope"] in proposition and labels["rent_after_end"] not in proposition
-
-
-def test_the_prompt_does_not_treat_every_general_rule_as_too_weak():
-    """Smoke run: told that general principles never fill an element, EXAONE rejected a mandatory
-    rule (Housing Lease Act art. 10) that states the element directly."""
-    _, model = assess("not json")
-    assert "일반 원칙" not in model.calls[0].messages[0].content
+    assert questions["agreed_clause_applies"] in proposition
+    assert questions["agreed_rent_after_end"] not in proposition
+    assert questions["unilateral_clause_applies"] not in proposition
 
 
 @pytest.mark.parametrize("support,expected", [
@@ -260,35 +334,43 @@ def test_the_prompt_does_not_treat_every_general_rule_as_too_weak():
     (("D1", "특약"), "invalid"),             # user material is never legal support
 ])
 def test_a_legal_quote_must_be_in_a_legal_source(support, expected):
-    output = scripted({}, {"agreement_effect": addressed(support)})
-    result, _ = assess(output, issue="clause-explanation", bundle=EvidenceBundle(items=[law()]),
+    step1 = notes(elements={"agreement_effect": element_note(support)}, issue="clause-explanation")
+    result, _ = assess(step1, choice(elements={"agreement_effect": "yes"}, issue="clause-explanation"),
+                       issue="clause-explanation", bundle=EvidenceBundle(items=[law()]),
                        documents=[UserDocument(name="계약서", text="특약")])
     assert result.policy_input.assessment_status == expected
 
 
-def test_an_addressed_element_needs_a_support():
-    output = scripted({}, {"agreement_effect": {"reason": "다룸", "verdict": "addressed", "supports": []}})
-    result, _ = assess(output, issue="clause-explanation", bundle=EvidenceBundle(items=[law()]))
+@pytest.mark.parametrize("placeholder", ["[없음]", "없음", "해당 없음", "N/A"])
+def test_a_placeholder_in_place_of_a_quote_is_no_quote(placeholder):
+    """Smoke run: EXAONE wrote "[없음]" as a supporting quote."""
+    step1 = notes(elements={"agreement_effect": element_note(("S1", placeholder))}, issue="clause-explanation")
+    result, _ = assess(step1, choice(elements={"agreement_effect": "yes"}, issue="clause-explanation"),
+                       issue="clause-explanation", bundle=EvidenceBundle(items=[law()]))
+    assert _status(result) == ("valid", "insufficient")
+    step1 = notes({"termination_agreement": fact_note(placeholder)})
+    result, _ = assess(step1, choice({"termination_agreement": "not_stated"}))
+    assert result.policy_input.assessment_status == "valid"
+
+
+def test_a_fabricated_quote_fails_even_under_not_covered():
+    step1 = notes(elements={"agreement_effect": element_note(("S1", "원문에 없는 문장"))}, issue="clause-explanation")
+    result, _ = assess(step1, issue="clause-explanation", bundle=EvidenceBundle(items=[law()]))
     assert result.policy_input.assessment_status == "invalid"
 
 
-def test_malformed_output_is_a_failed_assessment_not_a_gap():
-    result, _ = assess("not json", issue="clause-explanation")
-    assert result.policy_input.assessment_status == "invalid"
-
-
-def test_the_prompt_gives_no_quotable_example_of_a_user_statement():
-    """qwen3:8b and EXAONE both reported the prompt's example sentence as something the user said."""
-    _, model = assess("not json")
-    prompt = model.calls[0].messages[0].content
-    for copied in ("'합의가 없었다'", "'별도 종료 합의 없음'"):
-        assert copied not in prompt
-
-
-def test_user_material_is_not_offered_as_legal_authority():
-    _, model = assess("not json", documents=[UserDocument(name="계약서", text="특약")])
-    user = json.loads(model.calls[0].messages[1].content)
-    assert "D1" in user["user_observations"] and "D1" not in user["legal_sources"]
+@pytest.mark.parametrize("quote,expected", [
+    ("합의로 종료되면 … 특약은 일방 퇴거에 적용된다", "valid"),   # v2 held-out: joined with an ellipsis
+    ("합의로 종료되면...특약은 일방 퇴거에 적용된다", "valid"),
+    ("특약은 일방 퇴거에 적용된다 … 합의로 종료되면", "invalid"),   # out of order
+    ("합의로 종료되면 … 없는 문장입니다", "invalid"),
+    ("합의로 … 특약은 일방 퇴거에 적용된다", "invalid"),            # a fragment too short to anchor
+])
+def test_a_quote_joined_with_an_ellipsis_is_checked_piece_by_piece(quote, expected):
+    step1 = notes(elements={"agreement_effect": element_note(("S1", quote))}, issue="clause-explanation")
+    result, _ = assess(step1, choice(elements={"agreement_effect": "yes"}, issue="clause-explanation"),
+                       issue="clause-explanation", bundle=EvidenceBundle(items=[law(_BOTH)]))
+    assert result.policy_input.assessment_status == expected
 
 
 # --- case law: masking, roles, the whole document ----------------------------------------
@@ -298,19 +380,15 @@ def _case_bundle(role="기관·법원 판단", text="2026년 1월 1일 500만 �
         document_type="court_decision", header={"Type": "Case", "Section role": role}, text=text, score=1.0)])
 
 
-def _clause(quote, bundle, *, mask=False, document_text=None):
-    return assess(scripted({}, {"agreement_effect": addressed(("S1", quote))}), issue="clause-explanation",
-                  bundle=bundle, mask=mask, document_text=document_text)[0]
-
-
-def _status(result):
-    return result.policy_input.assessment_status, (result.policy_input.evidence[0].status
-                                                    if result.policy_input.evidence else None)
+def _clause(*quotes, bundle, mask=False, document_text=None):
+    step1 = notes(elements={"agreement_effect": element_note(*(("S1", q) for q in quotes))}, issue="clause-explanation")
+    return assess(step1, choice(elements={"agreement_effect": "yes"}, issue="clause-explanation"),
+                  issue="clause-explanation", bundle=bundle, mask=mask, document_text=document_text)[0]
 
 
 def test_the_assessor_sees_the_same_case_figure_mask_as_the_generator():
-    _, model = assess(scripted(), issue="clause-explanation", bundle=_case_bundle(), mask=True)
-    prompt = "\n".join(m.content for m in model.calls[0].messages)
+    _, model = assess(notes(issue="clause-explanation"), issue="clause-explanation", bundle=_case_bundle(), mask=True)
+    prompt = sent(model, "LegalNotes")
     assert "500만 원" not in prompt and "2026년 1월 1일" not in prompt and "(금액)" in prompt
 
 
@@ -320,7 +398,7 @@ def test_the_assessor_sees_the_same_case_figure_mask_as_the_generator():
     ("2026년 1월 1일 500만 원의 지급", False, "valid"),   # unmasked runs check the original
 ])
 def test_case_quotes_are_checked_against_the_text_the_model_read(quote, mask, expected):
-    assert _clause(quote, _case_bundle(), mask=mask).policy_input.assessment_status == expected
+    assert _clause(quote, bundle=_case_bundle(), mask=mask).policy_input.assessment_status == expected
 
 
 @pytest.mark.parametrize("role,evidence", [
@@ -330,10 +408,8 @@ def test_case_quotes_are_checked_against_the_text_the_model_read(quote, mask, ex
     ("당사자 주장 (채택 여부 미확인)", "insufficient"), ("사실관계", "insufficient"),
     ("주문·결론", "insufficient"), ("복수 역할 (본문 구분 확인 필요)", "insufficient"),
 ])
-def test_a_quote_that_is_not_reasoning_leaves_its_element_unaddressed(role, evidence):
-    """The quote is verified, it just is not legal support: the element stays open (research,
-    then withhold) instead of failing the whole assessment."""
-    result = _clause("차임을 지급할 의무", _case_bundle(role=role, text="임차인은 차임을 지급할 의무가 있다."))
+def test_a_quote_that_is_not_reasoning_leaves_its_element_open(role, evidence):
+    result = _clause("차임을 지급할 의무", bundle=_case_bundle(role=role, text="임차인은 차임을 지급할 의무가 있다."))
     assert _status(result) == ("valid", evidence)
 
 
@@ -361,14 +437,14 @@ _DOC = ("1. 기초사실\n원고는 2020. 3. 1. 피고와 임대차계약을 체
 def test_a_party_claim_found_through_the_whole_document_is_not_support():
     """The window starts mid-section, so the heading that names the speaker is in an earlier chunk."""
     at = _DOC.index("원고는 중도")
-    result = _clause("차임을 지급할 의무가 없다", _windowed_case(_DOC, at, at + 40), document_text=_Documents(_DOC))
+    result = _clause("차임을 지급할 의무가 없다", bundle=_windowed_case(_DOC, at, at + 40), document_text=_Documents(_DOC))
     assert _status(result) == ("valid", "insufficient")
     assert result.support_roles == {"S1": "party_claim"}
 
 
 def test_the_courts_reasoning_found_through_the_whole_document_is_support():
     at = _DOC.index("임차인은")
-    result = _clause("차임을 지급할 의무가 있다", _windowed_case(_DOC, at, len(_DOC)), document_text=_Documents(_DOC))
+    result = _clause("차임을 지급할 의무가 있다", bundle=_windowed_case(_DOC, at, len(_DOC)), document_text=_Documents(_DOC))
     assert _status(result) == ("valid", "supported")
     assert result.support_roles == {"S1": "finding"}
 
@@ -376,7 +452,7 @@ def test_the_courts_reasoning_found_through_the_whole_document_is_support():
 def test_the_quote_is_located_in_the_masked_document_the_model_read():
     at = _DOC.index("원고는 2020")
     bundle = _windowed_case(_DOC, at, _DOC.index("2. 당사자"))
-    result = _clause("원고는 (날짜) 피고와", bundle, mask=True, document_text=_Documents(_DOC))
+    result = _clause("원고는 (날짜) 피고와", bundle=bundle, mask=True, document_text=_Documents(_DOC))
     assert result.support_roles == {"S1": "facts"}  # found despite the masked date; facts are not support
     assert _status(result) == ("valid", "insufficient")
 
@@ -384,14 +460,14 @@ def test_the_quote_is_located_in_the_masked_document_the_model_read():
 def test_without_the_document_the_chunk_alone_decides_and_unknown_is_recorded():
     at = _DOC.index("임차인은")
     for documents in (None, _Documents(None)):
-        result = _clause("차임을 지급할 의무가 있다", _windowed_case(_DOC, at, len(_DOC)), document_text=documents)
+        result = _clause("차임을 지급할 의무가 있다", bundle=_windowed_case(_DOC, at, len(_DOC)), document_text=documents)
         assert _status(result) == ("valid", "supported")
         assert result.support_roles == {"S1": "unknown"}
 
 
 def test_statutes_are_never_looked_up_or_role_checked():
     documents = _Documents("원고는 임차인은 차임을 지급하여야 한다고 주장한다.")
-    result = _clause("차임을 지급하여야 한다", EvidenceBundle(items=[law()]), document_text=documents)
+    result = _clause("차임을 지급하여야 한다", bundle=EvidenceBundle(items=[law()]), document_text=documents)
     assert _status(result) == ("valid", "supported")
     assert documents.calls == [] and result.support_roles == {}
 
@@ -401,16 +477,14 @@ def test_interpretations_get_the_same_claim_filter_as_cases():
     at = doc.index("임차인이")
     bundle = EvidenceBundle(items=[Evidence(source_id="S1", chunk_id="i1", document_id="i",
         document_type="legal_interpretation", header={"Type": "Interpretation"}, text=doc[at:at + 30], score=1.0)])
-    result = _clause("차임 지급 의무가 없다", bundle, document_text=_Documents(doc))
+    result = _clause("차임 지급 의무가 없다", bundle=bundle, document_text=_Documents(doc))
     assert result.support_roles == {"S1": "party_claim"}
 
 
 def test_one_blocked_quote_marks_the_source_but_a_reasoning_quote_still_supports():
     at = _DOC.index("2. 당사자")
-    bundle = _windowed_case(_DOC, at, len(_DOC))
-    output = scripted({}, {"agreement_effect": addressed(("S1", "차임을 지급할 의무가 있다"),
-                                                         ("S1", "차임을 지급할 의무가 없다"))})
-    result, _ = assess(output, issue="clause-explanation", bundle=bundle, document_text=_Documents(_DOC))
+    result = _clause("차임을 지급할 의무가 있다", "차임을 지급할 의무가 없다",
+                     bundle=_windowed_case(_DOC, at, len(_DOC)), document_text=_Documents(_DOC))
     assert result.support_roles == {"S1": "party_claim"}  # the record shows the blocking role
     assert _status(result) == ("valid", "supported")
 
@@ -431,7 +505,7 @@ def test_a_quote_cut_by_the_length_limit_may_differ_only_at_its_last_characters(
     """Live runs: six 80-character quotes were exact but for the final character ("것으로보" for "것으로 보아"),
     because near maxLength decoding can only pick tokens that still fit."""
     assert len(quote) <= 80
-    assert _clause(quote, EvidenceBundle(items=[law(_LONG)])).policy_input.assessment_status == expected
+    assert _clause(quote, bundle=EvidenceBundle(items=[law(_LONG)])).policy_input.assessment_status == expected
 
 
 def test_the_role_of_a_bent_quote_is_read_at_its_exact_prefix():
@@ -439,6 +513,6 @@ def test_the_role_of_a_bent_quote_is_read_at_its_exact_prefix():
                   "그 이후의 기간에 대한 차임을 지급할 의무는 계속 남는다고 보아야 한다.")
     start = doc.index("임차인이 계약기간")
     quote = doc[start:][:79] + "X"
-    result = _clause(quote, _windowed_case(doc, start, len(doc)), document_text=_Documents(doc))
+    result = _clause(quote, bundle=_windowed_case(doc, start, len(doc)), document_text=_Documents(doc))
     assert _status(result) == ("valid", "supported")
     assert result.support_roles == {"S1": "finding"}
