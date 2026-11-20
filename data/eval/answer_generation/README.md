@@ -18,7 +18,7 @@
 
 - G2·G3는 같은 Q8_0 양자화·같은 비사고(non-thinking) 템플릿·같은 학습 형식 프롬프트(`training.dataset.SYSTEM` + `adapter_eval.retrieved_messages`)라서 차이가 어댑터에서 온다. 병합 검증은 spikes/002(chrF 0.80 대 원본 0.35)에서 이미 했다.
 - G1은 운영 설정 그대로(구조화 스키마, 운영 프롬프트). 형식이 다른 것은 갈래의 본질이라 한계로 적는다.
-- 공통: temperature 0.2, max_tokens 1024, num_ctx 12288(local 설정), timeout 300초. 모델별 2회 반복, 단일 GPU 순차 실행.
+- 공통: temperature 0.2, max_tokens 2048(운영 기본값), num_ctx 12288(local 설정), timeout 300초. 모델별 2회 반복, 단일 GPU 순차 실행.
 
 ## 입력
 
@@ -57,4 +57,4 @@
 
 ## 변경 기록
 
-- (없음)
+- 2026-11-20, 실행 직후·결과 확인 전: 공통 설정의 max_tokens를 1024에서 2048로 정정. 초안이 Generator 클래스 기본값(1024)을 적었으나 실제 운영 설정(configs/default.yaml)은 2048이고 러너는 운영 설정을 그대로 쓴다. 모든 갈래에 동일하게 적용되며 사례·기대·채점 기준은 바꾸지 않았다.
