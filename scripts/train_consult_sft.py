@@ -83,6 +83,7 @@ def main() -> None:
     parser.add_argument("--max-length", type=int, default=3072)
     parser.add_argument("--seed", type=int, default=20261120)
     parser.add_argument("--data", type=Path, default=DATA)
+    parser.add_argument("--out-root", type=Path, default=OUT_ROOT)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -121,7 +122,7 @@ def main() -> None:
     total_steps = steps_per_epoch * args.epochs
     scheduler = get_cosine_schedule_with_warmup(optimizer, math.ceil(total_steps * args.warmup_ratio), total_steps)
 
-    run_dir = OUT_ROOT / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    run_dir = args.out_root / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir.mkdir(parents=True)
     metrics = {"plan": plan, "base_adapter": str(BASE_ADAPTER.relative_to(ROOT)), "model": MODEL_ID, "revision": REVISION,
                "data_hashes": {n: file_hash(args.data / n) for n in ("train.jsonl", "validation.jsonl", "manifest.json")},
