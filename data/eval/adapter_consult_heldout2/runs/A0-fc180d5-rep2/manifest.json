@@ -1,0 +1,123 @@
+{
+  "created_at": "2026-11-21T09:39:27.872234+00:00",
+  "model_name": "qwen3-4b-legal:q8_0",
+  "arm": "structured",
+  "settings": {
+    "paths": {
+      "root": ".",
+      "raw_dir": "data/raw",
+      "processed_dir": "data/processed",
+      "index_dir": "data/indexes",
+      "eval_dir": "data/eval"
+    },
+    "corpus": {
+      "version": "v1"
+    },
+    "embedding": {
+      "backend": "ollama",
+      "model": "bge-m3",
+      "base_url": "http://localhost:11434",
+      "batch_size": 16,
+      "fake_dimension": 64,
+      "timeout_seconds": 120.0,
+      "query_num_ctx": 1024
+    },
+    "sparse": {
+      "tokenizer": "regex",
+      "k1": 1.2,
+      "b": 0.75
+    },
+    "qdrant": {
+      "mode": "server",
+      "path": null,
+      "url": "http://localhost:6333",
+      "timeout_seconds": 120.0
+    },
+    "retrieval": {
+      "k_dense": 100,
+      "k_sparse": 100,
+      "k_fused": 100,
+      "k_final": 5,
+      "rrf_k": 60,
+      "corpora": [
+        "criminal-v1",
+        "civil-v1",
+        "administrative-v1",
+        "ip-v1",
+        "statute-api-full-v1"
+      ],
+      "corpus_weights": {},
+      "law_corpus": "statute-api-full-v1",
+      "dense_weight": 1.0,
+      "sparse_weight": 0.75,
+      "leg_floor": 3
+    },
+    "rerank": {
+      "backend": "cross_encoder",
+      "model": "BAAI/bge-reranker-v2-m3",
+      "device": "cuda",
+      "dtype": "float16",
+      "local_files_only": true,
+      "max_length": 512
+    },
+    "llm": {
+      "backend": "ollama",
+      "model": "qwen3-4b-legal:q8_0",
+      "base_url": "http://localhost:11434",
+      "temperature": 0.2,
+      "max_tokens": 2048,
+      "adapter": null,
+      "gemini_thinking_level": null,
+      "timeout_seconds": 300.0,
+      "num_ctx": 12288
+    },
+    "rag": {
+      "answer_style": "full",
+      "allow_clarification": true,
+      "llm_rewrite": false,
+      "hard_filter": false,
+      "analyzer_terms_in_search": false,
+      "mask_case_figures": false,
+      "history_turns": 4,
+      "max_regenerations": 1,
+      "max_evidence_chars": 1500,
+      "context_neighbor_radius": 0,
+      "context_neighbor_corpora": [],
+      "max_context_chars": null
+    },
+    "api": {
+      "host": "127.0.0.1",
+      "port": 8000,
+      "warmup": true
+    },
+    "trace": {
+      "include_text": false,
+      "path": null
+    }
+  },
+  "input_hashes": {
+    "law-h3-3.txt": "1bd7829525765a80108eddacabbb5bf27612a3c702a1116bc84969797a1c6779",
+    "law-627.txt": "f97b2672a94b40e33cb274f2b2250a03cc0ba9cb9ea04160fc81b000e23295c0",
+    "law-536.txt": "76639c41c63f380a50c6731f19d747990bdf25f7ce632d5e46518d6523e83b16",
+    "law-391.txt": "1a1a9006a536078a0a0ec83b163c12fea45415b07c91a2af6297ac1d26b8f672",
+    "law-c260.txt": "b082343de27153ff0fc78b01d21821ceb3b393751b4f69e39716d596024fb2cf",
+    "law-c366.txt": "461f49ec03dd0a65f217a87a7ddff7484bd45215fc770555cca7107c010c3d33",
+    "law-oi11.txt": "a2902eab8c67a7422c998dd5949647db67e910a7779ccf436eeecd0d2b9a0968",
+    "law-ap24.txt": "34931db025336927276f0eb83dd91f2cdcea660e83a4d9556bf7b3573a4edbfb",
+    "case-WL1.txt": "2b628b5e21b30f3a38553727642d423015697cd1feefd12751992efb5d70badb",
+    "case-WL2.txt": "df7dd9972a628ed2ad8037026e75a94aef7019d5b2b2c5fc85028b3aecf14a80",
+    "case-WC1.txt": "3729678b952c312811d92ae7943c70d936eab495e69d19ab17ed14eaf4066c03",
+    "case-WC2.txt": "e4267a685810b6042b707efb02630320073a78029b0e1a89a0988979beb0623b",
+    "case-WX1.txt": "48044e20185098b54a6c85b44746812c12784189e4f58816311b1be70a1387c7",
+    "case-WX2.txt": "fd3b48f1820e5267d47d761e3d2266300359f2e86f31c28b56173b1daa2e9e04",
+    "case-WA1.txt": "2f2b9533cbe8e45e3c01349d54c44461479af544965f9d43039669cd50f21c06",
+    "case-WA2.txt": "a97549edad6a5622ff75caefdafaff27a3c66546961126900c6b1a635de04fc2",
+    "cases.json": "1d71c306d50824f469ff298b779ac4457c58c978e050fea76d886110d10744fd",
+    "sources.json": "16438707d58133b45d67e3380116e681508881c868a49ec8761523a1968fcfb2",
+    "comparison.json": "0e2e0ebb5512e354ac20892b31759748d01c0c691d7ad5eed5be07cc3bc2b6ef"
+  },
+  "runner_sha256": "b6a1a36b250ab3663b9eb8150e69846cfa218d1628c5fc78db621e050ab78d32",
+  "git_head": "fc180d545c20000e1d8f747d412059595f9a2789",
+  "protocol": "answer stage only, fixed evidence; structured=production prompt, plain=training format",
+  "human_legal_review": false
+}

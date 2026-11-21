@@ -1,0 +1,82 @@
+[
+  {
+    "id": "WL1-lease-registration",
+    "domain": "lease",
+    "message": "전세 계약이 끝났는데 집주인이 보증금 1억 원을 안 돌려줘요. 직장 때문에 다음 달에 이사를 가야 하는데, 이사 가면 보증금을 받을 권리가 없어지나요?",
+    "sources": [
+      "law-h3-3",
+      "case-WL1"
+    ],
+    "case_source": "case-WL1"
+  },
+  {
+    "id": "WL2-partial-loss-rent",
+    "domain": "lease",
+    "message": "월세 80만 원에 방 두 개짜리 집을 빌렸는데, 윗집 누수로 방 하나 천장이 무너져서 몇 달째 못 쓰고 있어요. 제 잘못은 없어요. 월세를 깎아 달라고 할 수 있나요?",
+    "sources": [
+      "law-627",
+      "case-WL2"
+    ],
+    "case_source": "case-WL2"
+  },
+  {
+    "id": "WC1-simultaneous-performance",
+    "domain": "civil",
+    "message": "중고차를 사기로 하고 계약금을 냈어요. 잔금 날짜랑 차를 넘겨받는 날을 같은 날로 정했는데, 판매자가 차는 준비도 안 해 놓고 잔금부터 내라고 해요. 제가 먼저 잔금을 내야 하나요?",
+    "sources": [
+      "law-536",
+      "case-WC1"
+    ],
+    "case_source": "case-WC1"
+  },
+  {
+    "id": "WC2-moving-damage",
+    "domain": "civil",
+    "message": "이사업체에 이사를 맡겼는데 업체가 보낸 작업자가 제 냉장고를 떨어뜨려서 고장 났어요. 업체는 작업자 개인 잘못이라 책임이 없대요. 업체에 배상을 받을 수 있나요?",
+    "sources": [
+      "law-391",
+      "case-WC2"
+    ],
+    "case_source": "case-WC2"
+  },
+  {
+    "id": "WX1-slap-assault",
+    "domain": "criminal",
+    "message": "술자리에서 시비가 붙었는데 상대가 제 뺨을 때렸어요. 다친 데는 없어요. 처벌받게 할 수 있나요?",
+    "sources": [
+      "law-c260",
+      "case-WX1"
+    ],
+    "case_source": "case-WX1"
+  },
+  {
+    "id": "WX2-mirror-damage",
+    "domain": "criminal",
+    "message": "옆집 사람이 주차 문제로 다투다가 제 차 사이드미러를 발로 차서 부쉈어요. 처벌받게 할 수 있나요?",
+    "sources": [
+      "law-c366",
+      "case-WX2"
+    ],
+    "case_source": "case-WX2"
+  },
+  {
+    "id": "WA1-disclosure-delay",
+    "domain": "administrative",
+    "message": "구청에 정보공개를 청구했는데 2주가 넘도록 아무 연락이 없어요. 원래 언제까지 답해야 하나요?",
+    "sources": [
+      "law-oi11",
+      "case-WA1"
+    ],
+    "case_source": "case-WA1"
+  },
+  {
+    "id": "WA2-phone-suspension",
+    "domain": "administrative",
+    "message": "구청 직원이 전화로 '내일부터 영업정지'라고만 했어요. 서류는 하나도 못 받았어요. 이것도 효력이 있나요?",
+    "sources": [
+      "law-ap24",
+      "case-WA2"
+    ],
+    "case_source": "case-WA2"
+  }
+]
