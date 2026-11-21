@@ -474,7 +474,8 @@ def assemble_mixed(args) -> None:
     from legal_rag.verification import Verifier
 
     out = Path(args.out)
-    records = [json.loads(line) for line in (out / "drafts.jsonl").read_text().splitlines()]
+    out.mkdir(parents=True, exist_ok=True)
+    records = [json.loads(line) for line in (args.drafts or out / "drafts.jsonl").read_text().splitlines()]
     full_review, template_review = load_review(args.full_review) or {}, load_review(args.template_review) or {}
     report: dict = {"records": len(records), "full_kept": 0, "template_kept": 0, "template_code_rejected": 0,
               "verifier_rejected": 0, "with_preparations": 0, "with_cautions": 0, "not_selected": 0}
@@ -518,7 +519,7 @@ def assemble_mixed(args) -> None:
         hashes[f"{name}.jsonl"] = hashlib.sha256(text.encode()).hexdigest()
     report.update({"train": len(splits["train"]), "validation": len(splits["validation"]), "hashes": hashes, "seed": SEED,
                    "full_review": str(args.full_review), "template_review": str(args.template_review),
-                   "template_version": args.template_version,
+                   "template_version": args.template_version, "drafts": str(args.drafts or out / "drafts.jsonl"),
                    "drafter": sorted({r.get("drafter", DRAFTER) for r in records}), "human_legal_review": False})
     (out / "manifest.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -544,6 +545,7 @@ def main() -> None:
     m.add_argument("--full-review", type=Path, default=None)
     m.add_argument("--template-review", type=Path, default=None)
     m.add_argument("--template-version", type=int, choices=(2, 3), default=2)
+    m.add_argument("--drafts", type=Path, default=None, help="drafts.jsonl to read when --out is a different directory")
     args = parser.parse_args()
     {"draft": draft_rows, "assemble": assemble, "assemble-mixed": assemble_mixed}[args.command](args)
 
