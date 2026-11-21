@@ -1,0 +1,102 @@
+{
+  "auto": {
+    "E": {
+      "completed": 16,
+      "attempted": 16,
+      "verify_fail": 0,
+      "fatal": 0
+    },
+    "A0": {
+      "completed": 16,
+      "attempted": 16,
+      "verify_fail": 0,
+      "fatal": 0
+    },
+    "A4": {
+      "completed": 16,
+      "attempted": 16,
+      "verify_fail": 0,
+      "fatal": 0
+    }
+  },
+  "counts": {
+    "A0": {
+      "C1": [
+        15,
+        16
+      ],
+      "C2": [
+        14,
+        16
+      ],
+      "C3": [
+        7,
+        16
+      ],
+      "C4": [
+        12,
+        16
+      ],
+      "C5": [
+        13,
+        16
+      ],
+      "C6": 1.125
+    },
+    "A4": {
+      "C1": [
+        11,
+        16
+      ],
+      "C2": [
+        12,
+        16
+      ],
+      "C3": [
+        8,
+        16
+      ],
+      "C4": [
+        14,
+        16
+      ],
+      "C5": [
+        16,
+        16
+      ],
+      "C6": 1.0625
+    },
+    "E": {
+      "C1": [
+        16,
+        16
+      ],
+      "C2": [
+        14,
+        16
+      ],
+      "C3": [
+        7,
+        16
+      ],
+      "C4": [
+        13,
+        16
+      ],
+      "C5": [
+        16,
+        16
+      ],
+      "C6": 1.9375
+    }
+  },
+  "gates": {
+    "H1": true,
+    "H2": false,
+    "H3": true,
+    "Q1": false,
+    "Q2": true
+  },
+  "decision1_replace_A0": false,
+  "decision2_exaone_level": false
+}
