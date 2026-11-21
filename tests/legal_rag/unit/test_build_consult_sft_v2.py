@@ -78,6 +78,29 @@ def test_load_review_and_strict_ok(tmp_path):
     assert strict_ok(full) and not strict_ok({**full, "rule_matches_source": False})
 
 
+def test_template_target_uses_reference_answer_and_stays_conditional():
+    from legal_rag.verification import Verifier
+    from scripts.build_consult_sft_v2 import particle, template_problems, template_target
+
+    d = draft()
+    assert template_problems(d, ROW) == []
+    preps, cauts, _ = kept_items(d, ROW)
+    t = template_target(d, ROW, preps, cauts)
+    assert t.analysis.startswith("비슷한 사건에서 법원은 다음과 같이 판단했습니다. 임차인은 필요비 상환을 청구할 수 있습니다.")
+    assert "말씀하신 상황(누수 수리비 50만 원을 직접 냈다)" in t.analysis
+    assert t.summary.endswith("집주인에게 먼저 수선을 요청했는지를 확인해야 합니다.")
+    assert t.additional_information_needed and t.citations
+    assert Verifier().verify(t, evidence_bundle(ROW)).ok
+    assert particle("여부", "을", "를") == "를" and particle("사실", "을", "를") == "을"
+
+
+def test_template_problems_flag_case_specific_reference_and_unstated_facts():
+    from scripts.build_consult_sft_v2 import template_problems
+
+    assert "reference_has_party_labels" in template_problems(draft(), {**ROW, "answer": "피고는 원고에게 지급하라."})
+    assert "user_fact_not_in_question" in template_problems(draft(user_facts=["집주인과 계약서를 두 번 갱신했다"]), ROW)
+
+
 def test_framed_rule_and_judge():
     assert framed_rule("임차인은 필요비를 청구할 수 있습니다.") == "관련 판결에 따르면, 임차인은 필요비를 청구할 수 있습니다."
     assert framed_rule("법원은 청구를 인정했습니다.") == "법원은 청구를 인정했습니다."

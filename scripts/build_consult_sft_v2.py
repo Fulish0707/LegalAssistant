@@ -82,14 +82,16 @@ class StrictJudgement(BaseModel):
 
 DRAFT_SYSTEM = """당신은 판결문을 바탕으로 법률 상담 학습 예제를 만드는 도우미입니다. 주어진 판결 발췌와 참고 답변을 읽고, 비슷한 처지의 일반인이 보낼 상담 질문과 그 상담 답변을 만드세요.
 
+먼저 참고 답변에서 법리(어떤 요건이 갖춰지면 어떤 결과가 되는지)를 찾으세요. 모든 내용은 그 법리를 바꾸지 않는 범위에서 씁니다.
+
 질문(question):
-- 판결의 사건과 비슷하지만 구체적 내용(금액·날짜·물건 등)은 바꾼 일반인의 상황을 1인칭 존댓말로 씁니다.
-- 원고·피고·피고인·이 사건 같은 재판 용어를 쓰지 마세요.
-- 판결의 결론을 바꿀 수 있는 중요한 사실 하나는 일부러 빼고 missing_fact에 적으세요. user_facts에는 질문에 실제로 적은 사실만 적으세요.
+- 판결에 관한 원래 질문을 다시 쓰지 마세요. 그 법리가 문제 되는 일을 겪은 일반인이 자기 상황(누가, 무엇을, 무슨 일이 있었는지)을 2~3문장으로 설명하고 묻는 1인칭 존댓말 질문을 씁니다.
+- 판결의 금액·이름·회사명·특수 용어를 옮기지 말고 일상적인 상황으로 바꾸세요. 원고·피고·피고인·이 사건 같은 재판 용어를 쓰지 마세요.
+- 법리의 요건 중 하나는 질문에서 확인되지 않게 남겨 두고 그 요건을 missing_fact에 적으세요. user_facts에는 질문에 실제로 적은 사실만 적으세요.
 
 답변:
-- rule: 판결이 제시한 법리를 "비슷한 사건에서 법원은 ~라고 판단했습니다"처럼 판결의 판단임을 밝혀 씁니다. 판결 사건의 구체적 사실은 쓰지 마세요.
-- application: 그 법리를 질문자의 사실(user_facts)에만 적용합니다. 질문에 없는 사실을 질문자의 사실처럼 쓰지 말고, missing_fact에 따라 결론이 어떻게 달라지는지 조건으로 설명하세요. 질문자를 원고·피고라고 부르지 마세요.
+- rule: 참고 답변의 법리를 바꾸지 말고 요약해 "비슷한 사건에서 법원은 ~라고 판단했습니다"처럼 판결의 판단임을 밝혀 씁니다. 새 요건이나 기준을 덧붙이지 말고, 판결 사건의 구체적 사실은 쓰지 마세요.
+- application: rule에 있는 요건만 질문자의 사실(user_facts)에 대입합니다. 요건을 뒤집거나 다른 쟁점의 법리를 섞지 마세요. 질문에 없는 사실을 질문자의 사실처럼 쓰지 말고, missing_fact가 충족되는 경우와 아닌 경우의 결론을 조건으로 나눠 설명하세요. 질문자를 원고·피고라고 부르지 마세요.
 - summary: 조건을 붙인 핵심 결론 한두 문장(예: "~라면 ~할 수 있습니다").
 - preparations: 질문자가 모을 수 있는 자료. material은 문서·기록·물건의 이름(예: 계약서, 송금 내역, 문자 메시지, 사진, 진단서), proves는 그 자료로 보여 줄 사실, quote는 그 사실이 판단 기준임을 보여 주는 발췌 문장입니다. 해당 없으면 비워 두세요.
 - cautions: 결론을 바꿀 수 있는 예외·기한·조건·요건. text는 발췌 내용과 같은 방향이어야 하고, quote는 그 근거 발췌 문장입니다. 해당 없으면 비워 두세요.
@@ -101,6 +103,8 @@ DRAFT_SYSTEM = """당신은 판결문을 바탕으로 법률 상담 학습 예�
 - 모든 quote는 발췌 문장을 한 글자도 바꾸지 말고 그대로 복사합니다(80자 이내). 당사자의 주장 문장은 quote로 쓰지 마세요.
 - 발췌에 없는 조문·사건번호·서류 이름·절차를 만들어 내지 마세요.
 - 한국어로, 일반인이 이해할 수 있게 쓰세요."""
+
+PROMPT_VERSION = hashlib.sha256(DRAFT_SYSTEM.encode()).hexdigest()[:12]
 
 JUDGE_SYSTEM = """상담 답변을 점검합니다. 아래 사용자 질문, 판결 발췌의 근거 문장, 답변을 읽고 세 가지를 판정하세요.
 - fabricated_user_fact: 답변이 사용자 질문에 없는 사실을 사용자의 사실로 단정하면 true. 판결 사건의 사실을 사용자에게 옮겨 쓴 경우도 true입니다. 조건문("~라면")으로 쓴 가정은 해당하지 않습니다.
@@ -250,6 +254,72 @@ def assemble_target(draft: Draft, row: dict, preps: list[Item], cauts: list[Item
                        uncertainty=uncertainty, confidence=Confidence.medium)
 
 
+def particle(word: str, with_final: str, without_final: str) -> str:
+    """Korean particle chosen by whether the last syllable has a final consonant."""
+    last = word.strip()[-1:] if word.strip() else ""
+    has_final = "가" <= last <= "힣" and (ord(last) - 0xAC00) % 28 != 0
+    return with_final if has_final else without_final
+
+
+def template_problems(draft: Draft, row: dict) -> list[str]:
+    """Checks for the template target: the legal content is the reference answer, so it must be a general rule."""
+    from scripts.build_consult_sft import bigrams
+
+    reasons = []
+    if has_party_label(row["answer"]):
+        reasons.append("reference_has_party_labels")
+    if has_party_label(draft.question):
+        reasons.append("party_label_in_question")
+    question = bigrams(draft.question)
+    for fact in draft.user_facts:
+        fb = bigrams(fact)
+        if fb and len(fb & question) / len(fb) < 0.3:  # paraphrase allowed; invented facts share almost nothing
+            reasons.append("user_fact_not_in_question")
+            break
+    if has_party_label(" ".join([draft.missing_fact, *draft.follow_up_questions])):
+        reasons.append("party_label_in_follow_up")
+    if not any(q.strip() for q in draft.follow_up_questions):
+        reasons.append("no_follow_up")
+    text = " ".join([draft.missing_fact, *draft.follow_up_questions, *(p.item().text for p in draft.preparations),
+                     *(c.text for c in draft.cautions)])
+    if foreign_authority(text, row["context"] + " " + row["title"]):
+        reasons.append("foreign_authority")
+    return reasons
+
+
+def template_target(draft: Draft, row: dict, preps: list[Item], cauts: list[Item]):
+    """Consultation answer whose legal content is the dataset's reference answer, framed as the court's ruling,
+    with the user's own facts restated and the outcome left conditional on the missing fact. The drafting model
+    writes no legal reasoning here (calibration: Qwen3-8B reversed or invented rules in most applications)."""
+    from legal_rag.schemas import LegalAnswer
+    from legal_rag.schemas.answer import Confidence
+    from scripts.build_consult_sft import first_sentence, issue_from_question
+
+    missing = draft.missing_fact.strip().rstrip(".?")
+    facts = ", ".join(f.strip().rstrip(".") for f in draft.user_facts)
+    caution_text = " ".join(sentence(c.text) for c in cauts)
+    analysis = (f"비슷한 사건에서 법원은 다음과 같이 판단했습니다. {row['answer'].strip()}\n\n"
+                f"말씀하신 상황({facts})에 이 기준이 그대로 적용되는지는 {missing}에 따라 달라질 수 있습니다. "
+                "제공된 자료는 비슷한 사건의 판단이므로, 실제 결론은 구체적인 사실관계를 확인해야 합니다.")
+    if caution_text:
+        analysis += "\n\n주의할 점: " + caution_text
+    core = first_sentence(row["answer"])
+    lead = "" if "따르면" in core[:40] else "비슷한 사건의 판단에 따르면, "
+    summary = f"{lead}{core} 다만 말씀하신 상황에 적용되는지는 {missing}{particle(missing, '을', '를')} 확인해야 합니다."
+    return LegalAnswer(legal_issues=[issue_from_question(row["question"])], analysis=analysis, summary=summary,
+                       possible_actions=[p.text for p in preps],
+                       additional_information_needed=[q.strip() for q in draft.follow_up_questions if q.strip()],
+                       citations=citations_for(row, [i.quote for i in preps + cauts]) or best_citation(row),
+                       uncertainty=" ".join(filter(None, [f"{missing}에 따라 결론이 달라질 수 있습니다.", caution_text])),
+                       confidence=Confidence.medium)
+
+
+def best_citation(row: dict):
+    from scripts.build_consult_sft import build_citations
+
+    return build_citations(row, [])
+
+
 def draft_rows(args) -> None:
     from legal_rag.llm import Message
     from legal_rag.llm.ollama import OllamaChatModel
@@ -270,7 +340,8 @@ def draft_rows(args) -> None:
             if row["id"] in done:
                 continue
             user = f"[판결 발췌]\n{row['context']}\n[/판결 발췌]\n\n판결에 관한 질문: {row['question']}\n참고 답변: {row['answer']}"
-            started, record = time.perf_counter(), {"id": row["id"], "row": row, "drafter": args.model, "think": args.think}
+            started, record = time.perf_counter(), {"id": row["id"], "row": row, "drafter": args.model, "think": args.think,
+                                                    "prompt_version": PROMPT_VERSION}
             try:
                 response = model.generate([Message(role="system", content=DRAFT_SYSTEM), Message(role="user", content=user)],
                                           response_schema=Draft, temperature=0.3, max_tokens=8192 if args.think else 2048)
@@ -376,6 +447,59 @@ def assemble(args) -> None:
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
+def assemble_mixed(args) -> None:
+    """Curated full drafts (reviewed as full) plus template targets (reviewed as template); selection only."""
+    from legal_rag.verification import Verifier
+
+    out = Path(args.out)
+    records = [json.loads(line) for line in (out / "drafts.jsonl").read_text().splitlines()]
+    full_review, template_review = load_review(args.full_review) or {}, load_review(args.template_review) or {}
+    report: dict = {"records": len(records), "full_kept": 0, "template_kept": 0, "template_code_rejected": 0,
+              "verifier_rejected": 0, "with_preparations": 0, "with_cautions": 0, "not_selected": 0}
+    examples = []
+    for record in records:
+        if "draft" not in record:
+            continue
+        row, draft = record["row"], Draft.model_validate(record["draft"])
+        preps, cauts, _ = kept_items(draft, row)
+        if full_review.get(record["id"], {}).get("keep") and not check_draft(draft, row):
+            style, target = "full", assemble_target(draft, row, preps, cauts)
+        elif template_review.get(record["id"], {}).get("keep"):
+            if template_problems(draft, row):
+                report["template_code_rejected"] += 1
+                continue
+            style, target = "template", template_target(draft, row, preps, cauts)
+        else:
+            report["not_selected"] += 1
+            continue
+        if not Verifier().verify(target, evidence_bundle(row)).ok:
+            report["verifier_rejected"] += 1
+            continue
+        report[f"{style}_kept"] += 1
+        report["with_preparations"] += bool(preps)
+        report["with_cautions"] += bool(cauts)
+        examples.append({"id": row["id"], "domain": row["domain"], "document_id": row["document_id"], "style": style,
+                         "messages": production_messages(draft.question, row, target)
+                         + [{"role": "assistant", "content": target.model_dump_json()}],
+                         "user_facts": draft.user_facts, "missing_fact": draft.missing_fact,
+                         "source_question": row["question"], "reference_answer": row["answer"]})
+    if len(examples) < args.validation + 10:
+        raise SystemExit(f"only {len(examples)} examples\n{json.dumps(report, ensure_ascii=False)}")
+    rng = random.Random(SEED)
+    rng.shuffle(examples)
+    splits = {"validation": examples[: args.validation], "train": examples[args.validation:]}
+    hashes = {}
+    for name, rows in splits.items():
+        text = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+        (out / f"{name}.jsonl").write_text(text)
+        hashes[f"{name}.jsonl"] = hashlib.sha256(text.encode()).hexdigest()
+    report.update({"train": len(splits["train"]), "validation": len(splits["validation"]), "hashes": hashes, "seed": SEED,
+                   "full_review": str(args.full_review), "template_review": str(args.template_review),
+                   "drafter": sorted({r.get("drafter", DRAFTER) for r in records}), "human_legal_review": False})
+    (out / "manifest.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -390,8 +514,13 @@ def main() -> None:
     a.add_argument("--train", type=int, default=300)
     a.add_argument("--validation", type=int, default=30)
     a.add_argument("--review", type=Path, default=None, help="curator keep/reject jsonl; replaces the model judge")
+    m = sub.add_parser("assemble-mixed")
+    m.add_argument("--out", required=True)
+    m.add_argument("--validation", type=int, default=12)
+    m.add_argument("--full-review", type=Path, default=None)
+    m.add_argument("--template-review", type=Path, default=None)
     args = parser.parse_args()
-    {"draft": draft_rows, "assemble": assemble}[args.command](args)
+    {"draft": draft_rows, "assemble": assemble, "assemble-mixed": assemble_mixed}[args.command](args)
 
 
 if __name__ == "__main__":
