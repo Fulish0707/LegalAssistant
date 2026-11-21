@@ -314,6 +314,28 @@ def template_target(draft: Draft, row: dict, preps: list[Item], cauts: list[Item
                        confidence=Confidence.medium)
 
 
+def dedupe(items: list[str]) -> list[str]:
+    seen, out = set(), []
+    for item in items:
+        key = norm(item)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(item.strip())
+    return out
+
+
+def template_target_v3(draft: Draft, row: dict, preps: list[Item], cauts: list[Item]):
+    """v2 template with less cross-field repetition: cautions only in analysis, a short generic uncertainty,
+    deduplicated actions and follow-ups. v2 repeated the caution text and the missing-fact sentence in three
+    fields; the adapter then looped on some answers (heldout2: 2/16 truncated)."""
+    unique_cauts = [Item(text=text, quote=q) for text, q in dict.fromkeys((c.text, c.quote) for c in cauts)]
+    t = template_target(draft, row, preps, unique_cauts)
+    return t.model_copy(update={
+        "possible_actions": dedupe(t.possible_actions),
+        "additional_information_needed": dedupe(t.additional_information_needed),
+        "uncertainty": "제공된 자료는 비슷한 사건의 판단이므로, 말씀하신 사실관계를 확인해야 결론을 정할 수 있습니다."})
+
+
 def best_citation(row: dict):
     from scripts.build_consult_sft import build_citations
 
@@ -468,7 +490,8 @@ def assemble_mixed(args) -> None:
             if template_problems(draft, row):
                 report["template_code_rejected"] += 1
                 continue
-            style, target = "template", template_target(draft, row, preps, cauts)
+            build = template_target_v3 if args.template_version == 3 else template_target
+            style, target = "template", build(draft, row, preps, cauts)
         else:
             report["not_selected"] += 1
             continue
@@ -495,6 +518,7 @@ def assemble_mixed(args) -> None:
         hashes[f"{name}.jsonl"] = hashlib.sha256(text.encode()).hexdigest()
     report.update({"train": len(splits["train"]), "validation": len(splits["validation"]), "hashes": hashes, "seed": SEED,
                    "full_review": str(args.full_review), "template_review": str(args.template_review),
+                   "template_version": args.template_version,
                    "drafter": sorted({r.get("drafter", DRAFTER) for r in records}), "human_legal_review": False})
     (out / "manifest.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -519,6 +543,7 @@ def main() -> None:
     m.add_argument("--validation", type=int, default=12)
     m.add_argument("--full-review", type=Path, default=None)
     m.add_argument("--template-review", type=Path, default=None)
+    m.add_argument("--template-version", type=int, choices=(2, 3), default=2)
     args = parser.parse_args()
     {"draft": draft_rows, "assemble": assemble, "assemble-mixed": assemble_mixed}[args.command](args)
 

@@ -94,6 +94,23 @@ def test_template_target_uses_reference_answer_and_stays_conditional():
     assert particle("여부", "을", "를") == "를" and particle("사실", "을", "를") == "을"
 
 
+def test_template_v3_removes_cross_field_repetition():
+    from legal_rag.verification import Verifier
+    from scripts.build_consult_sft_v2 import template_target, template_target_v3
+
+    d = draft(cautions=[{"text": "집주인이 제때 수선했다면 청구가 어렵습니다", "quote": "다만 임대인이 수선 요청을 받고 상당한 기간 내에 수선한 경우에는 그러하지 아니하다."},
+                        {"text": "집주인이 제때 수선했다면 청구가 어렵습니다", "quote": "다만 임대인이 수선 요청을 받고 상당한 기간 내에 수선한 경우에는 그러하지 아니하다."}],
+              follow_up_questions=["수리 전에 집주인에게 수선을 요청하셨나요?", "수리 전에 집주인에게 수선을 요청하셨나요?"])
+    preps, cauts, _ = kept_items(d, ROW)
+    v2, v3 = template_target(d, ROW, preps, cauts), template_target_v3(d, ROW, preps, cauts)
+    assert v2.analysis.count("집주인이 제때 수선했다면") > 1 and v3.analysis.count("집주인이 제때 수선했다면") == 1
+    assert "집주인이 제때 수선했다면" not in v3.uncertainty
+    assert len(v3.additional_information_needed) == 1
+    assert v3.summary == v2.summary and len(v3.analysis) < len(v2.analysis)
+    assert v3.analysis.split("\n\n주의할 점:")[0] == v2.analysis.split("\n\n주의할 점:")[0]
+    assert Verifier().verify(v3, evidence_bundle(ROW)).ok
+
+
 def test_template_problems_flag_case_specific_reference_and_unstated_facts():
     from scripts.build_consult_sft_v2 import template_problems
 
