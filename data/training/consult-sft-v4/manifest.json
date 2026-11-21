@@ -1,0 +1,25 @@
+{
+  "records": 1639,
+  "full_kept": 27,
+  "template_kept": 78,
+  "template_code_rejected": 0,
+  "verifier_rejected": 4,
+  "with_preparations": 27,
+  "with_cautions": 31,
+  "not_selected": 1519,
+  "train": 97,
+  "validation": 8,
+  "hashes": {
+    "validation.jsonl": "51657b9389dc20316c13dcf7102031f5e4ae160022bcf8119cbc6e0623d2b862",
+    "train.jsonl": "c1bab337e7d16f82408cc73a48ad32eb258895f0097ace0323b8799cc26e58f8"
+  },
+  "seed": 20261121,
+  "full_review": "/home/layke/.hermes/profiles/kei/work/consult-sft/review/full-review.jsonl",
+  "template_review": "/home/layke/.hermes/profiles/kei/work/consult-sft/review/template-review.jsonl",
+  "template_version": 3,
+  "drafts": "data/training/consult-sft-v2/drafts.jsonl",
+  "drafter": [
+    "qwen3:8b"
+  ],
+  "human_legal_review": false
+}
