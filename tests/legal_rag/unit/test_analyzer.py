@@ -74,3 +74,40 @@ def test_a_law_the_user_named_without_an_article_is_theirs():
     model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(statute_refs=["계량에 관한 법률", "민법"])]})
     analysis = QueryAnalyzer(model).analyze("계량에 관한 법률에 따른 법정단위는 어떻게 구분되나요?", history=[])
     assert analysis.statute_refs == ["계량에 관한 법률"]
+
+
+def test_slim_analysis_asks_only_for_the_fields_the_pipeline_reads():
+    """With analyzer terms and the hard filter off, only these five fields are read downstream. The full
+    schema made EXAONE write 200-250 tokens, 5-6 s per turn (docs/spikes/006, 2026-11-23)."""
+    from legal_rag.rag.analyzer import QueryAnalysisCore
+
+    assert set(QueryAnalysisCore.model_fields) == {"domain", "needs_more_info", "missing_facts", "statute_refs", "case_refs"}
+    model = FakeChatModel({"QueryAnalysisCore": [QueryAnalysisCore(domain="민사", needs_more_info=True, missing_facts=["계약 종료일"],
+                                                                   statute_refs=["계량에 관한 법률"])]})
+    analysis = QueryAnalyzer(model, full=False).analyze("계량에 관한 법률 위반으로 계약을 끝낼 수 있나요?", history=[])
+    assert isinstance(analysis, QueryAnalysis)
+    assert analysis.domain == "민사" and analysis.needs_more_info and analysis.missing_facts == ["계약 종료일"]
+    assert analysis.statute_refs == ["계량에 관한 법률"] and analysis.issues == [] and analysis.keywords == []
+    assert model.calls[0].response_schema is QueryAnalysisCore
+    system = model.calls[0].messages[0].content
+    assert "missing_facts" in system and "keywords" not in system and "key_facts" not in system
+
+
+def test_slim_analysis_keeps_the_deterministic_fallback():
+    class Broken:
+        name = "broken"
+
+        def generate(self, *args, **kwargs):
+            raise RuntimeError("down")
+
+    analysis = QueryAnalyzer(Broken(), full=False).analyze("민법 제750조 손해배상 2018다12345", history=[])
+    assert analysis.statute_refs == ["민법 제750조"] and analysis.case_refs == ["2018다12345"]
+
+
+def test_orchestrator_uses_the_full_schema_only_when_terms_or_the_hard_filter_need_it():
+    from legal_rag.config import Settings
+    from legal_rag.rag.analyzer import needs_full_analysis
+
+    assert needs_full_analysis(Settings()) is False
+    assert needs_full_analysis(Settings(rag={"analyzer_terms_in_search": True})) is True
+    assert needs_full_analysis(Settings(rag={"hard_filter": True})) is True
