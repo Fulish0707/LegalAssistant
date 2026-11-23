@@ -1,0 +1,9 @@
+{"q": 1, "stages": {"analyze": 0.01, "search": 3.77, "write": 6.1, "verify": 14.37}, "first_draft": 7.57, "draft_chars": 216, "end": 14.37, "kind": "answer"}
+{"q": 5, "stages": {"analyze": 0.0, "search": 5.72, "write": 7.85, "verify": 24.43}, "first_draft": 9.93, "draft_chars": 424, "end": 24.44, "kind": "answer"}
+{"q": 40, "stages": {"analyze": 0.0, "search": 1.39, "write": 3.44, "verify": 17.66}, "first_draft": 3.71, "draft_chars": 516, "end": 17.66, "kind": "answer"}
+{"q": 77, "stages": {"analyze": 0.0, "search": 5.97, "write": 7.81, "verify": 39.88}, "first_draft": 8.16, "draft_chars": 934, "end": 39.89, "kind": "answer"}
+{"q": 110, "stages": {"analyze": 0.0, "search": 4.81, "write": 6.65, "verify": 13.47}, "first_draft": 7.25, "draft_chars": 155, "end": 13.48, "kind": "answer"}
+{"q": 170, "stages": {"analyze": 0.0, "search": 4.54, "write": 6.43, "verify": 21.14}, "first_draft": 6.85, "draft_chars": 666, "end": 21.14, "kind": "answer"}
+{"q": 205, "stages": {"analyze": 0.0, "search": 6.0, "write": 7.72, "verify": 29.75}, "first_draft": 9.66, "draft_chars": 940, "end": 29.75, "kind": "answer"}
+{"q": 233, "stages": {"analyze": 0.0, "search": 4.62, "write": 6.42, "verify": 32.59}, "first_draft": 6.74, "draft_chars": 871, "end": 32.6, "kind": "answer"}
+{"q": 266, "stages": {"analyze": 0.0, "search": 4.78, "write": 6.59, "verify": 19.15}, "first_draft": 6.9, "draft_chars": 434, "end": 19.16, "kind": "answer"}
