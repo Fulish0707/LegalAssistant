@@ -112,6 +112,17 @@ class ModelConnectorTests(unittest.TestCase):
         os.environ["OLLAMA_EMBED_NUM_CTX"] = "2048"
         self.assertEqual(module.get_embedding_model().num_ctx, 2048)
 
+    def test_embedding_gpu_layers_follow_the_backends_setting(self):
+        """Must equal legal_rag's embedding.query_num_gpu (0 = CPU), or Ollama reloads bge-m3."""
+        module = importlib.import_module("llm_model")
+        os.environ["EMBEDDING_PROVIDER"] = "ollama"
+        os.environ.pop("OLLAMA_EMBED_NUM_GPU", None)
+        self.assertIsNone(module.get_embedding_model().num_gpu)
+
+        os.environ["OLLAMA_EMBED_NUM_GPU"] = "0"
+        self.assertEqual(module.get_embedding_model().num_gpu, 0)
+        os.environ.pop("OLLAMA_EMBED_NUM_GPU", None)
+
     def test_unknown_provider_raises(self):
         os.environ["LLM_PROVIDER"] = "not-a-provider"
         module = importlib.import_module("llm_model")

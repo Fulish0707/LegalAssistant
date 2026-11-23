@@ -35,6 +35,7 @@ def build_embedder(settings: Settings) -> Embedder:
             batch_size=settings.embedding.batch_size,
             timeout=settings.embedding.timeout_seconds,
             query_num_ctx=settings.embedding.query_num_ctx,
+            query_num_gpu=settings.embedding.query_num_gpu,
         )
     raise ValueError(f"unknown embedding backend {settings.embedding.backend!r}")
 

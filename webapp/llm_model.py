@@ -88,6 +88,9 @@ def get_embedding_model():
             # Same window as legal_rag's embedding.query_num_ctx: Ollama reloads bge-m3
             # when clients disagree. Upload chunks are 1,000 characters, well under it.
             num_ctx=int(os.getenv("OLLAMA_EMBED_NUM_CTX", "1024")),
+            # Same as legal_rag's embedding.query_num_gpu; 0 keeps bge-m3 on CPU so the
+            # answer model and the reranker have the card.
+            num_gpu=int(os.environ["OLLAMA_EMBED_NUM_GPU"]) if os.getenv("OLLAMA_EMBED_NUM_GPU") else None,
         )
 
     raise ValueError(f"Unknown EMBEDDING_PROVIDER: {provider!r}")

@@ -90,3 +90,28 @@ def test_factory_passes_the_query_context_window():
     embedder = build_embedder(Settings(embedding={"query_num_ctx": 1024}))
     assert embedder.query_num_ctx == 1024
     assert Settings().embedding.query_num_ctx is None
+
+
+def test_query_embeddings_can_run_on_cpu():
+    """num_gpu 0 frees the GPU for a larger answer model: EXAONE 3.5 7.8B at 12288 context and the fp16
+    reranker peaked at 7,642 of 8,188 MiB with bge-m3 on CPU, and CPU query vectors matched GPU ones
+    (cosine >= 0.99993 on 50 questions, spike 005, 2026-11-23). Document embeddings keep Ollama's default."""
+    embedder, bodies = _recording_embedder(query_num_ctx=1024, query_num_gpu=0)
+    embedder.embed_query("보증금 반환")
+    embedder.embed_documents(["긴 판결문"])
+    assert bodies[0]["options"] == {"num_ctx": 1024, "num_gpu": 0}
+    assert "options" not in bodies[1]
+
+
+def test_query_num_gpu_alone_is_sent():
+    embedder, bodies = _recording_embedder(query_num_gpu=0)
+    embedder.embed_query("q")
+    assert bodies[0]["options"] == {"num_gpu": 0}
+
+
+def test_factory_passes_query_num_gpu():
+    from legal_rag.config import Settings
+    from legal_rag.factory import build_embedder
+
+    assert build_embedder(Settings(embedding={"query_num_gpu": 0})).query_num_gpu == 0
+    assert Settings().embedding.query_num_gpu is None

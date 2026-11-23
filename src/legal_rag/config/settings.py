@@ -42,6 +42,9 @@ class EmbeddingSettings(_Section):
     # Ollama context window for query embeddings; None keeps Ollama's default. Must match
     # the chat app's OLLAMA_EMBED_NUM_CTX or Ollama reloads bge-m3 between the two clients.
     query_num_ctx: int | None = Field(default=None, ge=1)
+    # GPU layers for query embeddings; None keeps Ollama's choice, 0 runs them on CPU. Must match the
+    # chat app's OLLAMA_EMBED_NUM_GPU for the same reason as query_num_ctx.
+    query_num_gpu: int | None = Field(default=None, ge=0)
 
 
 class SparseSettings(_Section):
