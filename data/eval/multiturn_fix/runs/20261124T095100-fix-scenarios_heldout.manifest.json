@@ -1,0 +1,9 @@
+{
+  "tag": "20261124T095100",
+  "arm": "fix",
+  "scenarios": "data/eval/multiturn_fix/scenarios_heldout.json",
+  "legal_rag": "/home/layke/.hermes/profiles/kei/cache/scratch/wt-fix/src/legal_rag",
+  "model": "ollama:exaone3.5:7.8b",
+  "history_turns": 4,
+  "started": "2026-11-24T09:51:04+0900"
+}
