@@ -130,10 +130,6 @@ class RagSettings(_Section):
     # Hide the dates and amounts inside judgment text from the answer model (not from the response).
     mask_case_figures: bool = False
     history_turns: int = 4
-    # Give the answer model the user's own message as the question instead of the condensed one.
-    # The condensed question still drives retrieval and reranking; the generator gets the recent
-    # turns either way. Under test in data/eval/condense_downstream.
-    generate_from_message: bool = False
     max_regenerations: int = 1
     max_evidence_chars: int = Field(default=1500, ge=1)
     context_neighbor_radius: int = Field(default=0, ge=0, le=2)
