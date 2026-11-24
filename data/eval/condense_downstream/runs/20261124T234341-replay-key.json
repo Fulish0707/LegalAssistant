@@ -1,0 +1,490 @@
+{
+  "condense": {
+    "C001": "T13#2",
+    "C002": "T09#2",
+    "C003": "T22#2",
+    "C004": "T23#2",
+    "C005": "T17#2",
+    "C006": "T36#2",
+    "C007": "T14#2",
+    "C008": "T15#2",
+    "C009": "T19#2",
+    "C010": "T37#2",
+    "C011": "T04#2",
+    "C012": "T18#2",
+    "C013": "T11#2",
+    "C014": "T07#2",
+    "C015": "T05#2",
+    "C016": "T34#3",
+    "C017": "T35#2",
+    "C018": "T06#2",
+    "C019": "T24#2",
+    "C020": "T33#2",
+    "C021": "T40#2",
+    "C022": "T31#3",
+    "C023": "T34#2",
+    "C024": "T10#2",
+    "C025": "T30#2",
+    "C026": "T39#2",
+    "C027": "T32#2",
+    "C028": "T28#2",
+    "C029": "T02#2",
+    "C030": "T25#2",
+    "C031": "T27#2",
+    "C032": "T38#2",
+    "C033": "T20#2",
+    "C034": "T08#2",
+    "C035": "T31#2",
+    "C036": "T12#2",
+    "C037": "T26#2",
+    "C038": "T32#3",
+    "C039": "T03#2",
+    "C040": "T16#2",
+    "C041": "T33#3",
+    "C042": "T29#2",
+    "C043": "T21#2",
+    "C044": "T01#2"
+  },
+  "pairs": {
+    "P001": {
+      "input_id": "T32#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P002": {
+      "input_id": "T23#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P003": {
+      "input_id": "T32#3",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P004": {
+      "input_id": "T32#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P005": {
+      "input_id": "T21#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P006": {
+      "input_id": "T02#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P007": {
+      "input_id": "T03#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P008": {
+      "input_id": "T13#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P009": {
+      "input_id": "T17#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P010": {
+      "input_id": "T33#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P011": {
+      "input_id": "T05#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P012": {
+      "input_id": "T07#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P013": {
+      "input_id": "T22#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P014": {
+      "input_id": "T34#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P015": {
+      "input_id": "T22#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P016": {
+      "input_id": "T14#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P017": {
+      "input_id": "T16#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P018": {
+      "input_id": "T28#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P019": {
+      "input_id": "T40#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P020": {
+      "input_id": "T38#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P021": {
+      "input_id": "T29#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P022": {
+      "input_id": "T36#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P023": {
+      "input_id": "T27#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P024": {
+      "input_id": "T19#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P025": {
+      "input_id": "T38#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P026": {
+      "input_id": "T11#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P027": {
+      "input_id": "T07#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P028": {
+      "input_id": "T01#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P029": {
+      "input_id": "T34#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P030": {
+      "input_id": "T18#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P031": {
+      "input_id": "T31#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P032": {
+      "input_id": "T25#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P033": {
+      "input_id": "T20#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P034": {
+      "input_id": "T08#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P035": {
+      "input_id": "T06#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P036": {
+      "input_id": "T37#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P037": {
+      "input_id": "T18#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P038": {
+      "input_id": "T34#3",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P039": {
+      "input_id": "T02#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P040": {
+      "input_id": "T16#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P041": {
+      "input_id": "T15#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P042": {
+      "input_id": "T24#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P043": {
+      "input_id": "T12#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P044": {
+      "input_id": "T31#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P045": {
+      "input_id": "T33#3",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P046": {
+      "input_id": "T28#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P047": {
+      "input_id": "T24#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P048": {
+      "input_id": "T14#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P049": {
+      "input_id": "T09#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P050": {
+      "input_id": "T32#3",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P051": {
+      "input_id": "T17#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P052": {
+      "input_id": "T09#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P053": {
+      "input_id": "T25#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P054": {
+      "input_id": "T04#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P055": {
+      "input_id": "T11#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P056": {
+      "input_id": "T03#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P057": {
+      "input_id": "T06#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P058": {
+      "input_id": "T31#3",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P059": {
+      "input_id": "T23#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P060": {
+      "input_id": "T01#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P061": {
+      "input_id": "T10#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P062": {
+      "input_id": "T30#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P063": {
+      "input_id": "T19#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P064": {
+      "input_id": "T40#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P065": {
+      "input_id": "T34#3",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P066": {
+      "input_id": "T35#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P067": {
+      "input_id": "T21#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P068": {
+      "input_id": "T12#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P069": {
+      "input_id": "T26#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P070": {
+      "input_id": "T33#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P071": {
+      "input_id": "T33#3",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P072": {
+      "input_id": "T39#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P073": {
+      "input_id": "T05#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P074": {
+      "input_id": "T31#3",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P075": {
+      "input_id": "T20#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P076": {
+      "input_id": "T36#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P077": {
+      "input_id": "T04#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P078": {
+      "input_id": "T37#2",
+      "arm": "base2",
+      "base_side": 2
+    },
+    "P079": {
+      "input_id": "T35#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P080": {
+      "input_id": "T13#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P081": {
+      "input_id": "T39#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P082": {
+      "input_id": "T27#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P083": {
+      "input_id": "T15#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P084": {
+      "input_id": "T10#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P085": {
+      "input_id": "T29#2",
+      "arm": "base2",
+      "base_side": 1
+    },
+    "P086": {
+      "input_id": "T08#2",
+      "arm": "message",
+      "base_side": 1
+    },
+    "P087": {
+      "input_id": "T30#2",
+      "arm": "message",
+      "base_side": 2
+    },
+    "P088": {
+      "input_id": "T26#2",
+      "arm": "base2",
+      "base_side": 1
+    }
+  }
+}

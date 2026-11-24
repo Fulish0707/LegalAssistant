@@ -1,0 +1,165 @@
+{
+  "inputs": 44,
+  "defect_inputs": [
+    "T02#2",
+    "T03#2",
+    "T04#2",
+    "T06#2",
+    "T07#2",
+    "T12#2",
+    "T14#2",
+    "T20#2",
+    "T22#2",
+    "T30#2",
+    "T35#2"
+  ],
+  "condense_labels": {
+    "T13#2": "Q",
+    "T09#2": "Q",
+    "T22#2": "QA",
+    "T23#2": "Q",
+    "T17#2": "Q",
+    "T36#2": "Q",
+    "T14#2": "QA",
+    "T15#2": "Q",
+    "T19#2": "Q",
+    "T37#2": "Q",
+    "T04#2": "QA",
+    "T18#2": "Q",
+    "T11#2": "Q",
+    "T07#2": "A",
+    "T05#2": "Q",
+    "T34#3": "Q",
+    "T35#2": "QA",
+    "T06#2": "A",
+    "T24#2": "Q",
+    "T33#2": "Q",
+    "T40#2": "Q",
+    "T31#3": "Q",
+    "T34#2": "Q",
+    "T10#2": "Q",
+    "T30#2": "QA",
+    "T39#2": "Q",
+    "T32#2": "Q",
+    "T28#2": "Q",
+    "T02#2": "A",
+    "T25#2": "Q",
+    "T27#2": "Q",
+    "T38#2": "Q",
+    "T20#2": "QA",
+    "T08#2": "Q",
+    "T31#2": "Q",
+    "T12#2": "QA",
+    "T26#2": "Q",
+    "T32#3": "Q",
+    "T03#2": "QA",
+    "T16#2": "Q",
+    "T33#3": "Q",
+    "T29#2": "Q",
+    "T21#2": "Q",
+    "T01#2": "Q"
+  },
+  "condense_disagreements": [
+    "C033",
+    "C039"
+  ],
+  "pair_disagreements": 5,
+  "noise_base2": {
+    "defect": {
+      "win": 0,
+      "loss": 1,
+      "tie": 10
+    },
+    "all": {
+      "win": 4,
+      "loss": 3,
+      "tie": 37
+    }
+  },
+  "no_answer": {
+    "base": 0,
+    "base2": 0,
+    "message": 0
+  },
+  "verification_failed": {
+    "base": 1,
+    "base2": 1,
+    "message": 1
+  },
+  "median_turn_seconds": {
+    "base": 26.905,
+    "base2": 25.95,
+    "message": 24.465
+  },
+  "fixes": {
+    "message": {
+      "defect": {
+        "win": 4,
+        "loss": 3,
+        "tie": 4
+      },
+      "good": {
+        "win": 5,
+        "loss": 6,
+        "tie": 22
+      },
+      "per_input": {
+        "T02#2": "win",
+        "T03#2": "win",
+        "T04#2": "tie",
+        "T06#2": "loss",
+        "T07#2": "tie",
+        "T12#2": "win",
+        "T14#2": "loss",
+        "T20#2": "tie",
+        "T22#2": "loss",
+        "T30#2": "win",
+        "T35#2": "tie",
+        "T01#2": "tie",
+        "T05#2": "loss",
+        "T08#2": "tie",
+        "T09#2": "win",
+        "T10#2": "win",
+        "T11#2": "tie",
+        "T13#2": "tie",
+        "T15#2": "win",
+        "T16#2": "tie",
+        "T17#2": "tie",
+        "T18#2": "tie",
+        "T19#2": "loss",
+        "T21#2": "tie",
+        "T23#2": "loss",
+        "T24#2": "tie",
+        "T25#2": "tie",
+        "T26#2": "tie",
+        "T27#2": "win",
+        "T28#2": "tie",
+        "T29#2": "loss",
+        "T31#2": "loss",
+        "T31#3": "tie",
+        "T32#2": "tie",
+        "T32#3": "loss",
+        "T33#2": "win",
+        "T33#3": "tie",
+        "T34#2": "tie",
+        "T34#3": "tie",
+        "T36#2": "tie",
+        "T37#2": "tie",
+        "T38#2": "tie",
+        "T39#2": "tie",
+        "T40#2": "tie"
+      },
+      "gates": {
+        "G0 defects reproduced (|D| >= 6)": true,
+        "G0 noise on D (|base2 margin| <= 2)": true,
+        "G1 margin on D >= 4": false,
+        "G1 losses on D <= 1": false,
+        "G2 losses - wins on good inputs <= 2": true,
+        "G3 no-answer turns <= base + 1": true,
+        "G3 failed verifications <= base + 1": true,
+        "G4 median turn time <= base + 0.5 s": true
+      },
+      "adopt_before_G5": false
+    }
+  }
+}
