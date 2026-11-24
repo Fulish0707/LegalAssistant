@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from pathlib import Path
 from typing import Protocol
 
 from legal_rag.schemas import Conversation, Turn
 
+# A source handle from an answer: [LEGAL SOURCE S4], [S4], [S1, S3]. It names an item of that turn's
+# evidence bundle, so in a later turn it points at a different source, or none.
+SOURCE_HANDLE = re.compile(r"\[(?:LEGAL SOURCE\s+)?S\d+(?:\s*,\s*S\d+)*\]")
+
 
 def render_turns(turns: list[Turn], *, chars: int = 500) -> list[str]:
-    """One line per turn, each cut to `chars`: enough to resolve "그 신청", not enough to carry an answer."""
+    """One line per turn, each cut to `chars`: enough to resolve "그 신청", not enough to carry an answer.
+    Source handles are dropped from the assistant's turns."""
     lines = []
     for turn in turns:
-        text = " ".join(turn.content.split())
+        content = SOURCE_HANDLE.sub("", turn.content) if turn.role == "assistant" else turn.content
+        text = " ".join(content.split())
         lines.append(f"- {'사용자' if turn.role == 'user' else '상담'}: {text[:chars]}{'…' if len(text) > chars else ''}")
     return lines
 
