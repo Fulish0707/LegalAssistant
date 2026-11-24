@@ -268,7 +268,8 @@ class Orchestrator:
         said = " ".join(turn.content for turn in recent if turn.role == "assistant" and turn.evidence_ids)
         prior_refs = [*(ref.render() for ref in extract_statute_refs(said) if ref.law_name), *extract_case_refs(said)]
 
-        answer, report, action = self._generate_verified(question, bundle, analysis, recent, open_questions, recorder, user_documents, prior_refs,
+        asked = message if self.settings.rag.generate_from_message else question
+        answer, report, action = self._generate_verified(asked, bundle, analysis, recent, open_questions, recorder, user_documents, prior_refs,
                                                          on_draft, announce, suppress_followup_questions=policy_scope is not None,
                                                          unconfirmed_case_sources=unconfirmed)
 

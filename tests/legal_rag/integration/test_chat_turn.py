@@ -140,6 +140,27 @@ def test_a_follow_up_is_retrieved_and_answered_as_a_standalone_question(retrieve
     assert block in second and "임차권등기명령 신청서에 적어야 하는 사항은?" in second
 
 
+def test_generate_from_message_gives_the_answer_model_the_users_own_words(retriever, monkeypatch):
+    """The condensed question still drives retrieval; only the generator's question changes."""
+    settings, r = retriever
+    settings = settings.model_copy(update={"rag": settings.rag.model_copy(update={"generate_from_message": True})})
+    seen = _spy_retrieval(monkeypatch, r)
+    standalone = "임차권등기명령은 어느 법원에 신청하나요?"
+    model = FakeChatModel({
+        "QueryAnalysis": [QueryAnalysis(), QueryAnalysis()],
+        "StandaloneQuestion": [StandaloneQuestion(question=standalone)],
+        "LegalAnswer": [_answer(), _answer()],
+    })
+    orch = _orchestrator(settings, r, model)
+    orch.handle("임차권등기명령 신청서에 적어야 하는 사항은?", conversation_id="m3")
+    orch.handle("그건 어느 법원에 하나요?", conversation_id="m3")
+
+    assert seen[1]["queries"][0] == standalone and seen[1]["rerank_query"] == standalone
+    _, second = _generation_prompts(model)
+    assert "질문: 그건 어느 법원에 하나요?" in second and "질문: " + standalone not in second
+    assert "이전 대화(맥락 참고용" in second and "임차권등기명령 신청서에 적어야 하는 사항은?" in second
+
+
 def test_a_reply_to_a_clarification_is_merged_with_the_original_question(retriever, monkeypatch):
     settings, r = retriever
     seen = _spy_retrieval(monkeypatch, r)
