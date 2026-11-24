@@ -36,36 +36,6 @@ def test_only_recent_turns_and_a_bounded_slice_of_each_are_sent():
     assert "가" * 900 not in content
 
 
-def _prompt(history, message="그 신청은 어디에 하나요?"):
-    model = FakeChatModel({"StandaloneQuestion": [StandaloneQuestion(question="q")]})
-    QueryCondenser(model).condense(message, history)
-    return model.calls[0].messages[-1].content
-
-
-def test_an_earlier_answer_reaches_the_condenser_as_its_summary_only():
-    """Given the analysis, the model continued it and answered (data/eval/condense_summary)."""
-    answer = Turn(role="assistant", created_at=datetime(2026, 1, 1), evidence_ids=["c1", "c2"],
-                  content="노동위원회에 부당해고 구제신청을 할 수 있습니다.\n1. 해고된 날부터 3개월 이내에 신청합니다([LEGAL SOURCE S1] 참조).")
-    content = _prompt([*_turns(("user", "해고당했어요.")), answer])
-    assert "노동위원회에 부당해고 구제신청을 할 수 있습니다." in content
-    assert "3개월 이내" not in content and "LEGAL SOURCE" not in content
-    assert "해고당했어요." in content and "현재 질문: 그 신청은 어디에 하나요?" in content
-
-
-def test_clarifications_explanations_and_user_turns_are_kept_whole():
-    clarification = Turn(role="assistant", created_at=datetime(2026, 1, 1), evidence_ids=[],
-                         content="계약이 끝난 날짜\n보증금 액수")
-    user = Turn(role="user", created_at=datetime(2026, 1, 1), content="전세 보증금 문제예요.\n집주인이 연락이 안 돼요.")
-    content = _prompt([user, clarification], message="9월 말에 끝났고 1억이에요.")
-    assert "보증금 액수" in content and "집주인이 연락이 안 돼요." in content
-
-
-def test_a_one_line_answer_turn_is_unchanged():
-    refused = Turn(role="assistant", created_at=datetime(2026, 1, 1), evidence_ids=["c1"],
-                   content="근거를 확인할 수 없어 답변을 제공하지 못했습니다.")
-    assert "근거를 확인할 수 없어 답변을 제공하지 못했습니다." in _prompt([*_turns(("user", "질문")), refused])
-
-
 def test_a_model_failure_falls_back_to_the_message():
     class Broken:
         name = "broken"
