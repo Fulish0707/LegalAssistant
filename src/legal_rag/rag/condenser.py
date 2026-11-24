@@ -7,6 +7,10 @@ question is rewritten once; without them the message is returned untouched and t
 The rewrite becomes the first search query and the rerank query, so a rewrite holding a fact the
 conversation does not (a date or amount the user never gave, an article no turn named) is not used:
 the user's own words from the window are joined instead (data/eval/condense_facts).
+
+An earlier answer reaches the condenser as its first line, the summary (condenser_view): given the
+whole analysis, the model continued it and wrote an answer instead of a question
+(data/eval/condense_summary).
 """
 
 from __future__ import annotations
@@ -31,7 +35,7 @@ class QueryCondenser:
         recent = history[-self.history_turns :] if self.history_turns > 0 else []
         if not recent:
             return message
-        prompt = "\n".join(["이전 대화:", *render_turns(recent), "", f"현재 질문: {message}"])
+        prompt = "\n".join(["이전 대화:", *render_turns(condenser_view(recent)), "", f"현재 질문: {message}"])
         try:
             response = self.model.generate(
                 [Message(role="system", content=load_prompt("condense_system")), Message(role="user", content=prompt)],
@@ -48,6 +52,14 @@ class QueryCondenser:
         if invented_facts(question, users=users, window=window):
             return " ".join(text.strip() for text in users if text.strip())
         return question
+
+
+def condenser_view(turns: list[Turn]) -> list[Turn]:
+    """The turns as the condenser reads them: an answer turn (an assistant turn that cites evidence,
+    stored as summary, newline, analysis) is cut to its first line, the summary. A clarification or
+    an explanation (no evidence) and the user's turns are kept whole."""
+    return [turn.model_copy(update={"content": turn.content.split("\n", 1)[0]})
+            if turn.role == "assistant" and turn.evidence_ids else turn for turn in turns]
 
 
 def invented_facts(question: str, *, users: list[str], window: list[str]) -> list[str]:
