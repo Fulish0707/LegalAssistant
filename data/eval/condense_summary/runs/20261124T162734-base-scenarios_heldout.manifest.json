@@ -1,0 +1,9 @@
+{
+  "tag": "20261124T162734",
+  "arm": "base",
+  "scenarios": "data/eval/condense_summary/scenarios_heldout.json",
+  "legal_rag": "/home/layke/.hermes/profiles/kei/cache/scratch/wt-base/src/legal_rag",
+  "model": "ollama:exaone3.5:7.8b",
+  "history_turns": 4,
+  "started": "2026-11-24T16:27:40+0900"
+}
