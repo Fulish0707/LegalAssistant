@@ -6,7 +6,7 @@
 
 이 프로젝트는 1차 정보를 주는 도구입니다. 법률 자문이 아닙니다. 중요한 결정 전에는 근거 원문과 전문가의 확인이 필요합니다.
 
-**핵심 결과** (개발에 쓰지 않은 질문 274개, 로컬 qwen3:4b, 2026-10-06. 자세한 내용은 [6절](#6-평가-결과))
+**핵심 결과** (개발에 쓰지 않은 질문 274개, 로컬 qwen3:4b, 2026-10-06. 자세한 내용은 [6절](#6-평가-결과)). 2026-11-23부터 로컬 기본 답변 모델은 EXAONE 3.5 7.8B입니다. 아래 표는 전환 전 측정입니다. 검색 두 줄은 답변 모델과 무관합니다. EXAONE으로 다시 잰 것은 두 가지입니다. 고정 근거로 다시 만든 274개 답변 중 273개(0.996)가 인용 검증을 통과했고 확인 안내가 없었습니다(같은 정의로 10월 값 269/274가 재현됨, 그 사이 답변 프롬프트도 바뀌어 모델만의 효과는 아님, 2026-11-23). 첫 초안 글자까지의 중앙값은 7.25초로 qwen3:4b보다 길었습니다(9문항, `docs/spikes/008`). 핵심 결론 일치와 웹 채팅 전체 시간은 다시 재지 않았습니다.
 
 | 측정한 것 | 결과 |
 | --- | ---: |
@@ -77,7 +77,7 @@ flowchart LR
     API --> Qdrant[("Qdrant<br/>법령 · 판례 색인")]
     API --> Embed["Ollama bge-m3<br/>임베딩"]
     API --> Rerank["bge-reranker-v2-m3<br/>재정렬"]
-    API --> LLM["답변 모델<br/>Ollama qwen3:4b 또는 Gemini"]
+    API --> LLM["답변 모델<br/>Ollama EXAONE 3.5 7.8B 또는 Gemini"]
 
     Web --> SQLite[("SQLite<br/>대화 기록")]
     Web --> Chroma[("Chroma<br/>사건 자료")]
@@ -87,8 +87,8 @@ flowchart LR
 | --- | --- |
 | 웹 앱 | Flask, Server-Sent Events (SSE), SQLite |
 | 법률 RAG 백엔드 | FastAPI, Uvicorn |
-| 답변 모델 | Ollama qwen3:4b 또는 Gemini. `LEGAL_RAG__LLM__BACKEND`로 고릅니다 |
-| 임베딩 | Ollama bge-m3 |
+| 답변 모델 | Ollama EXAONE 3.5 7.8B(로컬 기본, 2026-11-23부터. 그 전 측정은 qwen3:4b) 또는 Gemini. `LEGAL_RAG__LLM__BACKEND`로 고릅니다 |
+| 임베딩 | Ollama bge-m3(질의는 CPU) |
 | 검색과 재정렬 | Qdrant, BM25, RRF, BAAI/bge-reranker-v2-m3 |
 | 사건 자료 | Chroma, Tesseract OCR |
 | 설정 | `.env`, `configs/default.yaml`, `configs/local.yaml` |
@@ -311,7 +311,7 @@ flowchart LR
 docker compose up -d
 uv python install 3.11
 uv sync --extra rerank
-ollama pull qwen3:4b
+ollama pull exaone3.5:7.8b
 ollama pull bge-m3
 uv run python scripts/serve.py --profile local --port 8000
 ~~~
@@ -327,11 +327,11 @@ uv run python scripts/serve.py --profile local --port 8000
 | GET /v1/law | 법령 하나의 조문 목록과 본문 |
 | POST /v1/chat | 검색 근거를 사용한 답변 |
 
-답변 모델은 `.env`에서 고릅니다.
+답변 모델은 `.env`에서 고릅니다. 로컬 기본값은 EXAONE 3.5 7.8B입니다(2026-11-23부터). 8GB GPU에 재정렬 모델과 함께 올리려고 bge-m3 질의 임베딩은 CPU에서 돌립니다(`configs/local.yaml`의 `embedding.query_num_gpu: 0`, 웹 앱은 `OLLAMA_EMBED_NUM_GPU=0`). EXAONE 라이선스는 연구·비상업 용도로 제한됩니다.
 
 ~~~dotenv
 LEGAL_RAG__LLM__BACKEND=ollama
-LEGAL_RAG__LLM__MODEL=qwen3:4b
+LEGAL_RAG__LLM__MODEL=exaone3.5:7.8b
 ~~~
 
 ### 8.2 Flask 웹 앱

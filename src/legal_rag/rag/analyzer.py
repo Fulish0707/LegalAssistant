@@ -33,8 +33,8 @@ class QueryAnalyzer:
         articles = {ref.article for ref in extract_statute_refs(written)}
         cases = set(extract_case_refs(written))
         squashed = "".join(written.split())
-        def verbatim(ref):  # a law named without an article
-            return "".join(ref.split()) in squashed
+        def verbatim(ref):  # a law named without an article; a blank ref is "in" every message
+            return bool(ref.strip()) and "".join(ref.split()) in squashed
         model_statutes = [ref for ref in base.statute_refs if verbatim(ref) or any(found.article in articles for found in extract_statute_refs(ref))]
         model_cases = [ref for ref in base.case_refs if verbatim(ref) or any(found in cases for found in extract_case_refs(ref))]
         return base.model_copy(update={"statute_refs": statute_refs or model_statutes, "case_refs": case_refs or model_cases})

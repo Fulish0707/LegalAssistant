@@ -1,0 +1,105 @@
+{
+  "resident": [
+    [
+      "exaone3.5:7.8b",
+      5.84,
+      5.84,
+      12288,
+      "23:25:27"
+    ],
+    [
+      "bge-m3:latest",
+      0.0,
+      1.11,
+      1024,
+      "23:25:20"
+    ]
+  ],
+  "A_full_context": {
+    "prompt_tokens": 10630,
+    "out_tokens": 1233,
+    "total_s": 42.5,
+    "load_s": 0.0,
+    "decode_tok_s": 34.0,
+    "peak_mib": 7636,
+    "ps": [
+      [
+        "exaone3.5:7.8b",
+        5.84,
+        5.84,
+        12288,
+        "23:26:13"
+      ],
+      [
+        "bge-m3:latest",
+        0.0,
+        1.11,
+        1024,
+        "23:25:20"
+      ]
+    ]
+  },
+  "B_concurrent": {
+    "wall_s": 16.9,
+    "each": [
+      {
+        "prompt_tokens": 4732,
+        "out_tokens": 296,
+        "total_s": 16.9,
+        "load_s": 0.0,
+        "decode_tok_s": 39.6
+      },
+      {
+        "prompt_tokens": 2233,
+        "out_tokens": 203,
+        "total_s": 6.7,
+        "load_s": 0.0,
+        "decode_tok_s": 42.1
+      }
+    ],
+    "peak_mib": 7642,
+    "ps": [
+      [
+        "exaone3.5:7.8b",
+        5.84,
+        5.84,
+        12288,
+        "23:26:31"
+      ],
+      [
+        "bge-m3:latest",
+        0.0,
+        1.11,
+        1024,
+        "23:25:20"
+      ]
+    ]
+  },
+  "B_single_ref": {
+    "prompt_tokens": 4732,
+    "out_tokens": 370,
+    "total_s": 9.5,
+    "load_s": 0.0,
+    "decode_tok_s": 39.1
+  },
+  "C_cpu_doc_embed": {
+    "chunks": 20,
+    "s": 10.9,
+    "ps": [
+      [
+        "bge-m3:latest",
+        0.0,
+        1.11,
+        1024,
+        "23:26:52"
+      ],
+      [
+        "exaone3.5:7.8b",
+        5.84,
+        5.84,
+        12288,
+        "23:26:41"
+      ]
+    ]
+  }
+}

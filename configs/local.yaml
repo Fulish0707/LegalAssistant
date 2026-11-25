@@ -6,8 +6,17 @@ embedding:
   # it failed to load (2026-09-27). Queries fit in 1024. Same value as the chat app's
   # OLLAMA_EMBED_NUM_CTX, or Ollama reloads bge-m3 whenever the other client calls.
   query_num_ctx: 1024
+  # Query embeddings on CPU (+0.03 s per query, vectors match GPU at cosine >= 0.99993) so
+  # EXAONE and the reranker have the card. Same as the chat app's OLLAMA_EMBED_NUM_GPU.
+  query_num_gpu: 0
 llm:
-  model: qwen3:4b
+  # EXAONE 3.5 7.8B (Q4_K_M, 5.84 GB at 12288) since 2026-11-23: it led qwen3:4b and the
+  # adapters on every blind answer criterion (data/eval/answer_generation). It fits on the 8 GB
+  # card only with bge-m3 query embeddings on CPU (embedding.query_num_gpu: 0): a 10,630-token
+  # prompt with 1,233 output tokens and the fp16 reranker peaked at 7,636 of 8,188 MiB, fully
+  # on GPU; two concurrent turns queue in one slot without a reload (docs/spikes/005, 006).
+  # EXAONE has no thinking mode; the chat app must not set OLLAMA_REASONING.
+  model: exaone3.5:7.8b
   # Measured 2026-10-06 on the four longest-evidence questions (7,500 characters of evidence):
   # the answer prompt is up to 6,600 tokens, and up to 9,250 with three 1,000-character
   # passages of the user's documents. With max_tokens 2048 that is 8,650 and 11,300, so 8192

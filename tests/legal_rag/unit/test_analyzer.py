@@ -74,3 +74,12 @@ def test_a_law_the_user_named_without_an_article_is_theirs():
     model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(statute_refs=["계량에 관한 법률", "민법"])]})
     analysis = QueryAnalyzer(model).analyze("계량에 관한 법률에 따른 법정단위는 어떻게 구분되나요?", history=[])
     assert analysis.statute_refs == ["계량에 관한 법률"]
+
+
+def test_a_blank_reference_is_not_the_users():
+    """EXAONE 3.5 sometimes fills an empty list with [""] (2026-11-23, data/eval/analyzer_slim). An empty
+    string is "in" every message, so it passed as the user's own reference: an empty search query and a
+    citation-check exemption."""
+    model = FakeChatModel({"QueryAnalysis": [QueryAnalysis(statute_refs=["", "  "], case_refs=[""])]})
+    analysis = QueryAnalyzer(model).analyze("보증금을 못 받았어요", history=[])
+    assert analysis.statute_refs == [] and analysis.case_refs == []

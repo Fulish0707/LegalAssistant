@@ -1,0 +1,5 @@
+n 39 non-answer 0
+median par 5.893 seq 6.062 median saving 0.1 mean -0.07 min -4.63 max 0.41
+p90 par 7.291 seq 6.806
+evidence identical 38 same set 38
+diff qs [3]

@@ -1,0 +1,7 @@
+{
+ "n": 50,
+ "cpu_vs_gpu_min": 0.9999278727271209,
+ "cpu_vs_gpu_median": 0.999992373443536,
+ "max_abs_diff": 0.0022062099999999862,
+ "neighbor_query_cos_max": 0.7883954513193118
+}
