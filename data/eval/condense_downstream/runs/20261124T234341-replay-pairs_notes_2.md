@@ -1,0 +1,29 @@
+- P002: 2 — 2는 철거 요청을 첫 단계로 직접 제시함. 1은 '설치에 대한 명시적 동의를 구하라'는 엇나간 조언을 함
+- P003: 2 — 1은 청구 기한이 아니라 '14일 이후부터 청구 가능'과 지연손해금 이야기를 함. 2는 기한 질문 자체를 다룸
+- P007: 2 — 1은 사용자가 가해자인데 '피고 자전거도로 관리자 보험'을 전제함. 2는 개인형 이동장치 보험 등 일반적인 보험 처리 안내
+- P008: 2 — 2는 고소 기한을 직접 답함. 1은 기한이 없다며 답을 피함
+- P010: 1 — 2의 결론은 앞뒤가 맞지 않고('정당 사유 있으면 이유 없이 거절 가능') 임대인 쪽 조치를 안내함. 1은 직접 답함
+- P013: 2 — 2는 '바로 나가야 하는가'에 조건부로 직접 답함. 1은 앞 답변만 반복함
+- P015: 2 — 1은 분석이 중간에 끊겨 답이 없음. 2는 질문에 직접 답함
+- P016: 1 — 2는 판례의 2018년 예식, 금액 수치를 사용자 사안처럼 적용함
+- P020: 1 — 1은 소요 기간 범위를 제시함. 2는 알 수 없다고만 함
+- P021: 2 — 1은 분석이 끊김. 2는 무엇을 청구할 수 있는지(매출 감소액과 고정비) 설명함
+- P028: 1 — 1은 청구 기한을 제시함. 2는 불명확하다고만 함
+- P032 (2): 2 directly gives a deadline (1년); 1 only says it depends on contract.
+- P036 (1): 1 explains how damages are calculated; 2 mostly just says evidence is needed.
+- P039 (1): 2 treats the user (who owns the dog) as a third party ('개 소유자 책임 인정 여부 확인'); 1 keeps the user as the owner.
+- P044 (1): 1 says the consumer can report; 2 shifts focus to the restaurant's own reporting duty.
+- P049 (1): 1 gives a general return window; 2 gives no timeframe.
+- P050 (2): 1 has an empty summary and no real answer; 2 answers.
+- P054 (1): 2's reasoning on pre-existing scratches misreads the context (customer awareness makes the charge more lawful); 1 addresses whether the user must pay.
+- P057 (2): 1 points to reporting to the direct boss when the boss is the harasser, and gives internal options only; 2 also gives external bodies.
+- P061: 2 — 내야 하는지에 공용/전유 구분으로 직접 답함; 1은 임대인 통지·소송 등 엉뚱한 방향.
+- P063: 2 — 재개발 공사 피해 신청처를 답함; 1은 군소음보상법 절차로 다른 사안에 답함.
+- P068: 2 — '어디에 맡기나'에 의료 전문가 감정·법률 자문으로 답함; 1은 판단 주체를 말하지 않음.
+- P070: 2 — 이유 없는 거절 불가를 직접 답함; 1은 결론이 모순되고 임대인 대상 조언 등 맥락 어긋남.
+- P073: 2 — 신고 기한(60일)을 직접 제시; 1은 기한 없다며 약관 확인만 안내.
+- P074: 1 — 2는 소비자가 이물 보고 의무를 이행한다고 주체를 혼동.
+- P082: 2 — 경쟁사 취업 가능 여부로 직접 답함; 1은 약정 유효성 설명에 머묾.
+- P083: 1 — 2는 신차 교환 규정(자동차관리법)과 판매시점 가정 등 질문과 동떨어진 내용 중심.
+- P084: 2 — 납부 의무 여부를 직접 답함; 1은 통지·소송 절차 중심.
+- P087: 1 — 1은 요구 가능 여부를 직접 답함; 2는 답을 유보하고 계약기간 미종료를 전제.
