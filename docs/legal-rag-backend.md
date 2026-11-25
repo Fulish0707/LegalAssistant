@@ -220,11 +220,22 @@ never overwritten: choose a new version to import changed data. Publication occu
 only after validation finishes. Collections retain the backend's model/version-based
 names; this importer does not switch to a fixed `legal_chunks` collection.
 
-**Indexing remains a full rebuild:** `build_index.py` recreates that version/model's
-collection. Use a new corpus version to preserve an existing index. Embedded Qdrant
+**Indexing rebuilds by default:** `build_index.py` recreates that version/model's
+collection. Use a new corpus version to preserve an existing index. After an interrupted
+run, `--resume` keeps the collection and embeds only the chunks that are missing; it
+refuses to continue if the corpus, tokenizer or BM25 statistics changed, if the collection
+is missing, or if `--on-disk` differs from the original run, and writes `index.json` only
+when the final point count matches the corpus. Embedded Qdrant
 requires exclusive access; stop search/API processes using the same index first.
 Full embedding of a large corpus can take substantial time. `fake` embeddings are
 only suitable for pipeline tests, not semantic search.
+
+Check that Ollama embeds on the GPU before a long run. On 2026-09-16 the system
+service had started without the GPU and embedded four chunks in 45.5 s instead of 1.5 s.
+`ollama ps` shows placement only after a model is loaded, so run one small embedding
+first; `100% CPU` means restart the service (`sudo systemctl restart ollama`) and check
+again. The builder logs a warning after its first document batch if bge-m3 has no VRAM,
+and prints throughput and an estimate of the time left.
 
 Structural validation does not prove that earlier preprocessing excluded QA gold
 answers. That requires reviewing the original preprocessing and QA/source provenance.

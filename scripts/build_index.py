@@ -7,6 +7,7 @@ Example:
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import typer
@@ -30,7 +31,15 @@ def main(
     settings = settings_from_options(profile=profile, root=root, corpus_version=corpus_version, extra=extra)
     if resume:
         typer.echo("Resuming: checking BM25 statistics and stored chunks; existing points are preserved.", err=True)
-    report = build_index(settings, on_disk=on_disk, resume=resume, progress=lambda done, total: typer.echo(f"  indexed {done}/{total}", err=True))
+    started = time.monotonic()
+
+    def progress(done: int, total: int) -> None:
+        elapsed = time.monotonic() - started
+        rate = done / elapsed if elapsed > 0 else 0.0
+        eta = f", about {(total - done) / rate / 60:.0f} min left" if rate and done < total else ""
+        typer.echo(f"  indexed {done}/{total} ({rate:.1f} chunks/s{eta})", err=True)
+
+    report = build_index(settings, on_disk=on_disk, resume=resume, progress=progress)
     typer.echo(f"chunks={report.chunks} collection={report.collection} dimension={report.dimension} index_dir={report.index_dir}")
 
 
