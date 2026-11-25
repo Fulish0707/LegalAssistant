@@ -1,0 +1,129 @@
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+import json
+import pytest
+from legal_rag.schemas import Chunk, ChunkMetadata, ScoredChunk
+from legal_rag.retrieval.fusion import RRFFuser
+from legal_rag.reranking.cross_encoder import CrossEncoderReranker
+from legal_rag.evaluation.recall_stages import capture_stages, replay_stages
+from legal_rag.evaluation.recall_variants import VARIANTS
+
+
+def hit(i, score=1., retriever='civil:dense'):
+    return ScoredChunk(chunk=Chunk(id=str(i), document_id='document-'+str(i), document_type='judgment', path='x', order=0, text='text '+str(i), title='', metadata=ChunkMetadata(dataset='civil', corpus_version='v1')), score=score, retriever=retriever)
+
+class Leg:
+    def __init__(self, name, hits=None, error=False):
+        self.name, self.hits, self.error = name, hits, error
+    def retrieve(self, query, k, filters=None):
+        if self.error: raise RuntimeError('backend unavailable')
+        return (self.hits if self.hits is not None else [hit(query, retriever=self.name)])[:k]
+
+class Encoder:
+    def predict(self, pairs, **kwargs):
+        assert all(q.startswith('query') for q, text in pairs)
+        return [1.] * len(pairs)
+
+def hybrid(legs):
+    return SimpleNamespace(legs=legs, fuser=RRFFuser(60, {l.name: .75 if l.name.endswith(':sparse') else 1. for l in legs},3), reranker=CrossEncoderReranker('stub', loader=lambda *a, **kw: Encoder()), k_fused=100, last_trace={'sentinel': []})
+
+def test_capture_identity_depth_error_empty_and_serialization():
+    legs=[Leg('civil:dense',[hit(i) for i in range(5)]), Leg('civil:sparse',[]), Leg('criminal:dense',error=True)]
+    h=hybrid(legs)
+    result=capture_stages(h,'query one',dense_k=3,sparse_k=2)
+    assert [l['requested_depth'] for l in result['legs']]==[3,2,3]
+    assert len(result['legs'][0]['hits'])==3
+    assert result['legs'][0]['hits'][0]['document_id']=='document-0'
+    assert result['legs'][1]['error'] is None and result['legs'][1]['hits']==[]
+    assert result['legs'][2]['error']['type']=='RuntimeError'
+    assert h.last_trace=={'sentinel': []}
+    assert json.loads(json.dumps(result))==result
+
+def test_concurrent_capture_is_request_local():
+    h=hybrid([Leg('civil:dense')])
+    with ThreadPoolExecutor(2) as pool:
+        results=list(pool.map(lambda q:capture_stages(h,q,dense_k=2,sparse_k=3), ['query A','query B']))
+    assert [r['legs'][0]['hits'][0]['chunk_id'] for r in results]==['query A','query B']
+
+def test_replay_full_union_recovers_rank_129_and_ties_keep_real_order():
+    h=hybrid([Leg('civil:dense',[hit(f'{i:03}') for i in range(130)])])
+    captured=capture_stages(h,'query original',dense_k=130,sparse_k=5)
+    assert '128' not in [x['chunk_id'] for x in captured['fused']['hits']]
+    replay=replay_stages(captured,h.reranker,full_union=True,rerank_k=130)
+    assert replay['reranked']['hits'][128]['chunk_id']=='128'
+    assert replay['reranked']['hits'][128]['document_id']=='document-128'
+    assert [x['chunk_id'] for x in replay['fused']['hits']]==[x['chunk_id'] for x in replay['reranked']['hits']]
+    baseline=replay_stages(captured,h.reranker)
+    assert baseline['fused']['hits']==captured['fused']['hits']
+    assert replay_stages(captured,None,rerank=False)['reranked']['hits']==captured['fused']['hits']
+
+def test_explicit_variants_and_normalization():
+    assert VARIANTS['F0'].leg_floor==0
+    assert VARIANTS['F1'].leg_floor==5
+    assert VARIANTS['F2'].budget==200
+    assert VARIANTS['F3'].sparse_weight==.5
+    assert VARIANTS['F4'].sparse_weight==1
+    assert VARIANTS['F5'].rrf_k==20
+    assert VARIANTS['F6'].rrf_k==100
+    lists=[[hit('a',10),hit('b',0)],[hit('b',5,'civil:sparse')]]
+    fused=VARIANTS['F7a'].fuse(lists)
+    assert {h.chunk.id:h.score for h in fused}=={'a':.5,'b':.5}
+    assert [(h.chunk.id,h.score) for h in VARIANTS['F7c'].fuse(lists)]==[('a',1.),('b',0.)]
+
+
+def test_eight_legs_preserve_corpus_and_actual_baseline_fusion():
+    legs=[Leg(f'{corpus}:{kind}', [hit(f'{corpus}-{kind}', retriever=f'{corpus}:{kind}')])
+          for corpus in ['civil','criminal','administrative','ip'] for kind in ['dense','sparse']]
+    h=hybrid(legs)
+    captured=capture_stages(h,'query',dense_k=4,sparse_k=7)
+    assert len(captured['legs'])==8
+    corpus_by_id={x['chunk_id']: leg['name'].split(':')[0] for leg in captured['legs'] for x in leg['hits']}
+    assert {x['chunk_id']: x['corpus'] for x in captured['fused']['hits']}==corpus_by_id
+    replay=replay_stages(captured,h.reranker)
+    assert replay['fused']['hits']==captured['fused']['hits']
+
+
+def test_normalized_floor_retains_zero_score_active_leg_hit():
+    civil=[hit("civil-a",10),hit("civil-b",5),hit("civil-c",0)]
+    other=[hit("other-"+str(i),100-i,"criminal:dense") for i in range(20)]
+    fused=VARIANTS["F7c"].fuse([civil,other],budget=10)
+    assert "civil-c" in {h.chunk.id for h in fused}
+
+
+def test_multi_query_capture_keeps_original_query_for_reranking():
+    from legal_rag.evaluation.recall_stages import capture_multi_stages
+    class TrackReranker:
+        def __init__(self): self.queries=[]
+        def rerank(self,query,candidates,k):
+            self.queries.append(query)
+            return candidates[:k]
+    h=hybrid([Leg("civil:dense"),Leg("civil:sparse")])
+    h.reranker=TrackReranker()
+    result=capture_multi_stages(h,["query original","query expanded"],depth=2,rerank_k=10)
+    assert len(result["legs"])==4
+    assert [x["query_index"] for x in result["legs"]]==[0,0,1,1]
+    assert h.reranker.queries==["query original"]
+    assert result["query"]=="query original"
+    assert {x["chunk_id"] for x in result["reranked"]["hits"]}=={"query original","query expanded"}
+
+def test_expansion_validation_rejects_novel_citation_and_lost_facts():
+    from legal_rag.evaluation.recall_expansion import validate_expansion
+    original="대법원 2020다123 제3조 계약 취소"
+    assert validate_expansion(original, original+" 의사표시 착오 민법")== (original+" 의사표시 착오 민법",None)
+    assert validate_expansion(original,original+" 제4조 민법")[1]=="novel_identifier"
+    assert validate_expansion(original,"제3조 계약 취소 의사표시")[1]=="original_not_preserved"
+    assert validate_expansion(original,original)[1]=="no_expansion"
+    assert validate_expansion(original,original+" "+"x "*30)[1]=="too_many_terms"
+
+
+def test_expansion_generation_uses_structured_prompt_and_preserves_query():
+    from legal_rag.evaluation.recall_expansion import generate_expansion
+    class FakeModel:
+        def generate(self,messages,**kwargs):
+            assert "원래 질문: 계약 취소" in messages[1].content
+            assert kwargs["temperature"]==0
+            return SimpleNamespace(parsed=SimpleNamespace(legal_query="의사표시 착오"),
+                                   text="raw")
+    result=generate_expansion(FakeModel(),"계약 취소")
+    assert result["legal_query"]=="계약 취소 의사표시 착오"
+    assert result["fallback_reason"] is None
