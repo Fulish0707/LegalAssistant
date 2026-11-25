@@ -2,7 +2,7 @@
 
 **Goal:** Identify and reduce loss of relevant evidence during candidate retrieval, fusion, reranking, and Flask evidence preparation.
 
-**Status:** Planned experiments; no evaluation runs or implementation changes have been performed for this plan.
+**Status:** Priority 1 current-Flask capture and paired top-10 grading completed (development-only, 2026-09-29). Later variant experiments and locked confirmation remain pending; fresh confirmation questions and independent human calibration are unavailable.
 
 **Architecture:** Exercise the same unfiltered four-corpus retrieval used by Flask through /v1/search. Record request-local intermediate rankings so candidate selection and reranking can be compared independently. Use local artifacts; LangSmith is not required.
 

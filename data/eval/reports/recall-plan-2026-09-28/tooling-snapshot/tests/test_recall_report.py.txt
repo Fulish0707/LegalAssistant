@@ -1,0 +1,347 @@
+from pathlib import Path
+import pytest
+from legal_rag.evaluation import recall_report as report
+
+def hit(doc, chunk, text="text", score=1):
+    return {"document_id": doc, "chunk_id": chunk, "score": score,
+            "chunk": {"id": chunk, "document_id": doc, "text": text}}
+
+def test_document_recall_and_chunk_cutoff_are_distinct():
+    hits = [hit("a", "1"), hit("a", "2"), hit("b", "3")]
+    out = report.reference_metrics(hits, ["a", "b"], k=2)
+    assert out["chunk_cutoff_recall"] == .5
+    assert out["unique_document_recall"] == 1
+    assert out["reference_coverage"] == 1
+
+def test_missing_reference_is_undefined_not_zero():
+    assert report.reference_metrics([], [], k=10)["chunk_cutoff_recall"] is None
+
+def test_evidence_keeps_source_offsets_and_exposes_truncation():
+    evidence = report.prepare_evidence([hit("a","1","x"*1200+"SUPPORT")])
+    assert evidence[0]["text"] == "x"*1200
+    assert evidence[0]["segments"][0]["source_end"] == 1200
+    assert evidence[0]["truncated"] is True
+    assert not report.support_survives(evidence, [{"chunk_id":"1","start":1200,"end":1207}])
+
+def test_evidence_groups_duplicates_and_obeys_doc_limit():
+    hits = [hit("a","1","one"),hit("a","2","one"),hit("b","3","two"),hit("c","4","three")]
+    evidence = report.prepare_evidence(hits, max_documents=2)
+    assert [e["document_id"] for e in evidence] == ["a","b"]
+    assert evidence[0]["text"] == "one"
+
+def test_graded_metrics_reject_failed_or_missing_judgments():
+    hits = [hit("a","1")]
+    for judgments in ({}, {"1":None}):
+        with pytest.raises(ValueError, match="judgment"):
+            report.judged_metrics(hits, judgments, k=10)
+    assert report.judged_metrics(hits, {"1":2}, k=10)["precision"] == .1
+
+def test_paired_comparison_is_grouped_reproducible_and_requires_alignment():
+    a=[{"case_id":"1","group_id":"g","domain":"civil","value":0},
+       {"case_id":"2","group_id":"h","domain":"civil","value":0}]
+    b=[dict(row,value=1) for row in a]
+    assert report.paired_interval(a,b,resamples=100)["ci95"] == [1,1]
+    with pytest.raises(ValueError,match="case"):
+        report.paired_interval(a,b[:1],resamples=100)
+
+def test_development_sampling_deduplicates_and_is_reproducible(tmp_path):
+    for domain in ("criminal","civil","administrative","ip"):
+        rows=[{"id":str(i),"query":domain+" "+str(i),"relevant_document_ids":[domain+str(i)]} for i in range(25)]
+        (tmp_path/f"{domain}-pilot-200.jsonl").write_text("\n".join(__import__("json").dumps(r) for r in rows))
+    rows=[{"id":str(i),"dataset":"civil-everyday","query":"everyday "+str(i),"relevant_document_ids":["x"+str(i)]} for i in range(25)]
+    (tmp_path/"everyday-150.jsonl").write_text("\n".join(__import__("json").dumps(r) for r in rows))
+    a=report.development_target(tmp_path)
+    assert a==report.development_target(tmp_path)
+    assert len(a)==100
+    assert len({r["case_id"] for r in a})==100
+
+
+def test_evidence_text_matches_actual_flask_function():
+    import ast
+    from types import SimpleNamespace
+    source = Path(__file__).resolve().parents[3] / "langchain_config.py"
+    tree = ast.parse(source.read_text())
+    selected = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "search_legal_evidence"]
+    hits = [hit("a","1","first"),hit("a","2","second"),hit("b","3","third")]
+    response = SimpleNamespace(raise_for_status=lambda:None,json=lambda:{"hits":hits,"labels":{}})
+    namespace={"httpx":SimpleNamespace(post=lambda *a,**kw:response,HTTPError=RuntimeError),
+               "LEGAL_SEARCH_K":10,"LEGAL_SEARCH_TIMEOUT":30,"LEGAL_MAX_DOCUMENTS":5,
+               "LEGAL_QUOTE_CHARS":1200,"LEGAL_CHUNK_SEPARATOR":"\n…\n",
+               "LEGAL_ANSWER_LANGUAGE_REMINDER":"language","_legal_hit_source":lambda c:"source",
+               "_LEGAL_KIND_LABELS":{}}
+    exec(compile(ast.Module(body=selected,type_ignores=[]),str(source),"exec"),namespace)
+    _, actual=namespace["search_legal_evidence"]("http://unused","query")
+    assert [x["text"] for x in report.prepare_evidence(hits)] == [x["quote"] for x in actual]
+
+
+def test_summary_keeps_failed_requests_and_labels_metrics():
+    row={"case_id":"a","domain":"civil","reference_metrics":{"union":{"reference_coverage":1.0},
+         "fused":{"reference_coverage":.5},"top10":{"chunk_cutoff_recall":.5}},"errors":[]}
+    failure={"case_id":"b","domain":"civil","reference_metrics":{},"errors":["timeout"]}
+    summary=report.summarize([row,failure])
+    assert summary["requests"]==2 and summary["failed_requests"]==1
+    assert summary["quality_status"]=="unjudged_known_reference_only"
+    assert summary["domains"]["civil"]["top10.chunk_cutoff_recall"]==.5
+
+
+def test_cli_audit_is_immutable(tmp_path):
+    import subprocess, sys, json
+    source = Path(__file__).resolve().parents[3]
+    data = tmp_path / "data" / "eval"
+    data.mkdir(parents=True)
+    for domain in ("criminal","civil","administrative","ip","everyday"):
+        rows=[{"id":str(i),"query":domain+str(i),"dataset":"civil-everyday",
+               "relevant_document_ids":[domain+str(i)]} for i in range(25)]
+        name="everyday-150" if domain=="everyday" else domain+"-pilot-200"
+        (data/(name+".jsonl")).write_text("\n".join(json.dumps(r) for r in rows))
+    output=tmp_path/"output"
+    cmd=[sys.executable,str(source/"scripts/eval_recall_stages.py"),"audit",
+         "--data-root",str(tmp_path),"--output",str(output)]
+    first=subprocess.run(cmd,capture_output=True,text=True)
+    assert first.returncode==0,first.stderr
+    before=(output/"target.jsonl").read_bytes()
+    second=subprocess.run(cmd,capture_output=True,text=True)
+    assert second.returncode!=0
+    assert (output/"target.jsonl").read_bytes()==before
+
+
+def load_cli():
+    import importlib.util
+    source=Path(__file__).resolve().parents[3]/"scripts/eval_recall_stages.py"
+    spec=importlib.util.spec_from_file_location("recall_cli",source)
+    module=importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+def test_capture_initialization_failure_is_recorded(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from legal_rag import factory
+    cli=load_cli()
+    target=tmp_path/"target.jsonl"
+    target.write_text(json.dumps({"case_id":"x","domain":"civil","query":"q"})+"\n")
+    monkeypatch.setattr(cli,"manifest",lambda *args:{"status":"running"})
+    def fail(*a,**kw):
+        raise RuntimeError("model unavailable")
+    monkeypatch.setattr(factory,"build_hybrid_retriever",fail)
+    args=SimpleNamespace(data_root=tmp_path,target=target,limit=0,output=tmp_path/"out",
+                         variants=["baseline"],parity=0,full_union=False,warmup=0,depth=100)
+    with pytest.raises(RuntimeError,match="model unavailable"):
+        cli.capture(args)
+    assert json.loads((args.output/"manifest.json").read_text())["status"]=="failed"
+
+def test_reranker_cache_binds_query_and_text():
+    from types import SimpleNamespace
+    from legal_rag.schemas import ScoredChunk
+    cli=load_cli()
+    class Fake:
+        calls=0
+        def rerank(self,q,candidates,k):
+            self.calls+=1
+            return [h.model_copy(update={"score":len(q)+len(h.chunk.text)}) for h in candidates]
+    delegate=Fake()
+    cache=cli.CachedReranker(delegate)
+    from legal_rag.schemas import Chunk,ChunkMetadata
+    a=ScoredChunk(chunk=Chunk(id="c",document_id="d",document_type="judgment",
+        path="x",order=0,text="first",title="",metadata=ChunkMetadata(dataset="d",corpus_version="v")),
+        score=0,retriever="dense")
+    cache.rerank("q",[a],1)
+    cache.rerank("q",[a],1)
+    assert delegate.calls==1
+    cache.rerank("other",[a],1)
+    cache.rerank("q",[a.model_copy(update={"chunk":a.chunk.model_copy(update={"text":"different"})})],1)
+    assert delegate.calls==3
+
+
+def test_report_rejects_incomplete_runs(tmp_path):
+    import json
+    from types import SimpleNamespace
+    cli=load_cli()
+    (tmp_path/"manifest.json").write_text(json.dumps({"status":"running"}))
+    with pytest.raises(ValueError,match="complete"):
+        cli.report_run(SimpleNamespace(run_dir=tmp_path,output=tmp_path/"report"))
+
+def test_report_pairs_full_union_only_on_its_subset(tmp_path):
+    import json
+    from types import SimpleNamespace
+    cli=load_cli()
+    (tmp_path/"manifest.json").write_text(json.dumps({"status":"complete"}))
+    def row(name,i,value):
+        return {"variant":name,"case_id":str(i),"group_id":str(i),"domain":"civil","errors":[],
+            "reference_metrics":{"union":{"reference_coverage":1},"fused":{"reference_coverage":1},
+                                 "top10":{"chunk_cutoff_recall":value},"prepared":{"reference_coverage":value}}}
+    records=[row("baseline",1,0),row("baseline",2,1),row("full_union",1,1)]
+    (tmp_path/"per-case.jsonl").write_text("\n".join(json.dumps(r) for r in records))
+    cli.report_run(SimpleNamespace(run_dir=tmp_path,output=tmp_path/"report"))
+    result=json.loads((tmp_path/"report/comparison.json").read_text())
+    assert result["comparisons"]["full_union"]["paired_questions"]==1
+    assert result["comparisons"]["full_union"]["delta"]==1
+    assert result["decision"]=="no_adoption_unjudged_development"
+
+
+def test_ann_overlap_and_known_reference_rescue_are_separate():
+    cli=load_cli()
+    approximate=[{"chunk_id":"a","document_id":"ordinary"}]
+    exact=[{"chunk_id":"g","document_id":"gold"}]
+    assert cli.ann_comparison(approximate,exact,["gold"])=={
+        "overlap":0,"rescued_reference_ids":["gold"]}
+    assert cli.ann_comparison(approximate,exact,["other"])=={
+        "overlap":0,"rescued_reference_ids":[]}
+
+
+def test_ann_search_modes_include_requested_ef_values():
+    cli=load_cli()
+    modes=cli.ann_search_modes([256,512])
+    assert [name for name,_ in modes]==["approximate","ef256","ef512","exact"]
+    assert modes[0][1] is None
+    assert modes[1][1].hnsw_ef==256
+    assert modes[2][1].hnsw_ef==512
+    assert modes[3][1].exact is True
+
+
+def test_unordered_union_does_not_report_rank_metrics():
+    cli=load_cli()
+    case={"case_id":"c","domain":"civil","group_id":"g","relevant_document_ids":["gold"]}
+    hit={"chunk_id":"x","document_id":"gold","score":1,"corpus":"civil",
+         "chunk":{"text":"support","path":"p","order":0,"title":"t"}}
+    record={"reranked":{"hits":[hit]},"fused":{"hits":[hit]},"legs":[]}
+    result=cli.metrics(case,record,[hit])
+    assert result["reference_metrics"]["union"]=={
+        "reference_coverage":1,"returned_chunks":1,"returned_documents":1}
+
+
+def test_compare_depth_rows_pairs_same_questions():
+    cli=load_cli()
+    def row(case, value):
+        return {"case_id":case,"group_id":case,"domain":"civil","errors":[],
+                "reference_metrics":{"union":{"reference_coverage":value},
+                                     "top10":{"chunk_cutoff_recall":value}}}
+    baseline=[row("a",0),row("b",1)]
+    shorter=[row("a",1),row("b",1)]
+    result=cli.compare_depth_rows({"baseline":baseline,"depth50":shorter})
+    assert result["depth50"]["questions"]==2
+    assert result["depth50"]["top10"]["delta"]==0.5
+    assert result["depth50"]["union"]["delta"]==0.5
+    with pytest.raises(ValueError,match="case membership"):
+        cli.compare_depth_rows({"baseline":baseline,"depth50":[row("a",1)]})
+
+
+def test_judging_pool_deduplicates_and_blinds_variant_rank():
+    cli=load_cli()
+    chunk={"id":"x","document_id":"gold","text":"support","document_type":"judgment"}
+    hit={"chunk_id":"x","document_id":"gold","chunk":chunk}
+    stage={"case":{"case_id":"q1","query":"question","relevant_document_ids":["gold"]},
+           "capture":{"legs":[{"hits":[hit]}],"reranked":{"hits":[hit]}}}
+    variant={"case_id":"q1","variant":"F1","record":{"reranked":{"hits":[hit]}}}
+    rows,origins=cli.judging_pool([stage],[variant],{"gold":[chunk]})
+    assert len(rows)==1
+    assert rows[0]["chunk_id"]=="x"
+    assert rows[0]["text"]=="support"
+    assert "variant" not in rows[0] and "rank" not in rows[0]
+    assert set(origins[0]["origins"])=={"baseline_top20","variant_top10","reference_document"}
+
+
+def test_calibration_sample_is_balanced_and_blinded():
+    from legal_rag.evaluation.recall_report import sample_review_calibration
+    domains=("criminal","civil","administrative","ip")
+    pool=[]
+    provenance=[]
+    by_case={}
+    for domain in domains:
+        for kind,origin in (("reference","reference_document"),
+                            ("baseline","baseline_top20"),("variant","variant_top10")):
+            for i in range(12):
+                case_id=f"{domain}:{kind}:{i}"
+                review_id=f"{case_id}:chunk"
+                by_case[case_id]=domain
+                pool.append({"review_id":review_id,"case_id":case_id,"query":"q",
+                             "chunk_id":"chunk","document_id":"doc","document_type":"judgment",
+                             "text":"x"*3600})
+                provenance.append({"review_id":review_id,"origins":[origin],"variants":[]})
+    selected,hidden=sample_review_calibration(pool,provenance,by_case,seed=20260928)
+    assert len(selected)==len({r["review_id"] for r in selected})==100
+    assert all(sum(by_case[r["case_id"]]==d for r in selected)==25 for d in domains)
+    assert len(hidden)==100
+    assert all(len(r["text"])==3500 and "origin" not in r for r in selected)
+    assert all(sum(h["stratum"]==kind and h["domain"]==d for h in hidden)==quota
+               for d in domains for kind,quota in (("reference",8),("baseline",9),("variant",8)))
+
+
+def test_expansion_repeat_sample_is_five_per_domain():
+    cli=load_cli()
+    rows=[{"case_id":f"{domain}:{i}","domain":domain} for domain in
+          ("criminal","civil","administrative","ip") for i in range(9)]
+    chosen=cli.expansion_repeat_ids(rows)
+    assert len(chosen)==20
+    assert all(sum(case.startswith(domain+":") for case in chosen)==5 for domain in
+               ("criminal","civil","administrative","ip"))
+
+
+def test_c5_fallback_uses_original_once():
+    cli=load_cli()
+    assert cli.expansion_queries("original",{"legal_query":None})==["original"]
+    assert cli.expansion_queries("original",{"legal_query":"original legal"})==["original","original legal"]
+    with pytest.raises(ValueError,match="preserve"):
+        cli.expansion_queries("original",{"legal_query":"different"})
+
+
+def test_c5_comparison_pairs_against_both_controls():
+    cli=load_cli()
+    def row(case,value):
+        return {"case_id":case,"group_id":case,"domain":"civil","errors":[],
+                "reference_metrics":{"union":{"reference_coverage":value},
+                                     "top10":{"chunk_cutoff_recall":value}}}
+    result=cli.compare_c5_rows({"baseline":[row("a",0),row("b",1)],
+                                "depth50":[row("a",0),row("b",0)],
+                                "C5":[row("a",1),row("b",0)]})
+    assert result["C5"]["top10"]["delta"]==0
+    assert result["C5"]["vs_depth50_top10"]["delta"]==0.5
+
+
+def test_c5_pool_extension_adds_new_top10_without_exposing_variant():
+    cli=load_cli()
+    old={"review_id":"old","case_id":"q","query":"question","chunk_id":"a",
+         "document_id":"d","document_type":"judgment","text":"one"}
+    source={"review_id":"old","origins":["baseline_top20"],"variants":[]}.copy()
+    top={"chunk_id":"b","document_id":"e",
+         "chunk":{"id":"b","document_id":"e","document_type":"judgment","text":"two"}}
+    rows,origins=cli.extend_judging_pool([old],[source],[{"case_id":"q","top10":[top]}])
+    assert len(rows)==len(origins)==2
+    new=next(r for r in rows if r["chunk_id"]=="b")
+    assert new["query"]=="question" and "variant" not in new
+    assert next(o for o in origins if o["review_id"]==new["review_id"])["variants"]==["C5"]
+
+
+def test_document_aware_selection_uses_first_five_documents():
+    from legal_rag.evaluation.recall_report import select_document_aware
+    docs=["A","A","B","C","C","D","E","F","B","E","D"]
+    hits=[{"chunk_id":str(i),"document_id":doc} for i,doc in enumerate(docs)]
+    selected=select_document_aware(hits,k=10,max_documents=5)
+    assert [h["chunk_id"] for h in selected]==["0","2","3","5","6","1","4","8","9","10"]
+    assert len({h["document_id"] for h in selected})==5
+    assert select_document_aware([],k=10)==[]
+    assert select_document_aware(hits,k=0)==[]
+    assert select_document_aware(hits,max_documents=0)==[]
+
+
+def test_calibration_pair_for_judge_hides_sampling_provenance():
+    cli=load_cli()
+    row={"review_id":"r","case_id":"c","query":"question","chunk_id":"x",
+         "document_id":"d","document_type":"judgment","text":"passage",
+         "grade":"","note":""}
+    pair=cli.calibration_judge_pair(row)
+    assert pair=={"case_id":"c","chunk_id":"x","document_id":"d",
+                  "document_type":"judgment","question":"question",
+                  "reference_answer":"","title":"","text":"passage"}
+
+
+def test_reviewed_calibration_requires_all_grades_and_unchanged_pairs():
+    from legal_rag.evaluation.recall_report import validated_review_grades
+    base=[{"review_id":"a","case_id":"q","chunk_id":"x","query":"why",
+           "text":"source","grade":"","note":""}]
+    reviewed=[{**base[0],"grade":"2"}]
+    assert validated_review_grades(base,reviewed)=={("q","x"):2}
+    with pytest.raises(ValueError,match="missing or invalid grade"):
+        validated_review_grades(base,base)
+    with pytest.raises(ValueError,match="content changed"):
+        validated_review_grades(base,[{**reviewed[0],"text":"different"}])
