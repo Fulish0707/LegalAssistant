@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class OllamaEmbedder:
@@ -21,6 +25,7 @@ class OllamaEmbedder:
         self.name = f"ollama:{model}"
         self._client = httpx.Client(base_url=base_url, timeout=timeout, transport=transport)
         self._dimension: int | None = None
+        self._placement_checked = False
 
     @property
     def dimension(self) -> int:
@@ -32,7 +37,31 @@ class OllamaEmbedder:
         vectors: list[list[float]] = []
         for start in range(0, len(texts), self.batch_size):
             vectors.extend(self._call(texts[start : start + self.batch_size]))
+            if not self._placement_checked:
+                self._warn_if_cpu_only()
         return vectors
+
+    def _warn_if_cpu_only(self) -> None:
+        """Warn once when the document embedder runs without the GPU.
+
+        A system Ollama service that missed the GPU at boot embedded about 30x slower
+        (4 chunks: 45.5 s on CPU against 1.5 s on GPU, 2026-09-16). Checked after document
+        batches only: query embeddings may run on CPU on purpose (query_num_gpu 0).
+        """
+        self._placement_checked = True
+        requested = self.model if ":" in self.model else self.model + ":latest"
+        try:
+            response = self._client.get("/api/ps")
+            response.raise_for_status()
+            models = response.json().get("models", [])
+        except (httpx.HTTPError, ValueError, AttributeError):
+            logger.debug("Ollama placement check unavailable")
+            return
+        for loaded in models:
+            name = loaded.get("name") or loaded.get("model") or ""
+            if (name if ":" in name else name + ":latest") == requested and loaded.get("size_vram") == 0:
+                logger.warning("Ollama runs %s on CPU only; check `ollama ps` and GPU placement before a large index run",
+                               self.model)
 
     def embed_query(self, text: str) -> list[float]:
         return self._call([text], num_ctx=self.query_num_ctx, num_gpu=self.query_num_gpu)[0]
