@@ -1,0 +1,8 @@
+{
+  "tag": "20261124T091824",
+  "git": "3b398d4",
+  "model": "ollama:exaone3.5:7.8b",
+  "store": "data/indexes/v1/conversations.db",
+  "history_turns": 4,
+  "started": "2026-11-24T09:18:30+0900"
+}
