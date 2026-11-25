@@ -1,0 +1,7 @@
+{
+  "model": "ollama:exaone3.5:7.8b",
+  "frozen": "data/eval/reports/chat_pipeline/final-test-2026-10-06/everyday.frozen.jsonl",
+  "overrides": "{\"llm\":{\"backend\":\"ollama\",\"model\":\"exaone3.5:7.8b\",\"max_tokens\":2048,\"num_ctx\":12288}}",
+  "answer_prompt": "served",
+  "answer_prompt_sha256": "3bacfec4b91c2b01716e422481fb743c22a7ff4f18702239089d441080742629"
+}
