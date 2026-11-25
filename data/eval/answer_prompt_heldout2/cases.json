@@ -1,0 +1,84 @@
+[
+  {
+    "id": "TL1-rent-arrears",
+    "domain": "lease",
+    "message": "월세를 두 달 밀려서 집주인이 계약을 해지한다고 해요. 그런데 해지 통지 전에 밀린 돈 중 30만 원을 냈어요. 그래도 해지할 수 있나요?",
+    "sources": [
+      "law-640",
+      "case-TL1"
+    ],
+    "case_source": "case-TL1"
+  },
+  {
+    "id": "TL2-one-year-term",
+    "domain": "lease",
+    "message": "집을 계약기간 1년으로 계약했는데 1년이 지났다고 나가라고 해요. 2년은 살 수 없는 건가요?",
+    "sources": [
+      "law-h4",
+      "case-TL2"
+    ],
+    "case_source": "case-TL2"
+  },
+  {
+    "id": "TC1-rescission-refund",
+    "domain": "civil",
+    "message": "상대방이 계약을 이행하지 않아서 적법하게 해제했어요. 이미 낸 돈 500만 원을 돌려받을 수 있나요? 이자도 받을 수 있는지 알고 싶어요.",
+    "sources": [
+      "law-548",
+      "case-TC1"
+    ],
+    "case_source": "case-TC1"
+  },
+  {
+    "id": "TC2-comparative-fault",
+    "domain": "civil",
+    "message": "교통사고로 다쳤는데 조사에서 제 무단횡단 과실도 30% 있다고 해요. 배상액이 줄어들나요?",
+    "sources": [
+      "law-396",
+      "law-763",
+      "case-TC2"
+    ],
+    "case_source": "case-TC2"
+  },
+  {
+    "id": "TX1-push-injury",
+    "domain": "criminal",
+    "message": "말다툼 중에 상대를 밀쳤는데 넘어져서 전치 2주가 나왔어요. 어느 정도의 처벌을 받을 수 있나요?",
+    "sources": [
+      "law-c257",
+      "case-TX1"
+    ],
+    "case_source": "case-TX1"
+  },
+  {
+    "id": "TX2-debtor-threat",
+    "domain": "criminal",
+    "message": "채무자가 '계속 독촉하면 가만두지 않겠다'고 했어요. 협박죄가 되나요? 저는 사실 처벌을 원하지는 않아요.",
+    "sources": [
+      "law-c283",
+      "case-TX2"
+    ],
+    "case_source": "case-TX2"
+  },
+  {
+    "id": "TA1-no-prior-notice",
+    "domain": "administrative",
+    "message": "구청이 사전 통지 없이 영업정지 처분을 했어요. 긴급한 사정은 없었어요. 절차상 문제가 있나요?",
+    "sources": [
+      "law-ap21",
+      "law-ap22",
+      "case-TA1"
+    ],
+    "case_source": "case-TA1"
+  },
+  {
+    "id": "TA2-appeal-stay",
+    "domain": "administrative",
+    "message": "과징금 3,000만 원 처분을 받고 행정심판을 청구했어요. 행정청은 다음 주에 강제징수를 하겠다고 해요. 징수되면 직원 월급도 줄 수 없어요. 심판으로 집행을 멈출 수 있나요?",
+    "sources": [
+      "law-at30",
+      "case-TA2"
+    ],
+    "case_source": "case-TA2"
+  }
+]

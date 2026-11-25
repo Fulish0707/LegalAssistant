@@ -1,0 +1,89 @@
+[
+  {
+    "id": "law-105",
+    "chunk_id": "official:민법:2026-03-17#art:105",
+    "law_name": "민법",
+    "article": "제105조",
+    "effective_date": "2026-03-17",
+    "quote": "제105조(임의규정) 법률행위의 당사자가 법령 중의 선량한 풍속 기타 사회질서에 관계없는 규정과 다른 의사를 표시한 때에는 그 의사에 의한다.",
+    "extraction_file": "civil-105.txt",
+    "sha256": "53374aa7358e799d82024e823a8036e97d28a0975d8982ccaeb54fabdd81235f",
+    "file": "civil-105.txt",
+    "url": "https://www.law.go.kr/lsLinkProc.do?joNo=010500&lnkJoNo=undefined&lsClsCd=L&lsId=001706&lsNm=%EB%AF%BC%EB%B2%95&mode=4",
+    "retrieved_at": "2026-11-19T04:22:36.644285+00:00",
+    "method": "live browser document.body.innerText"
+  },
+  {
+    "id": "law-618",
+    "chunk_id": "official:민법:2026-03-17#art:618",
+    "law_name": "민법",
+    "article": "제618조",
+    "effective_date": "2026-03-17",
+    "quote": "제618조(임대차의 의의) 임대차는 당사자 일방이 상대방에게 목적물을 사용, 수익하게 할 것을 약정하고 상대방이 이에 대하여 차임을 지급할 것을 약정함으로써 그 효력이 생긴다.",
+    "extraction_file": "civil-618.txt",
+    "sha256": "36870bea08247d243858b8bffa9540964d59545226c96d137c3c81a4c9631996",
+    "file": "civil-618.txt",
+    "url": "https://www.law.go.kr/lsLinkProc.do?joNo=061800&lnkJoNo=undefined&lsClsCd=L&lsId=001706&lsNm=%EB%AF%BC%EB%B2%95&mode=4",
+    "retrieved_at": "2026-11-19T04:22:44.229937+00:00",
+    "method": "live browser document.body.innerText"
+  },
+  {
+    "id": "law-10",
+    "chunk_id": "official:주택임대차보호법:2026-01-02#art:10",
+    "law_name": "주택임대차보호법",
+    "article": "제10조",
+    "effective_date": "2026-01-02",
+    "quote": "제10조(강행규정) 이 법에 위반된 약정(約定)으로서 임차인에게 불리한 것은 그 효력이 없다.",
+    "extraction_file": "housing-lease.txt",
+    "sha256": "1eeceba9b51840377293d4431fd025a046151b42742cccdd88f9350d67d4c4ae",
+    "file": "housing-lease.txt",
+    "url": "https://www.law.go.kr/%EB%B2%95%EB%A0%B9/%EC%A3%BC%ED%83%9D%EC%9E%84%EB%8C%80%EC%B0%A8%EB%B3%B4%ED%98%B8%EB%B2%95",
+    "version_url": "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=276291",
+    "retrieved_at": "2026-11-19T04:23:04.799074+00:00",
+    "method": "live browser document.body.innerText"
+  },
+  {
+    "id": "case-finding",
+    "kind": "case",
+    "chunk_id": "fictional:2026가단90001#reasoning",
+    "court": "가상지방법원",
+    "case_number": "2026가단90001",
+    "title": "보증금반환",
+    "quote": "이 사건 종료 합의에는 그 이후의 차임 부담에 관한 약정이 없고, 조기 퇴거 특약은 합의 없이 임차인이 일방적으로 퇴거하는 경우를 정한 것으로 보아야 한다. 따라서 피고는 종료일 이후의 차임을 보증금에서 공제할 수 없고, 피고의 주장은 이유 없다.",
+    "extraction_file": "case-90001.txt",
+    "sha256": "a0e6bebf2f4f3baec04f13d145ca4489a8e715786034b0eb4af5492236fc3642"
+  },
+  {
+    "id": "case-claim",
+    "kind": "case",
+    "chunk_id": "fictional:2026가단90001#claims",
+    "court": "가상지방법원",
+    "case_number": "2026가단90001",
+    "title": "보증금반환",
+    "quote": "피고는 조기 퇴거 특약에 따라 후속 임차인이 입주할 때까지의 차임 전부를 보증금에서 공제할 수 있다고 주장한다.",
+    "extraction_file": "case-90001.txt",
+    "sha256": "a0e6bebf2f4f3baec04f13d145ca4489a8e715786034b0eb4af5492236fc3642"
+  },
+  {
+    "id": "case-unknown",
+    "kind": "case",
+    "chunk_id": "fictional:2026나90002#summary",
+    "court": "가상고등법원",
+    "case_number": "2026나90002",
+    "title": "보증금반환 판결 요지",
+    "quote": "임차인이 계약기간 중 퇴거하면서 임대인과 계약 종료에 합의한 경우, 종료일 이후의 차임은 원칙적으로 발생하지 않는다. 다만 종료 합의 당시 후속 임차인의 입주 전까지 차임을 부담하기로 약정하였다면, 그 약정에 따라 보증금에서 공제될 수 있다. 종료 합의의 내용은 합의서, 문자메시지 등 객관적 자료로 확인하여야 한다.",
+    "extraction_file": "case-90002.txt",
+    "sha256": "07041159597c2236f9f7eaa30b31d2c2c9099de50b78ac98c744217f0aa132c4"
+  },
+  {
+    "id": "case-rule",
+    "kind": "case",
+    "chunk_id": "fictional:2026가단90001#rule",
+    "court": "가상지방법원",
+    "case_number": "2026가단90001",
+    "title": "보증금반환",
+    "quote": "임대차가 당사자의 합의로 종료되었다면, 종료 이후의 기간에 대하여 임차인은 차임 지급 의무를 지지 않는다. 다만 종료 합의에서 그 이후의 차임 부담을 따로 정하였다면 그 약정에 따른다.",
+    "extraction_file": "case-90001.txt",
+    "sha256": "a0e6bebf2f4f3baec04f13d145ca4489a8e715786034b0eb4af5492236fc3642"
+  }
+]

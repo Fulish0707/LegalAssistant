@@ -1,0 +1,21 @@
+[
+  {
+    "file": "civil-105.txt",
+    "url": "https://www.law.go.kr/lsLinkProc.do?joNo=010500&lnkJoNo=undefined&lsClsCd=L&lsId=001706&lsNm=%EB%AF%BC%EB%B2%95&mode=4",
+    "retrieved_at": "2026-11-19T04:22:36.644285+00:00",
+    "method": "live browser document.body.innerText"
+  },
+  {
+    "file": "civil-618.txt",
+    "url": "https://www.law.go.kr/lsLinkProc.do?joNo=061800&lnkJoNo=undefined&lsClsCd=L&lsId=001706&lsNm=%EB%AF%BC%EB%B2%95&mode=4",
+    "retrieved_at": "2026-11-19T04:22:44.229937+00:00",
+    "method": "live browser document.body.innerText"
+  },
+  {
+    "file": "housing-lease.txt",
+    "url": "https://www.law.go.kr/%EB%B2%95%EB%A0%B9/%EC%A3%BC%ED%83%9D%EC%9E%84%EB%8C%80%EC%B0%A8%EB%B3%B4%ED%98%B8%EB%B2%95",
+    "version_url": "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=276291",
+    "retrieved_at": "2026-11-19T04:23:04.799074+00:00",
+    "method": "live browser document.body.innerText"
+  }
+]

@@ -25,6 +25,19 @@ def render(response: ChatResponse, show_trace: bool) -> None:
         typer.echo("답변을 드리기 전에 몇 가지 확인이 필요합니다:")
         for question in response.questions:
             typer.echo(f"  - {question}")
+    elif response.kind == "withheld":
+        typer.echo("[판단 보류]")
+        details = response.withheld
+        if details:
+            typer.echo(details.explanation)
+            typer.echo(f"[보류 사유] {details.reason_code}")
+            for heading, items in (("확인된 사실", details.known_facts), ("미해결 사항·판단의 한계", details.unresolved_items)):
+                if items:
+                    typer.echo(f"[{heading}]")
+                    for item in items:
+                        typer.echo(f"  - {item}")
+        else:
+            typer.echo("확인되지 않은 내용이 있어 결론을 보류합니다.")
     elif response.kind == "rejected":
         typer.echo(f"근거를 확인할 수 없어 답변을 제공하지 못했습니다. ({response.reason})")
     else:

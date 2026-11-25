@@ -1,0 +1,85 @@
+[
+  {
+    "id": "HL1-fixture-purchase",
+    "domain": "lease",
+    "message": "건물을 3년간 임차해서 쓰면서 집주인 동의를 받고 시스템 에어컨을 설치했어요. 이제 계약이 끝나서 나가는데, 집주인에게 에어컨을 사 달라고 청구할 수 있나요?",
+    "sources": [
+      "law-646",
+      "case-HL1"
+    ],
+    "case_source": "case-HL1"
+  },
+  {
+    "id": "HL2-unauthorized-sublet",
+    "domain": "lease",
+    "message": "임차한 집의 절반을 집주인 동의 없이 지인에게 전대했어요. 집주인이 이 사실을 알고 계약을 해지하겠다고 해요. 정말 해지할 수 있나요?",
+    "sources": [
+      "law-629",
+      "case-HL2"
+    ],
+    "case_source": "case-HL2"
+  },
+  {
+    "id": "HC1-used-car-defect",
+    "domain": "civil",
+    "message": "중고차를 산 지 4개월 됐어요. 판매자는 사고가 없다고 했는데 보험 이력을 조회해 보니 중대한 사고 이력이 있었어요. 계약을 해제하고 돈을 돌려받을 수 있나요?",
+    "sources": [
+      "law-580",
+      "law-582",
+      "case-HC1"
+    ],
+    "case_source": "case-HC1"
+  },
+  {
+    "id": "HC2-tort-prescription",
+    "domain": "civil",
+    "message": "4년 전 교통사고로 다쳤어요. 사고 당시 가해자가 누구인지는 알고 있었는데 지금까지 손해배상 청구를 안 했어요. 이제라도 청구할 수 있나요?",
+    "sources": [
+      "law-766",
+      "case-HC2"
+    ],
+    "case_source": "case-HC2"
+  },
+  {
+    "id": "HX1-true-defamation",
+    "domain": "criminal",
+    "message": "이웃이 임금을 체불했다는 내용을 커뮤니티에 게시했어요. 내용은 사실이에요. 제가 명예훼손으로 처벌받을 수 있나요?",
+    "sources": [
+      "law-c307",
+      "law-c310",
+      "case-HX1"
+    ],
+    "case_source": "case-HX1"
+  },
+  {
+    "id": "HX2-employee-embezzlement",
+    "domain": "criminal",
+    "message": "매장 자금을 관리하던 직원이 판매 대금 300만 원을 개인적으로 썼어요. 나중에 갚으려고 했다고는 해요. 어떤 죄가 되나요?",
+    "sources": [
+      "law-c355",
+      "law-c356",
+      "case-HX2"
+    ],
+    "case_source": "case-HX2"
+  },
+  {
+    "id": "HA1-appeal-no-notice",
+    "domain": "administrative",
+    "message": "영업정지 처분을 받은 지 5개월 됐어요. 이제 행정심판을 청구하려고 하는데, 처분서에는 심판청구 기간 안내가 없었어요. 아직 가능한가요?",
+    "sources": [
+      "law-ap27",
+      "case-HA1"
+    ],
+    "case_source": "case-HA1"
+  },
+  {
+    "id": "HA2-closed-review-disclosure",
+    "domain": "administrative",
+    "message": "건축심의위원회 회의록을 정보공개 청구했는데 구청이 내부검토 사항이라며 비공개했어요. 그 심의는 2년 전에 끝났어요. 이 비공개가 적법한가요?",
+    "sources": [
+      "law-id9",
+      "case-HA2"
+    ],
+    "case_source": "case-HA2"
+  }
+]

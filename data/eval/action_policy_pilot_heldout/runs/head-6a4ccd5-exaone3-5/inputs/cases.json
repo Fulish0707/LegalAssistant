@@ -1,0 +1,121 @@
+[
+  {
+    "id": "H1-stated-positive-agreement",
+    "issue_id": "rent-deduction",
+    "message": "임대인과 다음 달 말일에 계약을 끝내기로 문자로 합의했습니다. 그러면 그 이후 남은 기간의 월세를 보증금에서 공제당하나요?",
+    "first": [
+      "law-618"
+    ],
+    "extra": [
+      "law-105",
+      "law-10"
+    ],
+    "manual_expected_actions": [
+      "research",
+      "withhold"
+    ],
+    "manual_rationale": "합의 '있음'을 사용자가 진술(긍정형 known). 일반 조문만으로 공제 결론 근거 없음.",
+    "user_documents": [
+      {
+        "name": "fictional-lease-1.txt",
+        "text": "[가상 문서: 실제 계약 아님] 주거용 주택 임대차. 보증금 1,000만 원, 월 차임 50만 원. 특약: 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다. 이 발췌에는 별도 종료 합의의 유무가 기재되어 있지 않다."
+      }
+    ]
+  },
+  {
+    "id": "H2-fact-in-attached-document",
+    "issue_id": "rent-deduction",
+    "message": "첨부한 합의서 기준으로 보면, 임대인이 보증금에서 남은 월세를 공제할 수 있나요?",
+    "first": [
+      "law-618"
+    ],
+    "extra": [
+      "law-105",
+      "law-10"
+    ],
+    "manual_expected_actions": [
+      "research",
+      "withhold"
+    ],
+    "manual_rationale": "종료 합의가 첨부 D2에 명시 → 재질문 금지. 공제 근거는 부족.",
+    "user_documents": [
+      {
+        "name": "fictional-lease-1.txt",
+        "text": "[가상 문서: 실제 계약 아님] 주거용 주택 임대차. 보증금 1,000만 원, 월 차임 50만 원. 특약: 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다. 이 발췌에는 별도 종료 합의의 유무가 기재되어 있지 않다."
+      },
+      {
+        "name": "fictional-termination-agreement.txt",
+        "text": "[가상 문서: 실제 합의서 아님] 임대인과 임차인은 위 임대차를 2027-06-30에 종료하기로 합의한다. 종료 이후 차임과 보증금 공제에 관하여는 정하지 아니한다."
+      }
+    ]
+  },
+  {
+    "id": "H3-missing-fact-paraphrase",
+    "issue_id": "rent-deduction",
+    "message": "사정이 생겨서 중간에 나가게 됐어요. 집주인이 남은 계약기간 월세를 보증금에서 다 빼겠다는데 그게 맞나요?",
+    "first": [
+      "law-618"
+    ],
+    "extra": [
+      "law-105",
+      "law-10"
+    ],
+    "manual_expected_actions": [
+      "clarify"
+    ],
+    "manual_rationale": "종료 합의 여부가 어디에도 없음 → 한 번 확인.",
+    "user_documents": [
+      {
+        "name": "fictional-lease-1.txt",
+        "text": "[가상 문서: 실제 계약 아님] 주거용 주택 임대차. 보증금 1,000만 원, 월 차임 50만 원. 특약: 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다. 이 발췌에는 별도 종료 합의의 유무가 기재되어 있지 않다."
+      }
+    ]
+  },
+  {
+    "id": "H4-clause-explanation-paraphrase",
+    "issue_id": "clause-explanation",
+    "message": "특약의 '후속 임차인의 입주 전까지 차임을 부담한다'는 문장이 일반적으로 무슨 뜻인지, 그리고 임차인에게 불리한 약정을 다루는 조항이 있는지만 알려주세요. 제 사건의 결론은 필요 없습니다.",
+    "first": [
+      "law-105",
+      "law-10",
+      "law-618"
+    ],
+    "extra": [],
+    "manual_expected_actions": [
+      "answer"
+    ],
+    "manual_rationale": "일반 설명 범위, 종료 합의 사실 불필요.",
+    "user_documents": [
+      {
+        "name": "fictional-lease-1.txt",
+        "text": "[가상 문서: 실제 계약 아님] 주거용 주택 임대차. 보증금 1,000만 원, 월 차임 50만 원. 특약: 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다. 이 발췌에는 별도 종료 합의의 유무가 기재되어 있지 않다."
+      }
+    ]
+  },
+  {
+    "id": "H5-statement-conflicts-document",
+    "issue_id": "rent-deduction",
+    "message": "임대인과 종료 합의는 하지 않았어요. 그런데 남은 월세를 보증금에서 빼도 되나요?",
+    "first": [
+      "law-618"
+    ],
+    "extra": [
+      "law-105",
+      "law-10"
+    ],
+    "manual_expected_actions": [
+      "clarify"
+    ],
+    "manual_rationale": "사용자 진술(합의 없음)과 첨부 D2(합의함)가 충돌 → 한쪽 임의 채택 금지, 확인.",
+    "user_documents": [
+      {
+        "name": "fictional-lease-1.txt",
+        "text": "[가상 문서: 실제 계약 아님] 주거용 주택 임대차. 보증금 1,000만 원, 월 차임 50만 원. 특약: 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다. 이 발췌에는 별도 종료 합의의 유무가 기재되어 있지 않다."
+      },
+      {
+        "name": "fictional-termination-agreement.txt",
+        "text": "[가상 문서: 실제 합의서 아님] 임대인과 임차인은 위 임대차를 2027-06-30에 종료하기로 합의한다. 종료 이후 차임과 보증금 공제에 관하여는 정하지 아니한다."
+      }
+    ]
+  }
+]

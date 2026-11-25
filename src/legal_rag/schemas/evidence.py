@@ -15,6 +15,11 @@ _CASE_DATE = re.compile(r"\d{4}\.\s*\d{1,2}\.\s*\d{1,2}\.?|\d{4}년\s*\d{1,2}월
 _CASE_AMOUNT = re.compile(r"\d[\d,]*\s*(?:억\s*)?(?:\d[\d,]*\s*)?(?:천만|백만|만)?\s*원")
 
 
+def mask_case_text(text: str) -> str:
+    """Hide a judgment's or interpretation's dates and amounts the way models are shown them."""
+    return _CASE_AMOUNT.sub("(금액)", _CASE_DATE.sub("(날짜)", text))
+
+
 class Evidence(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -25,6 +30,14 @@ class Evidence(BaseModel):
     header: dict[str, str]
     text: str
     score: float
+
+    def shown_text(self, *, mask_case_figures: bool = False) -> str:
+        """The text as a model reads it: a judgment's or interpretation's dates and amounts
+        are hidden with `mask_case_figures`; statutes are always whole. Checks of what a
+        model quoted must compare against this, not the stored text."""
+        if mask_case_figures and self.header.get("Type") != "Statute":
+            return mask_case_text(self.text)
+        return self.text
 
 
 class EvidenceBundle(BaseModel):
@@ -41,9 +54,7 @@ class EvidenceBundle(BaseModel):
         the user's. Statutes are shown whole, and the response keeps every text unmasked."""
         blocks = []
         for item in self.items:
-            text = item.text
-            if mask_case_figures and item.header.get("Type") != "Statute":
-                text = _CASE_AMOUNT.sub("(금액)", _CASE_DATE.sub("(날짜)", text))
+            text = item.shown_text(mask_case_figures=mask_case_figures)
             lines = [f"[LEGAL SOURCE {item.source_id}]", ""]
             lines += [f"{key}: {value}" for key, value in item.header.items()]
             lines += [f"Source ID: {item.source_id}", "", "Text:", text, ""]

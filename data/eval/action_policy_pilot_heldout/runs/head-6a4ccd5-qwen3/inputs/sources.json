@@ -1,0 +1,45 @@
+[
+  {
+    "id": "law-105",
+    "chunk_id": "official:민법:2026-03-17#art:105",
+    "law_name": "민법",
+    "article": "제105조",
+    "effective_date": "2026-03-17",
+    "quote": "제105조(임의규정) 법률행위의 당사자가 법령 중의 선량한 풍속 기타 사회질서에 관계없는 규정과 다른 의사를 표시한 때에는 그 의사에 의한다.",
+    "extraction_file": "civil-105.txt",
+    "sha256": "53374aa7358e799d82024e823a8036e97d28a0975d8982ccaeb54fabdd81235f",
+    "file": "civil-105.txt",
+    "url": "https://www.law.go.kr/lsLinkProc.do?joNo=010500&lnkJoNo=undefined&lsClsCd=L&lsId=001706&lsNm=%EB%AF%BC%EB%B2%95&mode=4",
+    "retrieved_at": "2026-11-19T04:22:36.644285+00:00",
+    "method": "live browser document.body.innerText"
+  },
+  {
+    "id": "law-618",
+    "chunk_id": "official:민법:2026-03-17#art:618",
+    "law_name": "민법",
+    "article": "제618조",
+    "effective_date": "2026-03-17",
+    "quote": "제618조(임대차의 의의) 임대차는 당사자 일방이 상대방에게 목적물을 사용, 수익하게 할 것을 약정하고 상대방이 이에 대하여 차임을 지급할 것을 약정함으로써 그 효력이 생긴다.",
+    "extraction_file": "civil-618.txt",
+    "sha256": "36870bea08247d243858b8bffa9540964d59545226c96d137c3c81a4c9631996",
+    "file": "civil-618.txt",
+    "url": "https://www.law.go.kr/lsLinkProc.do?joNo=061800&lnkJoNo=undefined&lsClsCd=L&lsId=001706&lsNm=%EB%AF%BC%EB%B2%95&mode=4",
+    "retrieved_at": "2026-11-19T04:22:44.229937+00:00",
+    "method": "live browser document.body.innerText"
+  },
+  {
+    "id": "law-10",
+    "chunk_id": "official:주택임대차보호법:2026-01-02#art:10",
+    "law_name": "주택임대차보호법",
+    "article": "제10조",
+    "effective_date": "2026-01-02",
+    "quote": "제10조(강행규정) 이 법에 위반된 약정(約定)으로서 임차인에게 불리한 것은 그 효력이 없다.",
+    "extraction_file": "housing-lease.txt",
+    "sha256": "1eeceba9b51840377293d4431fd025a046151b42742cccdd88f9350d67d4c4ae",
+    "file": "housing-lease.txt",
+    "url": "https://www.law.go.kr/%EB%B2%95%EB%A0%B9/%EC%A3%BC%ED%83%9D%EC%9E%84%EB%8C%80%EC%B0%A8%EB%B3%B4%ED%98%B8%EB%B2%95",
+    "version_url": "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=276291",
+    "retrieved_at": "2026-11-19T04:23:04.799074+00:00",
+    "method": "live browser document.body.innerText"
+  }
+]

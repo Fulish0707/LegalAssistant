@@ -1,0 +1,251 @@
+[
+ {
+  "id": "W1-agreed-by-chat-statement",
+  "issue_id": "rent-deduction",
+  "message": "집주인한테 문자로 3월까지만 살겠다고 했더니 그러라고 해서 계약 끝내기로 했어요. 그 뒤 월세는 따로 얘기 안 했는데, 집주인이 새 사람 올 때까지 월세를 보증금에서 깐다고 합니다. 맞나요?",
+  "first": [
+   "case-rule",
+   "case-finding",
+   "law-618"
+  ],
+  "extra": [
+   "law-105"
+  ],
+  "manual_expected_actions": [
+   "answer"
+  ],
+  "manual_rationale": "합의 있음을 사용자가 진술(표현이 다름). 판단 1·2문단이 두 요소를 모두 다룸.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-3.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 다세대주택 임대차. 보증금 3,000만 원, 월 차임 60만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "W2-no-agreement-case-on-point",
+  "issue_id": "rent-deduction",
+  "message": "집주인 동의는 못 받았지만 이직 때문에 다음 달에 먼저 이사 나가요. 새 세입자 들어오기 전까지 월세를 보증금에서 빼도 되는 건가요?",
+  "first": [
+   "case3-rule",
+   "case3-finding",
+   "law-618"
+  ],
+  "extra": [
+   "law-105"
+  ],
+  "manual_expected_actions": [
+   "answer"
+  ],
+  "manual_rationale": "합의 없음을 사용자가 진술. 90003 판단이 일방 퇴거 뒤 차임 의무와 특약 적용을 모두 다룸.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-3.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 다세대주택 임대차. 보증금 3,000만 원, 월 차임 60만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "W3-no-agreement-statutes-only",
+  "issue_id": "rent-deduction",
+  "message": "집주인 동의는 못 받았지만 이직 때문에 다음 달에 먼저 이사 나가요. 새 세입자 들어오기 전까지 월세를 보증금에서 빼도 되는 건가요?",
+  "first": [
+   "law-618"
+  ],
+  "extra": [
+   "law-105"
+  ],
+  "manual_expected_actions": [
+   "research",
+   "withhold"
+  ],
+  "manual_rationale": "W2와 같은 사실. 법령 정의·임의규정만으로 두 요소 근거 없음.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-3.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 다세대주택 임대차. 보증금 3,000만 원, 월 차임 60만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "W4-not-stated-different-wording",
+  "issue_id": "rent-deduction",
+  "message": "다음 달에 이사를 가야 해서 계약기간을 다 못 채워요. 보증금에서 남은 월세를 빼겠다는 집주인 말이 맞나요?",
+  "first": [
+   "case3-rule",
+   "case3-finding",
+   "case-rule",
+   "law-618"
+  ],
+  "extra": [
+   "law-105"
+  ],
+  "manual_expected_actions": [
+   "clarify"
+  ],
+  "manual_rationale": "합의 여부가 어디에도 없음. 근거는 합의 유무에 따라 결론이 갈림 → 한 번 확인.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-3.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 다세대주택 임대차. 보증금 3,000만 원, 월 차임 60만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "W5-agreement-in-chat-log",
+  "issue_id": "rent-deduction",
+  "message": "첨부한 문자대로 계약을 끝내기로 했어요. 그런데 집주인이 새 세입자가 들어올 때까지 월세를 보증금에서 공제하겠대요. 그래도 되나요?",
+  "first": [
+   "case-rule",
+   "case-finding",
+   "law-618"
+  ],
+  "extra": [
+   "law-105"
+  ],
+  "manual_expected_actions": [
+   "answer"
+  ],
+  "manual_rationale": "합의는 첨부 문자(D2)에만 있음 → 재질문 금지. 두 요소 모두 첫 근거에 있음.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-3.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 다세대주택 임대차. 보증금 3,000만 원, 월 차임 60만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   },
+   {
+    "name": "fictional-chat-log.txt",
+    "text": "[가상 문자 기록: 실제 대화 아님] 임차인: 사정이 생겨서 4월 말까지만 살고 계약을 끝내고 싶습니다. 임대인: 알겠습니다. 4월 30일에 계약 종료하는 것으로 하죠."
+   }
+  ]
+ },
+ {
+  "id": "W6-denial-conflicts-memo",
+  "issue_id": "rent-deduction",
+  "message": "저는 집주인이랑 계약 종료를 합의한 적이 없어요. 그런데 남은 월세를 보증금에서 빼 간다고 하네요. 가능한가요?",
+  "first": [
+   "case-rule",
+   "case-finding",
+   "case3-rule",
+   "case3-finding",
+   "law-618"
+  ],
+  "extra": [
+   "law-105"
+  ],
+  "manual_expected_actions": [
+   "clarify"
+  ],
+  "manual_rationale": "사용자는 합의 없다고 하나 첨부 메모(D2)에는 합의. 한쪽을 임의로 채택하지 않음.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-3.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 다세대주택 임대차. 보증금 3,000만 원, 월 차임 60만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   },
+   {
+    "name": "fictional-ending-memo.txt",
+    "text": "[가상 문서: 실제 합의서 아님] 임대인과 임차인은 이 임대차를 2027-05-31에 끝내기로 합의한다."
+   }
+  ]
+ },
+ {
+  "id": "W7-agreed-claim-and-partial-rule",
+  "issue_id": "rent-deduction",
+  "message": "집주인한테 문자로 3월까지만 살겠다고 했더니 그러라고 해서 계약 끝내기로 했어요. 그 뒤 월세는 따로 얘기 안 했는데, 집주인이 새 사람 올 때까지 월세를 보증금에서 깐다고 합니다. 맞나요?",
+  "first": [
+   "case-claim",
+   "law-618"
+  ],
+  "extra": [
+   "case-rule"
+  ],
+  "manual_expected_actions": [
+   "research",
+   "withhold"
+  ],
+  "manual_rationale": "첫 근거는 주장뿐. 추가 근거(판단 1문단)는 종료 뒤 차임만 다루고 특약 적용 범위는 다루지 않음.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-3.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 다세대주택 임대차. 보증금 3,000만 원, 월 차임 60만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "W8-no-agreement-claim-only",
+  "issue_id": "rent-deduction",
+  "message": "집주인 동의는 못 받았지만 이직 때문에 다음 달에 먼저 이사 나가요. 새 세입자 들어오기 전까지 월세를 보증금에서 빼도 되는 건가요?",
+  "first": [
+   "case3-claim",
+   "law-618"
+  ],
+  "extra": [
+   "law-105"
+  ],
+  "manual_expected_actions": [
+   "research",
+   "withhold"
+  ],
+  "manual_rationale": "판례 창은 원고(임차인) 측 주장뿐. 주장은 근거 아님.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-3.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 다세대주택 임대차. 보증금 3,000만 원, 월 차임 60만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "W9-clause-rule-available",
+  "issue_id": "clause-explanation",
+  "message": "임차인에게 불리한 계약 조항은 법적으로 효력이 없을 수도 있다고 들었는데, 관련 규정이 뭔지 일반론으로만 알려 주세요.",
+  "first": [
+   "law-105",
+   "law-10"
+  ],
+  "extra": [],
+  "manual_expected_actions": [
+   "answer"
+  ],
+  "manual_rationale": "일반 설명 범위. 주임법 10조와 민법 105조가 첫 근거에 있음.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-3.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 다세대주택 임대차. 보증금 3,000만 원, 월 차임 60만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "W10-clause-rule-missing",
+  "issue_id": "clause-explanation",
+  "message": "임차인에게 불리한 계약 조항은 법적으로 효력이 없을 수도 있다고 들었는데, 관련 규정이 뭔지 일반론으로만 알려 주세요.",
+  "first": [
+   "case3-claim"
+  ],
+  "extra": [],
+  "manual_expected_actions": [
+   "research",
+   "withhold"
+  ],
+  "manual_rationale": "주장 창뿐, 약정 효력 규정 없음, 추가 결과 없음.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-3.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 다세대주택 임대차. 보증금 3,000만 원, 월 차임 60만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "W11-default-path-control",
+  "issue_id": null,
+  "policy_enabled": false,
+  "message": "민법 제105조가 어떤 규정인지 일반적으로만 설명해 주세요.",
+  "first": [
+   "law-105"
+  ],
+  "extra": [],
+  "manual_expected_actions": [
+   "answer"
+  ],
+  "manual_rationale": "정책 꺼진 기본 경로 대조.",
+  "user_documents": []
+ }
+]

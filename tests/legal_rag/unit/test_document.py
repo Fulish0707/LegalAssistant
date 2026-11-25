@@ -78,3 +78,29 @@ def test_a_pinned_case_named_only_in_its_document_id_gets_its_number():
     assert [chunk.id for chunk in pinned] == [civil.id, numbered.id, plain.id]
     assert [chunk.metadata.case_number for chunk in pinned] == ["2023가단5103393", "84도2229", None]
     assert pinned[0].text == civil.text
+
+
+class _Leg:
+    def __init__(self, name, store):
+        self.name, self.store = name, store
+
+
+class _Store:
+    def __init__(self, chunks):
+        self.chunks = {c.id: c for c in chunks}
+
+    def chunk(self, chunk_id):
+        return self.chunks.get(chunk_id)
+
+    def document_chunks(self, chunk):
+        return sorted((c for c in self.chunks.values() if c.document_id == chunk.document_id), key=lambda c: c.order)
+
+
+def test_hybrid_retriever_gives_the_whole_document_of_a_cited_chunk():
+    from legal_rag.retrieval.hybrid import HybridRetriever
+    case = _Store([piece(0, "1. 당사자의 주장\n원고는 주장한다."), piece(1, "2. 판단\n이유 없다.")])
+    # dense and sparse legs of one corpus share a store; it is searched once
+    retriever = HybridRetriever([_Leg("v:dense", case), _Leg("v:sparse", case), _Leg("law:dense", _Store([]))],
+                                fuser=None, reranker=None, k_leg=1, k_fused=1)
+    assert retriever.document_text("v:d#1") == "1. 당사자의 주장\n원고는 주장한다.\n\n2. 판단\n이유 없다."
+    assert retriever.document_text("missing") is None

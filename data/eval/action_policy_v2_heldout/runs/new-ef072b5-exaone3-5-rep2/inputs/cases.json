@@ -1,0 +1,225 @@
+[
+ {
+  "id": "V1-agreed-rule-and-finding",
+  "issue_id": "rent-deduction",
+  "message": "집주인과 이번 달 말에 계약을 끝내기로 카톡으로 합의했어요. 그때 이후 월세 얘기는 안 했고요. 그런데 집주인이 특약을 들어서 새 세입자 들어올 때까지 월세를 보증금에서 빼겠대요. 그래도 되는 건가요?",
+  "first": [
+   "case-rule",
+   "case-finding",
+   "law-618"
+  ],
+  "extra": [
+   "law-105"
+  ],
+  "manual_expected_actions": [
+   "answer"
+  ],
+  "manual_rationale": "합의 있음을 사용자가 진술. 첫 근거에 합의 종료 뒤 차임 의무(판단 1문단)와 특약 적용 범위(판단 2문단)가 모두 있음.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-2.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 오피스텔 임대차. 보증금 2,000만 원, 월 차임 70만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "V2-agreed-found-on-research",
+  "issue_id": "rent-deduction",
+  "message": "집주인과 이번 달 말에 계약을 끝내기로 카톡으로 합의했어요. 그때 이후 월세 얘기는 안 했고요. 그런데 집주인이 특약을 들어서 새 세입자 들어올 때까지 월세를 보증금에서 빼겠대요. 그래도 되는 건가요?",
+  "first": [
+   "law-618"
+  ],
+  "extra": [
+   "case-rule",
+   "case-finding"
+  ],
+  "manual_expected_actions": [
+   "research",
+   "answer"
+  ],
+  "manual_rationale": "V1과 같은 사실. 첫 근거는 정의 조항뿐이라 부족, 추가 검색에서 두 요소가 모두 나옴.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-2.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 오피스텔 임대차. 보증금 2,000만 원, 월 차임 70만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "V3-no-agreement-statutes-only",
+  "issue_id": "rent-deduction",
+  "message": "집주인한테 따로 합의는 안 받았고, 회사 때문에 다음 달에 먼저 나가야 해요. 그러면 남은 기간 월세를 보증금에서 전부 빼 가도 되는 건가요?",
+  "first": [
+   "law-618"
+  ],
+  "extra": [
+   "law-105"
+  ],
+  "manual_expected_actions": [
+   "research",
+   "withhold"
+  ],
+  "manual_rationale": "합의 없음을 사용자가 진술(부정형 known). 정의·임의규정만으로 일방 퇴거 뒤 차임·공제 근거 없음.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-2.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 오피스텔 임대차. 보증금 2,000만 원, 월 차임 70만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "V4-not-stated",
+  "issue_id": "rent-deduction",
+  "message": "이사 날짜가 잡혀서 계약 끝나기 전에 나가게 됐어요. 집주인이 남은 월세를 보증금에서 다 빼겠다고 하면 그대로 따라야 하나요?",
+  "first": [
+   "case-rule",
+   "case-finding",
+   "law-618"
+  ],
+  "extra": [
+   "law-105"
+  ],
+  "manual_expected_actions": [
+   "clarify"
+  ],
+  "manual_rationale": "종료 합의 여부가 메시지·첨부 어디에도 없음. 결론이 그 사실에 달려 한 번 확인.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-2.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 오피스텔 임대차. 보증금 2,000만 원, 월 차임 70만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "V5-agreement-only-in-document",
+  "issue_id": "rent-deduction",
+  "message": "첨부한 메모대로 계약을 정리하기로 했는데, 집주인이 새 세입자 들어올 때까지 월세를 보증금에서 빼겠다고 합니다. 가능한가요?",
+  "first": [
+   "case-rule",
+   "case-finding",
+   "law-618"
+  ],
+  "extra": [
+   "law-105"
+  ],
+  "manual_expected_actions": [
+   "answer"
+  ],
+  "manual_rationale": "합의는 첨부 메모(D2)에 있음 → 재질문 금지. 두 요소 모두 첫 근거에 있음.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-2.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 오피스텔 임대차. 보증금 2,000만 원, 월 차임 70만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   },
+   {
+    "name": "fictional-termination-memo.txt",
+    "text": "[가상 문서: 실제 합의서 아님] 임대인과 임차인은 이 임대차를 2027-03-31에 종료하기로 합의한다. 종료일 이후의 차임에 관하여는 따로 정하지 않는다."
+   }
+  ]
+ },
+ {
+  "id": "V6-statement-conflicts-messages",
+  "issue_id": "rent-deduction",
+  "message": "집주인이랑 중간에 계약 끝내기로 합의했어요. 그럼 남은 월세는 보증금에서 안 빠지는 거죠?",
+  "first": [
+   "case-rule",
+   "case-finding",
+   "law-618"
+  ],
+  "extra": [
+   "law-105"
+  ],
+  "manual_expected_actions": [
+   "clarify"
+  ],
+  "manual_rationale": "사용자는 합의했다고 하나 첨부 문자에는 임대인이 거절. 한쪽을 임의로 채택하지 않고 확인.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-2.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 오피스텔 임대차. 보증금 2,000만 원, 월 차임 70만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   },
+   {
+    "name": "fictional-messages.txt",
+    "text": "[가상 문자 기록: 실제 대화 아님] 임대인: 중도에 계약을 끝내는 건 동의하기 어렵습니다. 계약서대로 해 주세요."
+   }
+  ]
+ },
+ {
+  "id": "V7-agreed-claim-only",
+  "issue_id": "rent-deduction",
+  "message": "집주인과 이번 달 말에 계약을 끝내기로 카톡으로 합의했어요. 그때 이후 월세 얘기는 안 했고요. 그런데 집주인이 특약을 들어서 새 세입자 들어올 때까지 월세를 보증금에서 빼겠대요. 그래도 되는 건가요?",
+  "first": [
+   "case-claim",
+   "law-618"
+  ],
+  "extra": [
+   "law-105"
+  ],
+  "manual_expected_actions": [
+   "research",
+   "withhold"
+  ],
+  "manual_rationale": "판례 창은 임대인 측 주장뿐. 주장은 근거가 아니므로 추가 검색 뒤 보류.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-2.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 오피스텔 임대차. 보증금 2,000만 원, 월 차임 70만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "V8-clause-rule-available",
+  "issue_id": "clause-explanation",
+  "message": "계약서 특약이 임차인한테 불리하면 효력이 없는 경우도 있나요? 제 사건 결론 말고 일반적인 규정만 알려주세요.",
+  "first": [
+   "law-10",
+   "law-105"
+  ],
+  "extra": [],
+  "manual_expected_actions": [
+   "answer"
+  ],
+  "manual_rationale": "일반 설명 범위. 불리한 약정의 효력(주임법 10조)과 임의규정(민법 105조)이 첫 근거에 있음.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-2.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 오피스텔 임대차. 보증금 2,000만 원, 월 차임 70만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "V9-clause-rule-missing",
+  "issue_id": "clause-explanation",
+  "message": "계약서 특약이 임차인한테 불리하면 효력이 없는 경우도 있나요? 제 사건 결론 말고 일반적인 규정만 알려주세요.",
+  "first": [
+   "law-618"
+  ],
+  "extra": [],
+  "manual_expected_actions": [
+   "research",
+   "withhold"
+  ],
+  "manual_rationale": "정의 조항만 있고 약정 효력 규정 없음. 추가 검색 결과도 없음.",
+  "user_documents": [
+   {
+    "name": "fictional-lease-2.txt",
+    "text": "[가상 문서: 실제 계약 아님] 주거용 오피스텔 임대차. 보증금 2,000만 원, 월 차임 70만 원, 계약기간 2년. 특약: 임차인이 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+   }
+  ]
+ },
+ {
+  "id": "V10-default-path-control",
+  "issue_id": null,
+  "policy_enabled": false,
+  "message": "주택임대차보호법 제10조가 무슨 내용인지 일반적으로만 설명해 주세요.",
+  "first": [
+   "law-10"
+  ],
+  "extra": [],
+  "manual_expected_actions": [
+   "answer"
+  ],
+  "manual_rationale": "정책 꺼진 기본 경로 대조. 두 갈래 모두 기본 경로.",
+  "user_documents": []
+ }
+]

@@ -1,0 +1,95 @@
+[
+  {
+    "id": "K1-unconfirmed-case",
+    "issue_id": "rent-deduction",
+    "message": "임대인과 다음 달 말일에 계약을 끝내기로 문자로 합의했습니다. 합의할 때 그 뒤의 월세 이야기는 따로 하지 않았어요. 그런데 임대인이 특약을 근거로 새 세입자가 들어올 때까지의 월세를 보증금에서 빼겠다고 합니다. 이게 맞나요?",
+    "first": [
+      "case-unknown",
+      "law-618"
+    ],
+    "extra": [
+      "law-105"
+    ],
+    "manual_expected_actions": [
+      "answer"
+    ],
+    "expect_notice": true,
+    "manual_rationale": "제목 없는 판결 요지(역할 미상)가 결론 근거. 답변은 허용, 고정 안내와 신뢰도 상한, 본문은 단정하지 않아야 함.",
+    "user_documents": [
+      {
+        "name": "fictional-lease-1.txt",
+        "text": "[가상 문서: 실제 계약 아님] 주거용 주택 임대차. 보증금 1,000만 원, 월 차임 50만 원. 특약: 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+      }
+    ]
+  },
+  {
+    "id": "K2-confirmed-finding",
+    "issue_id": "rent-deduction",
+    "message": "임대인과 다음 달 말일에 계약을 끝내기로 문자로 합의했습니다. 합의할 때 그 뒤의 월세 이야기는 따로 하지 않았어요. 그런데 임대인이 특약을 근거로 새 세입자가 들어올 때까지의 월세를 보증금에서 빼겠다고 합니다. 이게 맞나요?",
+    "first": [
+      "case-finding",
+      "law-618"
+    ],
+    "extra": [
+      "law-105"
+    ],
+    "manual_expected_actions": [
+      "answer"
+    ],
+    "expect_notice": false,
+    "manual_rationale": "창에는 제목이 없지만 문서 전체에서 '3. 판단' 아래 문장으로 확인됨. 고정 안내 없이 답변.",
+    "user_documents": [
+      {
+        "name": "fictional-lease-1.txt",
+        "text": "[가상 문서: 실제 계약 아님] 주거용 주택 임대차. 보증금 1,000만 원, 월 차임 50만 원. 특약: 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+      }
+    ]
+  },
+  {
+    "id": "K3-claim-only",
+    "issue_id": "rent-deduction",
+    "message": "임대인과 다음 달 말일에 계약을 끝내기로 문자로 합의했습니다. 합의할 때 그 뒤의 월세 이야기는 따로 하지 않았어요. 그런데 임대인이 특약을 근거로 새 세입자가 들어올 때까지의 월세를 보증금에서 빼겠다고 합니다. 이게 맞나요?",
+    "first": [
+      "case-claim",
+      "law-618"
+    ],
+    "extra": [
+      "law-105"
+    ],
+    "manual_expected_actions": [
+      "withhold"
+    ],
+    "expect_notice": null,
+    "manual_rationale": "판례 근거가 임대인 측 주장뿐. 주장을 근거로 답하지 말고 보류(재검색 경유 또는 판정 무효 경유).",
+    "user_documents": [
+      {
+        "name": "fictional-lease-1.txt",
+        "text": "[가상 문서: 실제 계약 아님] 주거용 주택 임대차. 보증금 1,000만 원, 월 차임 50만 원. 특약: 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+      }
+    ]
+  },
+  {
+    "id": "K4-claim-and-finding",
+    "issue_id": "rent-deduction",
+    "message": "임대인과 다음 달 말일에 계약을 끝내기로 문자로 합의했습니다. 합의할 때 그 뒤의 월세 이야기는 따로 하지 않았어요. 그런데 임대인이 특약을 근거로 새 세입자가 들어올 때까지의 월세를 보증금에서 빼겠다고 합니다. 이게 맞나요?",
+    "first": [
+      "case-claim",
+      "case-finding",
+      "law-618"
+    ],
+    "extra": [
+      "law-105"
+    ],
+    "manual_expected_actions": [
+      "answer"
+    ],
+    "expect_notice": null,
+    "manual_rationale": "주장과 그 주장을 배척한 판단이 함께 있음. 판단을 근거로 답하고 주장을 법원 판단처럼 쓰지 않아야 함.",
+    "user_documents": [
+      {
+        "name": "fictional-lease-1.txt",
+        "text": "[가상 문서: 실제 계약 아님] 주거용 주택 임대차. 보증금 1,000만 원, 월 차임 50만 원. 특약: 계약기간 중 조기 퇴거하는 경우 후속 임차인의 입주 전까지 차임을 부담한다."
+      }
+    ]
+  }
+]
