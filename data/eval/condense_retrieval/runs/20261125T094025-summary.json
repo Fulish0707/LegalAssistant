@@ -1,0 +1,39 @@
+{
+  "tag": "20261125T094025",
+  "D": {
+    "n": 17,
+    "hits": {
+      "served": 14,
+      "joined": 14,
+      "message": 9
+    },
+    "joined_only": [],
+    "served_only": [],
+    "mean_jaccard": 0.562,
+    "net_gain_joined": 0
+  },
+  "G": {
+    "n": 63,
+    "hits": {
+      "served": 59,
+      "joined": 57,
+      "message": 38
+    },
+    "joined_only": [
+      "Q09#2",
+      "Q24#2",
+      "T11#2",
+      "T34#2"
+    ],
+    "served_only": [
+      "Q05#2",
+      "Q23#2",
+      "Q27#2",
+      "Q28#2",
+      "T09#2",
+      "T21#2"
+    ],
+    "mean_jaccard": 0.259,
+    "net_gain_joined": -2
+  }
+}
